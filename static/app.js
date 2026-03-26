@@ -5,7 +5,7 @@
 
 const { ConfigProvider, Button, Table, Tag, Space, Spin, Drawer, Badge,
         Tooltip, Progress, Select, Input, Empty, Tabs, Statistic, Switch,
-        Modal, Alert, Radio } = antd;
+        Modal, Alert, Radio, Checkbox } = antd;
 const { createElement: h, useState, useEffect, useCallback, useMemo } = React;
 
 dayjs.extend(dayjs_plugin_relativeTime);
@@ -138,15 +138,12 @@ function findingStatusTag(status) {
 }
 
 // Build Domino UI URL for a bundle
+// URL pattern: {DOMINO_API_HOST}/governance/bundles/{bundleId}
 function getDominoBundleUrl(bundle) {
+  if (!bundle || !bundle.id) return null;
   var host = '';
   try { host = window.location.origin; } catch(e) {}
-  // In Domino, the bundle URL pattern is: /u/{owner}/{project}/governance/bundle/{bundleId}/policy/{policyId}
-  if (bundle.projectOwner && bundle.projectName && bundle.id && bundle.policyId) {
-    return host + '/u/' + bundle.projectOwner + '/' + bundle.projectName +
-      '/governance/bundle/' + bundle.id + '/policy/' + bundle.policyId;
-  }
-  return null;
+  return host + '/governance/bundles/' + bundle.id;
 }
 
 // Get the bundle's own stage names (from SCE QC)
@@ -196,7 +193,7 @@ function TopNav(props) {
   // Only show whitelabel badge if terms differ from defaults
   var isWhitelabeled = terms.bundle !== DEFAULT_TERMS.bundle || terms.policy !== DEFAULT_TERMS.policy;
   return h('div', { className: 'top-nav' },
-    h('img', { src: 'static/../domino-logo.svg', className: 'top-nav-logo', alt: 'Domino' }),
+    h('img', { src: '/static/domino-logo.svg', className: 'top-nav-logo', alt: 'Domino' }),
     h('div', { className: 'top-nav-divider' }),
     h('span', { className: 'top-nav-title' }, 'SCE QC Tracker'),
     h('div', { className: 'top-nav-right' },
@@ -224,13 +221,13 @@ function TopNav(props) {
 
 // ── Sidebar ─────────────────────────────────────────────────────
 var NAV_ITEMS = [
-  { key: 'dashboard', icon: '\u25A3', label: 'Dashboard' },
   { key: 'tracker', icon: '\u25C9', label: 'QC Tracker' },
-  { key: 'rules', icon: '\u2699', label: 'Assignment Rules' },
+  { key: 'dashboard', icon: '\u25A3', label: 'Portfolio Overview' },
   { key: 'milestones', icon: '\u2630', label: 'Milestones' },
   { key: 'approvals', icon: '\u2713', label: 'Approvals' },
   { key: 'findings', icon: '\u26A0', label: 'Findings & QC' },
   { key: 'metrics', icon: '\u2261', label: 'Team Metrics' },
+  { key: 'rules', icon: '\u2699', label: 'Assignment Rules' },
 ];
 
 function Sidebar(props) {
@@ -1146,6 +1143,7 @@ function MetricsPage(props) {
 // ═══════════════════════════════════════════════════════════════
 function StagePipeline(props) {
   var bundle = props.bundle;
+  var onFindingsClick = props.onFindingsClick;
   var stageNames = getBundleStageNames(bundle);
   if (stageNames.length === 0) return h('span', { style: { color: '#8F8FA3', fontSize: 12 } }, 'No stages');
   var currentIdx = deriveBundleStageIndex(bundle);
@@ -1197,13 +1195,15 @@ function StagePipeline(props) {
     var statusText = dotState === 'completed' ? 'Completed' : dotState === 'active' ? 'In Progress' : dotState === 'blocked' ? 'Open Finding' : 'Pending';
     var tipText = stageNames[j] + '\n' + assigneeName + ' \u2022 ' + statusText;
 
+    var dotClickable = dotState === 'blocked' && onFindingsClick;
     elements.push(
-      h(Tooltip, { key: 'dot-' + j, title: tipText },
+      h(Tooltip, { key: 'dot-' + j, title: dotClickable ? tipText + '\nClick to view findings' : tipText },
         h('circle', {
           cx: cx, cy: cy, r: dotR - (strokeW ? 1 : 0),
           fill: fill, stroke: stroke, strokeWidth: strokeW,
           className: className,
-          style: { cursor: 'pointer' }
+          style: { cursor: 'pointer' },
+          onClick: dotClickable ? function(e) { e.stopPropagation(); onFindingsClick(bundle); } : undefined,
         })
       )
     );
@@ -1222,6 +1222,7 @@ function StagePipeline(props) {
 // ═══════════════════════════════════════════════════════════════
 function StatusFlags(props) {
   var bundle = props.bundle;
+  var onFindingsClick = props.onFindingsClick;
 
   var openFindings = bundle._findings ? bundle._findings.filter(function(f) {
     return f.status !== 'Done' && f.status !== 'WontDo';
@@ -1235,8 +1236,12 @@ function StatusFlags(props) {
   var flags = [];
 
   if (openFindings > 0) {
-    flags.push(h(Tooltip, { key: 'findings', title: openFindings + ' open finding' + (openFindings > 1 ? 's' : '') },
-      h('span', { className: 'status-flag open-findings' }, '\u26A0 ' + openFindings)
+    flags.push(h(Tooltip, { key: 'findings', title: 'Click to view ' + openFindings + ' open finding' + (openFindings > 1 ? 's' : '') },
+      h('span', {
+        className: 'status-flag open-findings',
+        style: { cursor: 'pointer' },
+        onClick: function(e) { e.stopPropagation(); if (onFindingsClick) onFindingsClick(bundle); },
+      }, '\u26A0 ' + openFindings)
     ));
   }
 
@@ -1546,6 +1551,128 @@ function BulkActionBar(props) {
 
 
 // ═══════════════════════════════════════════════════════════════
+//  COMPONENT: Findings Drawer (reusable for stage indicator + findings count)
+// ═══════════════════════════════════════════════════════════════
+function FindingsDrawer(props) {
+  var visible = props.visible;
+  var onClose = props.onClose;
+  var bundle = props.bundle;
+  var findings = bundle ? (bundle._findings || []) : [];
+  var dominoUrl = bundle ? getDominoBundleUrl(bundle) : null;
+
+  var columns = [
+    { title: 'Severity', dataIndex: 'severity', key: 'severity', width: 80,
+      sorter: function(a, b) { return (a.severity || '').localeCompare(b.severity || ''); },
+      render: function(sev) {
+        return h(Tag, { color: severityColor(sev), style: { color: '#fff', border: 'none', minWidth: 28, textAlign: 'center', fontSize: 11 } }, sev || '\u2014');
+      }
+    },
+    { title: 'Name', dataIndex: 'name', key: 'name', width: 180, ellipsis: true,
+      render: function(t) { return h('span', { style: { fontWeight: 500, fontSize: 12 } }, t || '\u2014'); }
+    },
+    { title: 'Status', dataIndex: 'status', key: 'status', width: 110,
+      render: function(s) { return findingStatusTag(s); }
+    },
+    { title: 'Assignee', key: 'assignee', width: 120,
+      render: function(_, r) {
+        var name = r.assignee ? (r.assignee.name || r.assignee.userName) : null;
+        return h('span', { style: { fontSize: 12 } }, name || '\u2014');
+      }
+    },
+    { title: 'Due Date', key: 'dueDate', width: 100,
+      render: function(_, r) {
+        return r.dueDate ? h('span', { style: { fontSize: 12 } }, dayjs(r.dueDate).format('MMM D, YYYY')) : h('span', { style: { color: '#8F8FA3', fontSize: 12 } }, '\u2014');
+      }
+    },
+    { title: 'Description', key: 'description', ellipsis: true,
+      render: function(_, r) {
+        return h('span', { style: { fontSize: 11, color: '#65657B' } }, r.description || '\u2014');
+      }
+    },
+  ];
+
+  return h(Drawer, {
+    title: bundle ? 'Findings \u2014 ' + bundle.name : 'Findings',
+    open: visible,
+    onClose: onClose,
+    width: 720,
+    extra: dominoUrl
+      ? h(Button, { type: 'primary', size: 'small', onClick: function() { window.open(dominoUrl, '_blank'); } }, '\u2197 View in Domino')
+      : null,
+  },
+    findings.length > 0
+      ? h(Table, {
+          dataSource: findings,
+          rowKey: function(r, i) { return r.id || i; },
+          size: 'small',
+          pagination: findings.length > 10 ? { pageSize: 10 } : false,
+          columns: columns,
+        })
+      : h(Empty, { description: 'No findings for this deliverable' })
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+//  COMPONENT: Attachments Drawer
+// ═══════════════════════════════════════════════════════════════
+function AttachmentsDrawer(props) {
+  var visible = props.visible;
+  var onClose = props.onClose;
+  var bundle = props.bundle;
+  var attachments = bundle ? (bundle._attachments || []) : [];
+  var dominoUrl = bundle ? getDominoBundleUrl(bundle) : null;
+
+  var columns = [
+    { title: 'Type', dataIndex: 'type', key: 'type', width: 140,
+      render: function(t) {
+        var colors = { DatasetSnapshotFile: 'blue', Report: 'green', ModelVersion: 'purple', Endpoint: 'orange', FlowArtifact: 'cyan', NetAppVolumeSnapshotFile: 'default' };
+        return h(Tag, { color: colors[t] || 'default', style: { fontSize: 10 } }, (t || '').replace(/([A-Z])/g, ' $1').trim());
+      }
+    },
+    { title: 'Identifier', key: 'identifier', width: 200, ellipsis: true,
+      render: function(_, r) {
+        var id = r.identifier || {};
+        var fname = id.filename || id.name || '\u2014';
+        return h('span', { style: { fontWeight: 500, fontSize: 12 } }, fname);
+      }
+    },
+    { title: 'Created', key: 'createdAt', width: 120,
+      render: function(_, r) {
+        return r.createdAt ? h('span', { style: { fontSize: 12 } }, dayjs(r.createdAt).format('MMM D, YYYY')) : '\u2014';
+      }
+    },
+    { title: 'Created By', key: 'createdBy', width: 130,
+      render: function(_, r) {
+        var name = r.createdBy ? (r.createdBy.name || r.createdBy.userName) : null;
+        return h('span', { style: { fontSize: 12 } }, name || '\u2014');
+      }
+    },
+  ];
+
+  return h(Drawer, {
+    title: bundle ? 'Attachments \u2014 ' + bundle.name : 'Attachments',
+    open: visible,
+    onClose: onClose,
+    width: 640,
+    extra: dominoUrl
+      ? h(Button, { type: 'primary', size: 'small', onClick: function() { window.open(dominoUrl, '_blank'); } }, '\u2197 View in Domino')
+      : null,
+  },
+    attachments.length > 0
+      ? h(Table, {
+          dataSource: attachments,
+          rowKey: function(r, i) { return r.id || i; },
+          size: 'small',
+          pagination: attachments.length > 10 ? { pageSize: 10 } : false,
+          columns: columns,
+        })
+      : h(Empty, { description: 'No attachments for this deliverable' })
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════
 //  PAGE: QC Tracker
 // ═══════════════════════════════════════════════════════════════
 function QCTrackerPage(props) {
@@ -1564,6 +1691,11 @@ function QCTrackerPage(props) {
   var _fs5 = useState([]); var filterFlags = _fs5[0]; var setFilterFlags = _fs5[1];
   var _fs6 = useState([]); var selectedRowKeys = _fs6[0]; var setSelectedRowKeys = _fs6[1];
   var _fs7 = useState([]); var expandedRowKeys = _fs7[0]; var setExpandedRowKeys = _fs7[1];
+  // Findings & attachments drawer state
+  var _fd1 = useState(false); var findingsDrawerOpen = _fd1[0]; var setFindingsDrawerOpen = _fd1[1];
+  var _fd2 = useState(null); var findingsDrawerBundle = _fd2[0]; var setFindingsDrawerBundle = _fd2[1];
+  var _ad1 = useState(false); var attachDrawerOpen = _ad1[0]; var setAttachDrawerOpen = _ad1[1];
+  var _ad2 = useState(null); var attachDrawerBundle = _ad2[0]; var setAttachDrawerBundle = _ad2[1];
   // Derive filter options from scoped bundles (project/tag scope handled at App level)
   var policyOptions = useMemo(function() {
     var names = {};
@@ -1665,7 +1797,7 @@ function QCTrackerPage(props) {
       render: function(t) { return t ? h(Tag, { style: { fontSize: 10 } }, t) : '\u2014'; } },
     { title: 'Progress', key: 'progress', width: 130,
       sorter: function(a, b) { return getBundleProgress(a) - getBundleProgress(b); },
-      render: function(_, record) { return h(StagePipeline, { bundle: record }); } },
+      render: function(_, record) { return h(StagePipeline, { bundle: record, onFindingsClick: function(b) { setFindingsDrawerBundle(b); setFindingsDrawerOpen(true); } }); } },
     { title: 'Stage', dataIndex: 'stage', key: 'stage', width: 130, ellipsis: true,
       filters: allStageNames.map(function(s) { return { text: s, value: s }; }),
       onFilter: function(v, r) { return r.stage === v; },
@@ -1704,8 +1836,11 @@ function QCTrackerPage(props) {
       render: function(_, record) {
         var count = (record._attachments || []).length;
         if (count === 0) return h('span', { style: { color: '#D1D1DB', fontSize: 11 } }, '\u2014');
-        return h(Tooltip, { title: count + ' attachment' + (count > 1 ? 's' : '') },
-          h('span', { style: { color: '#543FDE', fontSize: 12, fontWeight: 600, cursor: 'pointer' } }, count)
+        return h(Tooltip, { title: 'Click to view ' + count + ' attachment' + (count > 1 ? 's' : '') },
+          h('span', {
+            style: { color: '#543FDE', fontSize: 12, fontWeight: 600, cursor: 'pointer' },
+            onClick: function(e) { e.stopPropagation(); setAttachDrawerBundle(record); setAttachDrawerOpen(true); },
+          }, count)
         );
       }
     },
@@ -1721,7 +1856,7 @@ function QCTrackerPage(props) {
         if (v === 'approved') return r._approvals && r._approvals.length > 0 && r._approvals.every(function(a) { return a.status === 'Approved'; });
         return true;
       },
-      render: function(_, record) { return h(StatusFlags, { bundle: record }); } },
+      render: function(_, record) { return h(StatusFlags, { bundle: record, onFindingsClick: function(b) { setFindingsDrawerBundle(b); setFindingsDrawerOpen(true); } }); } },
   ];
 
   return h('div', null,
@@ -1777,7 +1912,17 @@ function QCTrackerPage(props) {
             },
           },
         })
-      )
+      ),
+      h(FindingsDrawer, {
+        visible: findingsDrawerOpen,
+        onClose: function() { setFindingsDrawerOpen(false); },
+        bundle: findingsDrawerBundle,
+      }),
+      h(AttachmentsDrawer, {
+        visible: attachDrawerOpen,
+        onClose: function() { setAttachDrawerOpen(false); },
+        bundle: attachDrawerBundle,
+      })
     )
   );
 }
@@ -2395,7 +2540,9 @@ function App() {
   // ── Universal Scope Filters ──────────────────────────────────
   var _sc1 = useState([]); var scopeProjects = _sc1[0]; var setScopeProjects = _sc1[1];
   var _sc2 = useState([]); var scopeTags = _sc2[0]; var setScopeTags = _sc2[1];
-  var _sc3 = useState('all'); var scopeView = _sc3[0]; var setScopeView = _sc3[1];
+  var _sc3a = useState(false); var filterMyCurrentStage = _sc3a[0]; var setFilterMyCurrentStage = _sc3a[1];
+  var _sc3b = useState(false); var filterMyFutureStage = _sc3b[0]; var setFilterMyFutureStage = _sc3b[1];
+  var _sc3c = useState(false); var filterMyPriorStage = _sc3c[0]; var setFilterMyPriorStage = _sc3c[1];
   var _sc4 = useState(null); var scopeCurrentUser = _sc4[0]; var setScopeCurrentUser = _sc4[1];
 
   // Load assignment rules from localStorage on mount
@@ -2478,52 +2625,34 @@ function App() {
         var matchesTag = scopeTags.some(function(ft) { return tagLabels.indexOf(ft) >= 0; });
         if (!matchesTag) return false;
       }
-      // View filter
-      if (scopeView === 'mywork') {
-        var isAssigned = false;
-        (b.stages || []).forEach(function(s) {
-          if (s.assignee && s.assignee.name === scopeCurrentUser) isAssigned = true;
-        });
-        if (!isAssigned) return false;
-      } else if (scopeView === 'mywork_current') {
-        var currentStage = b.stage;
-        var match = false;
-        (b.stages || []).forEach(function(s) {
-          if (s.stage && s.stage.name === currentStage && s.assignee && s.assignee.name === scopeCurrentUser) match = true;
-        });
-        if (!match) return false;
-      } else if (scopeView === 'mywork_upcoming') {
+      // "Assigned to Me" checkbox filters — if any checked, bundle must match at least one
+      var anyCheckbox = filterMyCurrentStage || filterMyFutureStage || filterMyPriorStage;
+      if (anyCheckbox && scopeCurrentUser) {
         var stageNames = (b.stages || []).map(function(s) { return s.stage ? s.stage.name : ''; });
         var curIdx = stageNames.indexOf(b.stage);
-        var futureMatch = false;
-        (b.stages || []).forEach(function(s, idx) {
-          if (idx > curIdx && s.assignee && s.assignee.name === scopeCurrentUser) futureMatch = true;
-        });
-        if (!futureMatch) return false;
-      } else if (scopeView === 'mywork_completed') {
-        var stageNames2 = (b.stages || []).map(function(s) { return s.stage ? s.stage.name : ''; });
-        var curIdx2 = stageNames2.indexOf(b.stage);
-        var priorMatch = false;
-        (b.stages || []).forEach(function(s, idx) {
-          if (idx < curIdx2 && s.assignee && s.assignee.name === scopeCurrentUser) priorMatch = true;
-        });
-        if (!priorMatch) return false;
-      } else if (scopeView === 'unassigned') {
-        var currentStage2 = b.stage;
-        var currentAssigned = false;
-        (b.stages || []).forEach(function(s) {
-          if (s.stage && s.stage.name === currentStage2 && s.assignee && s.assignee.name) currentAssigned = true;
-        });
-        if (currentAssigned) return false;
-      } else if (scopeView === 'blocked') {
-        var hasOpen = b._findings && b._findings.some(function(f) { return f.status !== 'Done' && f.status !== 'WontDo'; });
-        if (!hasOpen) return false;
+        var matchesAny = false;
+        if (filterMyCurrentStage) {
+          (b.stages || []).forEach(function(s) {
+            if (s.stage && s.stage.name === b.stage && s.assignee && s.assignee.name === scopeCurrentUser) matchesAny = true;
+          });
+        }
+        if (filterMyFutureStage && !matchesAny) {
+          (b.stages || []).forEach(function(s, idx) {
+            if (idx > curIdx && s.assignee && s.assignee.name === scopeCurrentUser) matchesAny = true;
+          });
+        }
+        if (filterMyPriorStage && !matchesAny) {
+          (b.stages || []).forEach(function(s, idx) {
+            if (idx < curIdx && s.assignee && s.assignee.name === scopeCurrentUser) matchesAny = true;
+          });
+        }
+        if (!matchesAny) return false;
       }
       return true;
     });
-  }, [bundles, scopeProjects, scopeTags, scopeView, scopeCurrentUser, projectTagsMap]);
+  }, [bundles, scopeProjects, scopeTags, filterMyCurrentStage, filterMyFutureStage, filterMyPriorStage, scopeCurrentUser, projectTagsMap]);
 
-  var hasScopeFilters = scopeProjects.length > 0 || scopeTags.length > 0 || scopeView !== 'all';
+  var hasScopeFilters = scopeProjects.length > 0 || scopeTags.length > 0 || filterMyCurrentStage || filterMyFutureStage || filterMyPriorStage;
 
   // Load mock/dummy data
   function loadMockData() {
@@ -2579,12 +2708,22 @@ function App() {
         var policyList = policiesResp.data || (Array.isArray(policiesResp) ? policiesResp : []);
         setLivePolicies(policyList);
 
-        // Build project tags map from projects data
+        // Build project tags map and owner map from projects data
         var tagsMap = {};
+        var projectOwnerMap = {}; // projectId → { id, userName, firstName, lastName }
         var projectsList = Array.isArray(projects) ? projects : [];
         projectsList.forEach(function(p) {
           if (p.tags && p.tags.length > 0) {
             tagsMap[p.id] = p.tags; // shape: [{ id, name, isApproved }]
+          }
+          // Capture project owner for merging into collaborators (Fix 2.5)
+          if (p.ownerUsername || p.owner) {
+            projectOwnerMap[p.id] = {
+              id: p.ownerId || (p.owner && p.owner.id) || '',
+              userName: p.ownerUsername || (p.owner && p.owner.userName) || '',
+              firstName: p.ownerFirstName || (p.owner && p.owner.firstName) || '',
+              lastName: p.ownerLastName || (p.owner && p.owner.lastName) || '',
+            };
           }
         });
         setProjectTagsMap(tagsMap);
@@ -2608,27 +2747,29 @@ function App() {
 
         var collabPromises = projectIds.map(function(pid) {
           return apiGet('api/projects/' + pid + '/collaborators')
-            .then(function(members) { return { pid: pid, members: Array.isArray(members) ? members : [] }; })
-            .catch(function() { return { pid: pid, members: [] }; });
+            .then(function(members) {
+              var memberList = Array.isArray(members) ? members : [];
+              // Merge project owner if not already in collaborators list (Fix 2.5)
+              var owner = projectOwnerMap[pid];
+              if (owner && owner.userName) {
+                var ownerAlreadyPresent = memberList.some(function(m) { return m.userName === owner.userName; });
+                if (!ownerAlreadyPresent) {
+                  memberList.unshift(owner);
+                }
+              }
+              return { pid: pid, members: memberList };
+            })
+            .catch(function() {
+              // Even if collaborators fetch fails, include owner
+              var owner = projectOwnerMap[pid];
+              return { pid: pid, members: owner && owner.userName ? [owner] : [] };
+            });
         });
 
-        return Promise.all([
-          Promise.resolve(bundleList),
-          Promise.resolve(attachMap),
-          Promise.all(collabPromises),
-        ]);
-      })
-      .then(function(results) {
-        var bundleList = results[0];
-        var attachMap = results[1];
-        var collabResults = results[2];
-
-        // Store project members cache
-        var membersCache = {};
-        collabResults.forEach(function(r) { membersCache[r.pid] = r.members; });
-        setProjectMembersCache(membersCache);
-
-        // 2. Per-bundle enrichment: approvals, findings, gates in parallel
+        // Fire collaborator fetches AND per-bundle enrichment simultaneously
+        // (previously sequential: collabs first, then enrichment)
+        // All per-bundle calls (approvals, findings, gates) + collaborator calls
+        // fire in a single Promise.all batch for maximum parallelism.
         var enrichPromises = bundleList.map(function(bundle) {
           return Promise.all([
             apiGet('api/bundles/' + bundle.id + '/approvals').catch(function() { return []; }),
@@ -2642,7 +2783,23 @@ function App() {
             return bundle;
           });
         });
-        return Promise.all(enrichPromises);
+
+        // Single Promise.all: collaborator fetches + all enrichment calls fire together
+        return Promise.all([
+          Promise.all(collabPromises),
+          Promise.all(enrichPromises),
+        ]);
+      })
+      .then(function(results) {
+        var collabResults = results[0];
+        var enrichedBundles = results[1];
+
+        // Store project members cache
+        var membersCache = {};
+        collabResults.forEach(function(r) { membersCache[r.pid] = r.members; });
+        setProjectMembersCache(membersCache);
+
+        return enrichedBundles;
       })
       .then(function(enrichedBundles) {
         setBundles(enrichedBundles);
@@ -2706,17 +2863,7 @@ function App() {
     }
   }
 
-  var viewOptions = [
-    { label: 'All Deliverables', value: 'all' },
-    { label: 'My Work (Any Stage)', value: 'mywork' },
-    { label: 'My Work (Current Stage)', value: 'mywork_current' },
-    { label: 'My Work (Upcoming)', value: 'mywork_upcoming' },
-    { label: 'My Work (Completed)', value: 'mywork_completed' },
-    { label: 'Unassigned', value: 'unassigned' },
-    { label: 'Blocked', value: 'blocked' },
-  ];
-
-  var isMyWorkView = scopeView.indexOf('mywork') === 0;
+  var anyMyWorkCheckbox = filterMyCurrentStage || filterMyFutureStage || filterMyPriorStage;
 
   return h(ConfigProvider, { theme: dominoTheme },
     h('div', null,
@@ -2742,25 +2889,27 @@ function App() {
               options: scopeTagOptions,
             }),
             h('span', { className: 'global-filter-divider' }),
-            h('span', { className: 'global-filter-label' }, 'View:'),
-            h(Select, {
-              value: scopeView, onChange: setScopeView,
-              style: { minWidth: 180 }, size: 'small',
-              options: viewOptions,
-            }),
-            isMyWorkView
-              ? h(Select, {
-                  value: scopeCurrentUser, onChange: setScopeCurrentUser,
-                  style: { minWidth: 180 }, size: 'small',
-                  showSearch: true, optionFilterProp: 'label',
-                  options: scopeUserOptions,
-                })
-              : null,
+            h('span', { className: 'global-filter-label' }, 'Assigned to Me:'),
+            h(Checkbox, {
+              checked: filterMyCurrentStage,
+              onChange: function(e) { setFilterMyCurrentStage(e.target.checked); },
+              style: { fontSize: 12 },
+            }, 'Current stage'),
+            h(Checkbox, {
+              checked: filterMyFutureStage,
+              onChange: function(e) { setFilterMyFutureStage(e.target.checked); },
+              style: { fontSize: 12 },
+            }, 'Future stage'),
+            h(Checkbox, {
+              checked: filterMyPriorStage,
+              onChange: function(e) { setFilterMyPriorStage(e.target.checked); },
+              style: { fontSize: 12 },
+            }, 'Prior stage'),
             hasScopeFilters
               ? h('span', { style: { marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 } },
                   h(Tag, { color: 'purple' }, scopedBundles.length + ' of ' + bundles.length + ' deliverables'),
                   h(Button, { type: 'link', size: 'small', onClick: function() {
-                    setScopeProjects([]); setScopeTags([]); setScopeView('all');
+                    setScopeProjects([]); setScopeTags([]); setFilterMyCurrentStage(false); setFilterMyFutureStage(false); setFilterMyPriorStage(false);
                   } }, 'Clear all')
                 )
               : null

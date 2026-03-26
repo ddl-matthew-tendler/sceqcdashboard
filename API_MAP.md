@@ -21,21 +21,23 @@ All API calls made by the frontend, routed through the FastAPI backend proxy.
 ## Fetch Sequence (fetchLiveData)
 
 ```
-1. Parallel batch:
+Phase 1 — Top-level (parallel):
    - GET /api/users/self
    - GET /api/bundles?limit=200
-   - GET /api/projects?limit=200
+   - GET /api/projects?limit=200       → also extracts project owner for D16 merge
    - GET /api/policies?limit=200
    - GET /api/attachment-overviews?limit=200
 
-2. Per unique projectId (parallel):
-   - GET /api/projects/{projectId}/collaborators
-
-3. Per bundle (parallel via Promise.all):
-   - GET /api/bundles/{id}/approvals
-   - GET /api/bundles/{id}/findings?limit=200
-   - GET /api/bundles/{id}/gates
+Phase 2 — All fire simultaneously (single Promise.all):
+   Per unique projectId:
+     - GET /api/projects/{projectId}/collaborators → owner merged if missing (D16)
+   Per bundle (3 calls each):
+     - GET /api/bundles/{id}/approvals
+     - GET /api/bundles/{id}/findings?limit=200
+     - GET /api/bundles/{id}/gates
 ```
+
+**Note on project owners (D16)**: The `/v4/projects/{id}/collaborators` endpoint returns only explicitly added collaborators, not the project owner. The app extracts the owner from the `/v4/projects` response and merges them into the collaborator list if not already present. This ensures all assignee dropdowns include the project owner.
 
 ## Write Endpoints (API Pending)
 
