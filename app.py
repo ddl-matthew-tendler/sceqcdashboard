@@ -101,6 +101,14 @@ def get_bundle_gates(bundle_id: str):
     return gov_get(f"/bundles/{bundle_id}/gates")
 
 
+# ── Attachment Overviews ──────────────────────────────────────────
+
+@app.get("/api/attachment-overviews")
+def list_attachment_overviews(limit: int = 200, offset: int = 0):
+    params = {"limit": limit, "offset": offset}
+    return gov_get("/attachment-overviews", params=params)
+
+
 # ── Computed Policy (rich detail per bundle+policy) ────────────────
 
 @app.post("/api/compute-policy")

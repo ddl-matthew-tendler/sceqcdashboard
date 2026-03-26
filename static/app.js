@@ -1389,7 +1389,59 @@ function QCTrackerExpandedRow(props) {
               );
             })
           )
-        : null
+        : null,
+
+      // Attachments
+      bundle._attachments && bundle._attachments.length > 0
+        ? h('div', { style: { marginTop: 16 } },
+            h('div', { className: 'tracker-section-title' }, 'Attachments (' + bundle._attachments.length + ')'),
+            h(Table, {
+              dataSource: bundle._attachments,
+              rowKey: 'id',
+              size: 'small',
+              pagination: false,
+              style: { fontSize: 11 },
+              columns: [
+                { title: 'File', key: 'filename', width: 180, ellipsis: true,
+                  render: function(_, r) {
+                    var fname = r.identifier && r.identifier.filename;
+                    var name = r.identifier && r.identifier.name;
+                    return h('span', { style: { fontWeight: 500, fontSize: 11 } }, fname || name || 'Unknown');
+                  }
+                },
+                { title: 'Type', dataIndex: 'type', key: 'type', width: 120,
+                  render: function(t) {
+                    var colors = { DatasetSnapshotFile: 'blue', Report: 'green', ModelVersion: 'purple', Endpoint: 'orange', FlowArtifact: 'cyan', NetAppVolumeSnapshotFile: 'default' };
+                    return h(Tag, { color: colors[t] || 'default', style: { fontSize: 10 } }, (t || '').replace(/([A-Z])/g, ' $1').trim());
+                  }
+                },
+                { title: 'Source', key: 'source', width: 140, ellipsis: true,
+                  render: function(_, r) {
+                    var id = r.identifier || {};
+                    if (id.source === 'DominoDataset') return h('span', { style: { fontSize: 10 } }, (id.name || 'Dataset') + ' @ ' + (id.branch || ''));
+                    if (id.source === 'DominoFlow') return h('span', { style: { fontSize: 10 } }, id.executionWorkflowName || 'Flow');
+                    if (id.source === 'DominoModel') return h('span', { style: { fontSize: 10 } }, (id.name || 'Model') + ' v' + (id.version || ''));
+                    return h('span', { style: { fontSize: 10, color: '#8F8FA3' } }, id.source || id.name || '\u2014');
+                  }
+                },
+                { title: 'Added By', key: 'addedBy', width: 110,
+                  render: function(_, r) {
+                    var name = r.createdBy && (r.createdBy.name || r.createdBy.userName);
+                    return h('span', { style: { fontSize: 10 } }, name || '\u2014');
+                  }
+                },
+                { title: 'Added', key: 'addedAt', width: 90,
+                  render: function(_, r) {
+                    return r.createdAt ? h('span', { style: { fontSize: 10, color: '#8F8FA3' } }, dayjs(r.createdAt).format('MMM D, YYYY')) : '\u2014';
+                  }
+                },
+              ],
+            })
+          )
+        : h('div', { style: { marginTop: 16 } },
+            h('div', { className: 'tracker-section-title' }, 'Attachments'),
+            h('div', { style: { color: '#8F8FA3', fontSize: 12 } }, 'No attachments')
+          )
     )
   );
 }
@@ -1626,6 +1678,16 @@ function QCTrackerPage(props) {
       ],
       onFilter: function(v, r) { return r.state === v; },
       render: function(s) { return h(Tag, { color: stateColor(s), style: { fontSize: 11 } }, s); } },
+    { title: '\uD83D\uDCCE', key: 'attachments', width: 50, align: 'center',
+      sorter: function(a, b) { return (a._attachments || []).length - (b._attachments || []).length; },
+      render: function(_, record) {
+        var count = (record._attachments || []).length;
+        if (count === 0) return h('span', { style: { color: '#D1D1DB', fontSize: 11 } }, '\u2014');
+        return h(Tooltip, { title: count + ' attachment' + (count > 1 ? 's' : '') },
+          h('span', { style: { color: '#543FDE', fontSize: 12, fontWeight: 600, cursor: 'pointer' } }, count)
+        );
+      }
+    },
     { title: 'Flags', key: 'flags', width: 70,
       filters: [
         { text: 'Open Findings', value: 'open_findings' },
@@ -1863,6 +1925,7 @@ function App() {
         copy._approvals = (typeof MOCK_APPROVALS !== 'undefined' && MOCK_APPROVALS[b.id]) || [];
         copy._findings = (typeof MOCK_FINDINGS !== 'undefined' && MOCK_FINDINGS[b.id]) || [];
         copy._gates = (typeof MOCK_GATES !== 'undefined' && MOCK_GATES[b.id]) || [];
+        copy._attachments = (typeof MOCK_ATTACHMENTS !== 'undefined' && MOCK_ATTACHMENTS[b.id]) || [];
         return copy;
       });
       setBundles(mockEnriched);
@@ -1893,6 +1956,7 @@ function App() {
             bundle._approvals = Array.isArray(results[0]) ? results[0] : [];
             bundle._findings = results[1].data || (Array.isArray(results[1]) ? results[1] : []);
             bundle._gates = Array.isArray(results[2]) ? results[2] : [];
+            bundle._attachments = Array.isArray(bundle.attachments) ? bundle.attachments : [];
             return bundle;
           });
         });

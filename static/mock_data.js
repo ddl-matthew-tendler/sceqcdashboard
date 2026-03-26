@@ -512,3 +512,63 @@ var MOCK_GATES = {
     { id: 'g-003', name: 'Clinical Safety Release Gate', bundleId: 'b-surg-012', isOpen: false, reason: 'Clinical validation not yet started' },
   ],
 };
+
+// ── Attachments (evidence artifacts attached to bundles) ─────────
+var MOCK_ATTACHMENTS = {
+  'b-adsl-001': [
+    { id: 'att-001', type: 'DatasetSnapshotFile', createdAt: '2026-01-20T10:30:00Z', createdBy: makeCreatedBy(MOCK_USERS.prodProg),
+      identifier: { filename: 'adsl.sas7bdat', source: 'DominoDataset', datasetId: 'ds-cdisc-001', snapshotId: 'snap-001', commit: 'a1b2c3d', branch: 'main', name: 'CDISC_Pilot_ADaM' } },
+    { id: 'att-002', type: 'DatasetSnapshotFile', createdAt: '2026-01-22T14:00:00Z', createdBy: makeCreatedBy(MOCK_USERS.prodProg),
+      identifier: { filename: 'adsl_spec.xlsx', source: 'DominoDataset', datasetId: 'ds-cdisc-001', snapshotId: 'snap-001', commit: 'a1b2c3d', branch: 'main', name: 'CDISC_Pilot_ADaM' } },
+    { id: 'att-003', type: 'DatasetSnapshotFile', createdAt: '2026-02-10T09:15:00Z', createdBy: makeCreatedBy(MOCK_USERS.qcProg),
+      identifier: { filename: 'v_adsl.sas7bdat', source: 'DominoDataset', datasetId: 'ds-cdisc-001', snapshotId: 'snap-002', commit: 'e4f5g6h', branch: 'main', name: 'CDISC_Pilot_ADaM' } },
+  ],
+  'b-adae-002': [
+    { id: 'att-004', type: 'DatasetSnapshotFile', createdAt: '2026-01-25T11:00:00Z', createdBy: makeCreatedBy(MOCK_USERS.prodProg),
+      identifier: { filename: 'adae.sas7bdat', source: 'DominoDataset', datasetId: 'ds-cdisc-001', snapshotId: 'snap-001', commit: 'a1b2c3d', branch: 'main', name: 'CDISC_Pilot_ADaM' } },
+    { id: 'att-005', type: 'Report', createdAt: '2026-02-15T16:30:00Z', createdBy: makeCreatedBy(MOCK_USERS.studyLead),
+      identifier: { filename: 'ADAE_QC_Report.pdf', source: 'DominoReport', name: 'ADAE QC Report v1.2' } },
+  ],
+  'b-adcm-003': [
+    { id: 'att-006', type: 'DatasetSnapshotFile', createdAt: '2026-01-28T09:00:00Z', createdBy: makeCreatedBy(MOCK_USERS.prodProg),
+      identifier: { filename: 'adcm.sas7bdat', source: 'DominoDataset', datasetId: 'ds-cdisc-001', snapshotId: 'snap-001', commit: 'a1b2c3d', branch: 'main', name: 'CDISC_Pilot_ADaM' } },
+  ],
+  'b-adlb-004': [
+    { id: 'att-007', type: 'DatasetSnapshotFile', createdAt: '2026-02-05T10:00:00Z', createdBy: makeCreatedBy(MOCK_USERS.prodProg),
+      identifier: { filename: 'adlb.sas7bdat', source: 'DominoDataset', datasetId: 'ds-cdisc-001', snapshotId: 'snap-003', commit: 'i7j8k9l', branch: 'main', name: 'CDISC_Pilot_ADaM' } },
+    { id: 'att-008', type: 'DatasetSnapshotFile', createdAt: '2026-03-01T08:45:00Z', createdBy: makeCreatedBy(MOCK_USERS.qcProg),
+      identifier: { filename: 'v_adlb.sas7bdat', source: 'DominoDataset', datasetId: 'ds-cdisc-001', snapshotId: 'snap-004', commit: 'm1n2o3p', branch: 'qc-review', name: 'CDISC_Pilot_ADaM' } },
+    { id: 'att-009', type: 'DatasetSnapshotFile', createdAt: '2026-03-10T14:20:00Z', createdBy: makeCreatedBy(MOCK_USERS.prodProg),
+      identifier: { filename: 'adlb_spec.xlsx', source: 'DominoDataset', datasetId: 'ds-cdisc-001', snapshotId: 'snap-003', commit: 'i7j8k9l', branch: 'main', name: 'CDISC_Pilot_ADaM' } },
+    { id: 'att-010', type: 'FlowArtifact', createdAt: '2026-03-15T11:00:00Z', createdBy: makeCreatedBy(MOCK_USERS.prodProg),
+      identifier: { filename: 'adlb_derivation_flow.json', source: 'DominoFlow', executionName: 'ADLB Derivation Pipeline', executionWorkflowName: 'ADaM Production', executionWorkflowVersion: '2.1' } },
+  ],
+  'b-adae-active-007': [
+    { id: 'att-011', type: 'DatasetSnapshotFile', createdAt: '2026-02-25T09:30:00Z', createdBy: makeCreatedBy(MOCK_USERS.ross),
+      identifier: { filename: 'adae_output.sas7bdat', source: 'DominoDataset', datasetId: 'ds-cdisc-002', snapshotId: 'snap-005', commit: 'q4r5s6t', branch: 'main', name: 'CDISC_Pilot_Output' } },
+    { id: 'att-012', type: 'DatasetSnapshotFile', createdAt: '2026-03-05T13:00:00Z', createdBy: makeCreatedBy(MOCK_USERS.qcProg),
+      identifier: { filename: 'v_adae_output.sas7bdat', source: 'DominoDataset', datasetId: 'ds-cdisc-002', snapshotId: 'snap-006', commit: 'u7v8w9x', branch: 'qc-review', name: 'CDISC_Pilot_Output' } },
+  ],
+  'b-tpop-008': [
+    { id: 'att-013', type: 'DatasetSnapshotFile', createdAt: '2026-02-10T10:00:00Z', createdBy: makeCreatedBy(MOCK_USERS.etan),
+      identifier: { filename: 't_pop.rtf', source: 'DominoDataset', datasetId: 'ds-tfl-001', snapshotId: 'snap-007', commit: 'y1z2a3b', branch: 'main', name: 'CDISC_Pilot_TFL' } },
+    { id: 'att-014', type: 'Report', createdAt: '2026-02-28T15:00:00Z', createdBy: makeCreatedBy(MOCK_USERS.studyLead),
+      identifier: { filename: 'T_POP_QC_Signoff.pdf', source: 'DominoReport', name: 'T_POP QC Sign-off Report' } },
+  ],
+  'b-rwe-011': [
+    { id: 'att-015', type: 'DatasetSnapshotFile', createdAt: '2026-03-01T08:00:00Z', createdBy: makeCreatedBy(MOCK_USERS.agnes),
+      identifier: { filename: 'migraine_cohort_v3.parquet', source: 'DominoDataset', datasetId: 'ds-rwe-001', snapshotId: 'snap-008', commit: 'c4d5e6f', branch: 'main', name: 'Migraine_RWE_Data' } },
+    { id: 'att-016', type: 'ModelVersion', createdAt: '2026-03-10T14:00:00Z', createdBy: makeCreatedBy(MOCK_USERS.agnes),
+      identifier: { name: 'Migraine Propensity Model', version: '3.1', source: 'DominoModel' } },
+    { id: 'att-017', type: 'Endpoint', createdAt: '2026-03-12T09:00:00Z', createdBy: makeCreatedBy(MOCK_USERS.agnes),
+      identifier: { name: 'Migraine Scoring API', source: 'DominoEndpoint' } },
+    { id: 'att-018', type: 'FlowArtifact', createdAt: '2026-03-18T11:30:00Z', createdBy: makeCreatedBy(MOCK_USERS.agnes),
+      identifier: { filename: 'regulatory_submission_flow.json', source: 'DominoFlow', executionName: 'Regulatory Submission Pipeline', executionWorkflowName: 'RWE Submission', executionWorkflowVersion: '1.0' } },
+  ],
+  'b-daccess-013': [
+    { id: 'att-019', type: 'DatasetSnapshotFile', createdAt: '2026-03-05T10:00:00Z', createdBy: makeCreatedBy(MOCK_USERS.etan),
+      identifier: { filename: 'access_policy_config.yaml', source: 'DominoDataset', datasetId: 'ds-gov-001', snapshotId: 'snap-009', commit: 'g7h8i9j', branch: 'main', name: 'Data_Governance_Config' } },
+    { id: 'att-020', type: 'DatasetSnapshotFile', createdAt: '2026-03-08T16:00:00Z', createdBy: makeCreatedBy(MOCK_USERS.etan),
+      identifier: { filename: 'data_classification_matrix.xlsx', source: 'DominoDataset', datasetId: 'ds-gov-001', snapshotId: 'snap-009', commit: 'g7h8i9j', branch: 'main', name: 'Data_Governance_Config' } },
+  ],
+};
