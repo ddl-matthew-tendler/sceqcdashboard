@@ -1,0 +1,273 @@
+/*
+ * domino-overrides.css — Antd CSS overrides for components where Domino's
+ * styled-components produce a VISUALLY DIFFERENT result from antd defaults.
+ *
+ * Include this in every prototype's HTML AFTER the antd CDN stylesheet.
+ * It is stable across prototypes — doesn't change per feature.
+ *
+ * Source of truth: each component's styles.ts in
+ *   example_domino_frontend_code/frontend/packages/base-components/src/
+ *
+ * Token resolution: defaultColorPalette (light theme) from
+ *   core/src/styled/colors.ts + color-palettes.ts
+ *
+ * Last verified: 2026-03-10
+ */
+
+
+/* ==========================================================================
+   BUTTON — secondary / tertiary
+   Source: Button/styles.ts
+   antd 'default' = gray border, white bg — Domino secondary = purple-tinted
+   antd 'text' = no border, gray hover   — Domino tertiary = purple text, border on hover
+   Requires: domino-components.js Button alias adds .domino-btn-secondary / .domino-btn-tertiary
+   ========================================================================== */
+
+.domino-btn-secondary.ant-btn {
+  background: #F0EEFC !important;   /* purple50 = palette.secondary */
+  border-color: #D1CBF6 !important; /* purple100 */
+  color: #311EAE !important;        /* purple700 */
+}
+.domino-btn-secondary.ant-btn:hover:not(:disabled) {
+  background: #D1CBF6 !important;   /* purple100 = palette.secondaryHover */
+  border-color: #D1CBF6 !important;
+  color: #311EAE !important;
+}
+.domino-btn-secondary.ant-btn:active:not(:disabled) {
+  background: #B2A8F0 !important;   /* purple200 = palette.secondaryActive */
+  border-color: #B2A8F0 !important;
+  color: #311EAE !important;
+}
+.domino-btn-secondary.ant-btn:disabled {
+  background: #EBEBEB !important;   /* neutralLight400 = palette.bgMedium */
+  border-color: #EBEBEB !important;
+  color: #65657B !important;        /* neutralDark400 = palette.textSecondary */
+}
+
+.domino-btn-tertiary.ant-btn {
+  background: transparent !important;
+  border-color: transparent !important;
+  color: #543FDE !important;        /* purple500 = palette.primary */
+  box-shadow: none !important;
+}
+.domino-btn-tertiary.ant-btn:hover:not(:disabled) {
+  background: transparent !important;
+  border-color: #3B23D1 !important; /* purple600 = palette.primaryHover */
+  color: #3B23D1 !important;
+}
+.domino-btn-tertiary.ant-btn:active:not(:disabled) {
+  background: transparent !important;
+  border-color: #311EAE !important; /* purple700 = palette.primaryActive */
+  color: #311EAE !important;
+}
+.domino-btn-tertiary.ant-btn:disabled {
+  background: transparent !important;
+  border-color: transparent !important;
+  color: #65657B !important;        /* palette.textSecondary */
+}
+
+
+/* ==========================================================================
+   SELECT
+   Source: Select/Select.styles.ts + SelectNew.tsx
+   Key diffs: purple focus border (not blue), purple selected-item bg (not blue),
+   hidden checkmark on selected items, taller dropdown items, custom padding.
+   Note: checkmark removal + dropdownStyle are handled in the Select alias props.
+   ========================================================================== */
+
+/* --- Trigger / selector --- */
+
+.ant-select .ant-select-selector {
+  border-radius: 4px !important;    /* radiusSmall = 4px (antd default: 6px) */
+  border-color: #D6D6D6 !important; /* neutralLight600 = palette.borderMedium */
+}
+
+.ant-select .ant-select-selection-placeholder {
+  color: #65657B !important;        /* neutralDark400 = palette.textSecondary */
+}
+
+.ant-select:not(.ant-select-disabled):hover .ant-select-selector {
+  border-color: #543FDE !important; /* purple500 = palette.primary (antd: blue) */
+}
+
+.ant-select-focused:not(.ant-select-disabled) .ant-select-selector {
+  border-color: #543FDE !important; /* purple500 = palette.primary */
+  box-shadow: none !important;      /* Domino removes the focus glow */
+}
+
+/* --- Dropdown items --- */
+
+.ant-select-dropdown .ant-select-item-option {
+  padding: 8px 16px;               /* spacing.xSmall, spacing.small */
+  line-height: 17px;
+  min-height: 28px;
+}
+
+.ant-select-dropdown .ant-select-item-option:hover {
+  background-color: #FAFAFA !important; /* neutralLight100 = palette.bgLight1 */
+}
+
+.ant-select-dropdown .ant-select-item-option:active {
+  background-color: #F7F7F7 !important; /* neutralLight200 = palette.bgLight2 */
+}
+
+.ant-select-dropdown .ant-select-item-option-selected {
+  font-weight: 500 !important;          /* Domino: 500 (antd default: 600) */
+  background-color: #F0EEFC !important; /* purple50 = palette.bgPrimary (antd: blue tint) */
+}
+
+/* Hide the selected-item checkmark (handled via prop, CSS backup) */
+.ant-select-dropdown .ant-select-item-option-selected .ant-select-item-option-state {
+  display: none;
+}
+
+/* --- Group headings --- */
+
+.ant-select-dropdown .ant-select-item-group {
+  font-size: 12px;                  /* fontSizes.tiny */
+  color: #65657B;                   /* palette.textSecondary */
+  padding: 4px 16px;               /* spacing.xXSmall, spacing.small */
+  min-height: 28px;
+  line-height: 20px;
+}
+
+.ant-select-dropdown .ant-select-item-option-grouped {
+  padding-inline-start: 16px;      /* spacing.small (antd default: 24px) */
+}
+
+/* --- Disabled --- */
+
+.ant-select-disabled .ant-select-selector {
+  background-color: #EBEBEB !important; /* palette.bgMedium */
+  color: #65657B !important;            /* palette.textSecondary */
+}
+
+/* --- Multi-select overflow tag --- */
+
+.ant-select .ant-select-selection-overflow-item-rest > .ant-select-selection-item {
+  background-color: transparent;
+  color: #65657B;                   /* palette.textSecondary */
+}
+
+/* --- Dropdown container --- */
+
+.ant-select-dropdown {
+  padding-inline: 0 !important;    /* Domino removes default inline padding */
+}
+
+
+/* ==========================================================================
+   TABLE (DominoTable)
+   Source: DominoTable.styles.ts
+   Key diffs: uppercase headers, shorter header, different bg, taller rows,
+   purple selected-row bg (not blue), purple sort icons (not blue).
+   ========================================================================== */
+
+/* --- Header --- */
+
+.ant-table-thead > tr > th {
+  height: 44px;
+  padding: 8px 16px !important;
+  background-color: #F7F7F7 !important; /* neutralLight200 = palette.bgLight2 */
+  font-weight: 500 !important;          /* fontWeights.medium (antd: 600) */
+  font-size: 14px !important;
+  text-transform: uppercase;
+  color: #65657B !important;            /* palette.textSecondary */
+}
+
+/* --- Body cells --- */
+
+.ant-table-tbody > tr > td {
+  height: 52px;
+  padding: 8px 16px !important;
+}
+
+/* --- Row hover --- */
+
+.ant-table-cell-row-hover {
+  background-color: #F7F7F7 !important; /* palette.bgLight2 */
+}
+
+/* --- Row selected --- */
+
+.ant-table-row-selected > .ant-table-cell {
+  background-color: #F0EEFC !important; /* purple50 = palette.bgPrimary (antd: blue) */
+}
+
+/* --- Sort icons --- */
+
+.ant-table-column-sorter {
+  color: #2E2E38;                       /* palette.textPrimary (antd: light gray) */
+}
+
+.ant-table-column-sorter-up.active,
+.ant-table-column-sorter-down.active {
+  color: #543FDE !important;            /* palette.primary (antd: blue) */
+}
+
+
+/* ==========================================================================
+   BREADCRUMB
+   Source: Breadcrumb/styles.ts + LinkNew default color
+   Key diffs: 12px font (not 14px), purple links (not gray), lighter separator.
+   ========================================================================== */
+
+.ant-breadcrumb {
+  font-size: 12px;                      /* fontSizes.tiny (antd default: 14px) */
+}
+
+.ant-breadcrumb .ant-breadcrumb-separator {
+  color: #D6D6D6;                       /* neutralLight600 = palette.borderMedium */
+}
+
+.ant-breadcrumb a,
+.ant-breadcrumb a:hover {
+  color: #543FDE;                       /* purple500 = palette.primary (antd: gray) */
+}
+
+.ant-breadcrumb a:hover {
+  background-color: transparent;        /* remove antd's hover bg */
+}
+
+
+/* ==========================================================================
+   GLOBAL FOUNDATIONS — ConfigProvider covers most of these, but these are
+   backup/reinforcement for components that antd doesn't fully theme.
+   ========================================================================== */
+
+.ant-input:hover,
+.ant-input:focus,
+.ant-input-focused {
+  border-color: #543FDE !important;     /* palette.primary (antd: blue) */
+  box-shadow: none !important;          /* Domino removes focus glow */
+}
+
+.ant-input-number:hover,
+.ant-input-number-focused {
+  border-color: #543FDE !important;
+  box-shadow: none !important;
+}
+
+/* Collapse panel header alignment */
+.ant-collapse > .ant-collapse-item > .ant-collapse-header {
+  font-weight: 500;
+}
+
+/* Modal structure */
+.ant-modal .ant-modal-header {
+  border-bottom: 1px solid #E0E0E0;
+  padding: 16px 24px;
+}
+.ant-modal .ant-modal-footer {
+  border-top: 1px solid #E0E0E0;
+  padding: 12px 24px;
+  display: flex;
+  justify-content: flex-end;
+}
+.ant-modal .ant-modal-body {
+  padding: 0;
+}
+.ant-modal .ant-modal-title {
+  font-size: 20px;
+  font-weight: 600;
+}

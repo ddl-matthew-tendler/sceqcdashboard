@@ -1,0 +1,313 @@
+---
+description: For the Domino design team building UI prototypes that must precisely reference real internal front-end components. The prototype must show engineering exactly which @domino/base-components to use. Covers the component discovery workflow, alias layer, stand-ins, and dev tools (dev mode overlay + comment system). NOT for external app developers or making real domino apps— use how-to-build-domino-apps for that.
+---
+
+# Domino Design Team — Prototype Rules
+
+These prototypes are built by the Domino design team to hand off to engineering. The goal is precision: engineering should look at the prototype and know exactly which `@domino/base-components` to use, with the UI matching the real Domino product.
+
+## How It Works
+
+Real Domino components (`@domino/base-components`) require `@domino/core`, `styled-components`, and a full Node.js build pipeline — too heavy for a deployable prototype. So prototypes use Ant Design via CDN under the hood, but expose **real Domino component names** via an alias layer and stand-in implementations. The result looks identical to Domino UI, and every component is tagged with its real name for engineering.
+
+The source of truth for component names, props, and behavior is always the real front-end code in `example_domino_frontend_code/` — never this rule.
+
+## Component Discovery Workflow (FOLLOW THIS FOR EVERY UI ELEMENT)
+
+Before using ANY UI component in a prototype, follow these steps in order:
+
+**Step 0 — Implement the app shell first.** Before building any feature-specific UI, set up the overall application frame using these real `@domino/base-components`:
+
+| Stand-in | Real component | Purpose |
+|----------|---------------|---------|
+| `TopNavBar` | `import { TopNavBar } from '@domino/base-components'` | Dark charcoal top nav (44px, `colors.neutralDark700` = `#2E2E38`) |
+| `SideBar` | `import { SideBar } from '@domino/base-components'` | White sidebar with light-purple header (`palette.bgPrimary` = `#F0EEFC`) |
+| `DominoLabelIcon` | `import { DominoLabelIcon } from '@domino/base-components'` | Domino wordmark logo for the nav bar |
+
+These are pre-built stand-ins in `prototype_modules/domino-standins.js`. Use them — do NOT re-implement a nav bar or sidebar from scratch. The app layout should be:
+
+```javascript
+h(TopNavBar, { logo: ..., left: [...], searchPlaceholder: ..., selectedKeys: [...] }),
+h('div', { className: 'app-body' },
+  h(SideBar, { section: ..., name: ..., tag: ..., items: [...], selectedKeys: [...] }),
+  h('main', { className: 'main-content' }, pageContent)
+)
+```
+
+**Important: Do NOT pass `right` items (Help, Account, notifications) to `TopNavBar`.** The right side of the nav bar is reserved for the Dev Tools toolbar (Dev Mode + Comment Mode buttons), which is fixed-positioned there by `dev-tools.css`. Adding nav items on the right will overlap with these controls. The `logo`, `left` menu items, and `searchPlaceholder` are fine — they sit on the left/center.
+
+**Step 1 — Check existing files.** Is the component already aliased in this prototype's `domino-components.js` or implemented in `domino-standins.js`? If yes, use it. If no, continue to Step 2.
+
+**Step 2 — Search the real library.** Browse `example_domino_frontend_code/frontend/packages/base-components/src/` for a matching component. Check the barrel export at `base-components/src/index.ts` for the exported name. If the directory isn't populated, run `./grab_front_end_code.sh` first.
+
+**Step 3 — Read the real component's props.** Open its main `.tsx` file and read the exported props interface. Note which antd component it wraps (if any) and what custom behavior it adds.
+
+**Step 4 — Classify and implement:**
+
+- **Simple wrapper** (wraps a single antd component): Add a `dominoAlias()` entry to `domino-components.js`.
+- **Composite component** (combines multiple primitives or has significant custom rendering): Add a stand-in to `domino-standins.js` matching the real prop names. Use the Wizard stand-in as a template.
+- **Not found in the real library**: Use the closest antd component via `dominoAlias()` with a descriptive name. Add a comment noting it may not have a direct `@domino/base-components` equivalent.
+
+**Step 5 — Always add `data-domino-component`.** Whether alias or stand-in, the component must inject this attribute so Dev Mode can identify it on hover.
+
+**Step 6 — Add `data-domino-view-state` to stateful containers.** If the component conditionally renders children based on internal state (wizard steps, tabs, accordion panels, conditional views), its content wrapper must include `data-domino-view-state` with a unique value for each state. This ensures comments are scoped correctly and don't leak across states.
+
+**Step 7 — Verify against Storybook.** After implementing a component, visually compare it against the real component in Storybook. This catches visual differences that code reading misses.
+
+Run the **`base-components`** Storybook (this matches the official Chromatic instance):
+
+```bash
+cd example_domino_frontend_code/frontend
+yarn install
+yarn build-install-mocks
+yarn build-install-core
+yarn build-install-base-components
+cd packages/base-components
+yarn storybook
+```
+
+Runs at **http://localhost:6007**. Browse the sidebar to find components — do NOT use the `packages/ui` Storybook (it's a different internal dev tool with extra sandbox stories and a different nav structure).
+
+If a component looks different in Storybook vs. your prototype, the prototype is wrong — update the CSS overrides or stand-in until they match.
+
+**Never skip this workflow and fall back to raw antd names.**
+
+### When a spec contradicts real components
+
+Feature specs (prompt files, design docs) describe **what the UI should do**, not how to implement it. If a spec mentions raw antd component names, CSS classes, layout details, or visual styles that conflict with how the real `@domino/base-components` actually look and behave, **the real components always win**. Derive implementation from the real source code — not from a spec's assumptions about component internals. Specifically:
+
+- If a spec says "use `<Steps>`" but the real Wizard uses custom step indicators → use the real Wizard's approach.
+- If a spec describes a dark sidebar but the real component has a light background with a border → follow the real styles.
+- If a spec specifies a color like `#2E2E38` for nav → check the real theme palette (`core/src/styled/colors.ts` + `color-palettes.ts`) for the correct token.
+- If a spec puts the footer inside the content area but the real component uses the Modal footer prop → follow the real component.
+
+## Two Patterns: Aliases vs. Stand-ins
+
+### Pattern 1 — Alias (for simple antd wrappers)
+
+Most Domino components wrap a single antd component with custom props or styling. These use `dominoAlias()` in `domino-components.js`:
+
+```javascript
+// dominoAlias maps the name AND injects data-domino-component for Dev Tools.
+const DominoTable = dominoAlias(AntTable, 'DominoTable');
+const Callout     = dominoAlias(AntAlert, 'Callout');
+const TextInput   = dominoAlias(AntInput, 'TextInput');
+```
+
+`prototype_modules/domino-components.js` provides the `dominoAlias` function, antd destructuring, and **pre-built aliases for components that need custom prop/CSS handling** (Button, Tag, Select — see "The Styled-Components Gap" below). The agent adds additional simple aliases during prototype construction by following the discovery workflow.
+
+### Pattern 2 — Stand-in (for composite components)
+
+Some Domino components have no single antd equivalent (e.g., Wizard = Modal + Steps + custom navigation). These are lightweight implementations in `domino-standins.js` that match the real component's prop API:
+
+```javascript
+// Stand-in accepts the same props as the real Wizard from @domino/base-components:
+// isOpen, items, current, onChange, onSubmit, onClose, enableFinishOnAnyStep, etc.
+h(Wizard, {
+  isOpen: showWizard,
+  items: steps,
+  current: currentStep,
+  onChange: setCurrentStep,
+  onSubmit: handleFinish,
+  onClose: () => setShowWizard(false),
+}, stepContent)
+```
+
+See `prototype_modules/domino-standins.js` for pre-built stand-ins:
+
+| Stand-in | Real component | Notes |
+|----------|---------------|-------|
+| `TopNavBar` | `TopNavBar` | App shell — dark charcoal nav bar, always use this |
+| `SideBar` | `SideBar` | App shell — white sidebar with purple header, always use this |
+| `Wizard` | `StepperContent` + `Modal` | Modal wizard with step sidebar. Not in base-components Storybook — see stand-in source and `packages/ui/src/components/StepperContent/` for details. |
+| `Typography` | `Typography` | H1/H2/H3/Text with Domino font sizing |
+| `MetricCard` | `MetricCard` | Value display card with optional trend indicator |
+| `ActionDropdown` | `ActionDropdown` | Dropdown triggered by ellipsis button |
+| `CopyText` | `CopyText` | Monospace text with copy button |
+| `EllipsisText` | `EllipsisText` | Truncated text with tooltip on hover |
+
+When a prototype needs a new composite component, add it to this file following the same pattern. When updating a stand-in, verify it against the real component's `.tsx` and `styles.ts` — pre-built stand-ins can drift if the real component changes.
+
+## Theme and Visual Fidelity
+
+The prototype must match the real Domino look and feel. Always check the real theme source when styling:
+
+- **Colors — component `styles.ts` is the ground truth.** `color-palettes.ts` maps semantic roles to token names (e.g., `navBackground: 'navy600'`), but individual components often bypass these semantic mappings and reference `colors.ts` tokens directly. For example, `TopNavBar/styles.ts` uses `colors.neutralDark700` (`#2E2E38`), **not** the palette's `navBackground` which points to `navy600` (`#242D5B`). When implementing a stand-in, always read the component's own `styles.ts` file for exact color usage — don't rely solely on `color-palettes.ts`.
+- **Colors — raw tokens**: `core/src/styled/colors.ts` defines every raw color (purple500, navy600, neutralDark700, etc.). `color-palettes.ts` maps semantic roles to these raw tokens. Use raw tokens resolved through the component's `styles.ts`.
+- **Spacing/sizing**: `core/src/styled/spacing.ts`, `fontSizes.ts`, `fontWeights.ts`.
+- **Theme provider**: `Domino30ThemeProvider.tsx` shows the real antd ConfigProvider overrides — e.g., `borderRadius: 2`, wave effects disabled, specific Input/Button token configs. Use these same overrides in the prototype's ConfigProvider.
+- **Component styles**: For composite stand-ins, read the real component's `styles.ts` file to replicate the layout (sidebar width, container height, step indicator size, etc.).
+
+Don't guess at colors or spacing — read the real component source and tokens.
+
+## The Styled-Components Gap
+
+Domino's real components use `styled-components` to override antd's default colors, borders, and spacing. Since prototypes use antd via CDN (no styled-components), a simple `dominoAlias()` remap produces components that **behave correctly but look wrong** whenever the real `styles.ts` diverges from antd defaults.
+
+This is handled by `prototype_modules/domino-overrides.css` — a shared CSS file that applies the real Domino colors using antd class selectors. **Every prototype must include this file.** It covers all components audited below.
+
+### Components with significant visual divergence
+
+These components look noticeably different between vanilla antd and real Domino. All are handled by the boilerplate — the pre-built aliases in `domino-components.js` set the right props, and `domino-overrides.css` applies the right colors.
+
+| Component | What antd gets wrong | How the boilerplate fixes it |
+|-----------|---------------------|------------------------------|
+| **Button** (secondary) | Gray border, white bg | Purple border (`#D1CBF6`), lavender bg (`#F0EEFC`), dark purple text (`#311EAE`). Alias adds `.domino-btn-secondary` class. |
+| **Button** (tertiary) | No border, gray hover bg | Purple text (`#543FDE`), transparent bg, purple border appears on hover. Alias adds `.domino-btn-tertiary` class. |
+| **Select** | Blue focus border, blue selected bg, checkmark on selected items | Purple focus border (`#543FDE`), purple selected bg (`#F0EEFC`), **no checkmark** (hidden via prop), taller dropdown (`400px`). Alias sets `menuItemSelectedIcon`, `listHeight`, `dropdownStyle`. |
+| **DominoTable** | `#fafafa` header, 14px normal-case, blue selected rows, blue sort icons | `#F7F7F7` header, **uppercase** headers, 500 weight, 44px header / 52px rows, purple selected rows (`#F0EEFC`), purple sort icons (`#543FDE`). |
+| **Breadcrumb** | 14px font, gray separator, gray links | **12px** font, lighter separator (`#D6D6D6`), **purple** links (`#543FDE`). |
+
+### Components that are safe as-is
+
+These were audited and their `styles.ts` overrides are minor enough that vanilla antd + ConfigProvider is visually acceptable for prototyping:
+
+Callout, Checkbox, Toggle/Switch, Tooltip, Popover, Segmented, TextInput, Modal, DatePicker, ProgressBar, Autocomplete, Typography (custom primitives, not wrapping antd).
+
+### Key prop differences to watch for
+
+Some Domino components rename or re-type antd props. Don't memorize these — read the real `.tsx` file each time:
+
+- **Button**: `type: 'secondary' | 'tertiary'` (not antd's `'default' | 'text'`), `color: 'danger'` (not antd's `danger` boolean)
+- **Modal**: `size: 'sm' | 'md' | 'lg' | 'xl'` (not antd's `width` number)
+- **Tag**: `type: 'success' | 'danger' | 'warning'` (not antd's `color`)
+- **Alert → Callout**: Different component name
+- **Table → DominoTable**: `DominoColumnType` with `resizable`, `minWidth`, `maxWidth`
+- **Select**: `menuItemSelectedIcon` hidden, `showSearch` on by default, `listHeight: 400`
+- **PageHeader**: Does NOT exist as a component — composed ad-hoc from Typography + Breadcrumb
+
+### If you find a new component that looks wrong
+
+Follow this pattern (same as Button/Select):
+1. Read the component's `styles.ts` and resolve every token to a hex value
+2. Add CSS rules to `domino-overrides.css` using antd's class selectors
+3. If props need changing (like Select's hidden checkmark), create a custom alias function in `domino-components.js` instead of using `dominoAlias()`
+4. Document the component in the table above
+
+## Prototype File Structure
+
+Copy the module files from `prototype_modules/` in the repo root into each prototype:
+
+```
+my-prototype/
+├── app.py                      # FastAPI back-end (mount comment_api router)
+├── app.sh                      # Startup script
+├── comment_api.py              # ← from prototype_modules/comment-api.py
+├── static/
+│   ├── domino-overrides.css    # ← from prototype_modules/domino-overrides.css (antd visual fixes)
+│   ├── domino-components.js    # ← from prototype_modules/domino-components.js
+│   ├── domino-standins.js      # ← from prototype_modules/domino-standins.js
+│   ├── dev-tools.js            # ← from prototype_modules/dev-tools.js
+│   ├── dev-tools.css           # ← from prototype_modules/dev-tools.css
+│   ├── app.js                  # Prototype app code (uses Domino names only)
+│   └── styles.css              # Prototype-specific styles only
+└── templates/
+    └── index.html
+```
+
+### HTML Load Order
+
+```html
+<!-- Stylesheets: antd reset FIRST, then Domino overrides, then prototype styles -->
+<link href="https://cdn.jsdelivr.net/npm/antd@5/dist/reset.min.css" rel="stylesheet">
+<link href="static/domino-overrides.css" rel="stylesheet">
+<link href="static/styles.css" rel="stylesheet">
+<link href="static/dev-tools.css" rel="stylesheet">
+
+<!-- CDN scripts (React, antd, etc.), then: -->
+<script src="static/domino-components.js"></script>
+<script src="static/domino-standins.js"></script>
+<script src="static/app.js"></script>
+<script src="static/dev-tools.js"></script>
+```
+
+**Important:** `domino-overrides.css` must load AFTER antd's stylesheet and BEFORE the prototype's `styles.css`. It contains all the visual fixes for components where antd defaults don't match Domino (Button, Select, Table, Breadcrumb, etc.). Without it, the prototype will have correct component names but wrong colors.
+
+### Mount the Comment API
+
+In `app.py`, one import enables comment persistence:
+
+```python
+from comment_api import router as dev_tools_router
+app.include_router(dev_tools_router)
+```
+
+## Dev Tools Module
+
+Every prototype includes a **Dev Tools** toolbar (top-right of the nav bar). The module is self-contained in `prototype_modules/` — keep it separate from prototype app code.
+
+### Dev Mode (`</>` button)
+
+Hovering any component shows a tooltip with:
+- The real `@domino/base-components` component name
+- The exact import statement (e.g., `import { DominoTable } from '@domino/base-components'`)
+- A blue dashed outline around the component
+
+This works because `dominoAlias()` and stand-ins inject `data-domino-component` attributes on DOM elements.
+
+### Comment Mode (chat icon, shift+click to toggle)
+
+- **Click** any component to pin a comment at that location
+- **Pins** appear as numbered circles anchored to their target component
+- **Drawer** (click the chat icon normally) slides in, listing comments grouped by component
+- **Hovering** a comment in the drawer highlights and scrolls to its element
+- **Badge** on the chat icon shows unresolved count for the current page
+
+### State-Aware Comments (`data-domino-view-state`)
+
+Comments are scoped to the **UI state** they were created in. Without this, a comment added on Wizard step 2 would appear on step 1, or a comment on Tab A would leak to Tab B.
+
+**How it works:** Any container that changes visible content based on state should have `data-domino-view-state` with a unique value identifying the active state. When a comment is created, the dev tools walk up the DOM and record the view-state path. Pins and drawer entries only appear when their recorded state is currently active.
+
+**Built-in:** The Wizard stand-in already adds `data-domino-view-state="wizard-step-{N}"` to its content container automatically.
+
+**For new stand-ins or custom stateful UI in `app.js`:** Any component that conditionally renders children based on state (tabs, accordions, steppers, conditional panels) must add this attribute to the content container:
+
+```javascript
+// Stand-in pattern — add to the content wrapper:
+h('div', { 'data-domino-view-state': 'my-tabs-' + activeKey }, tabContent)
+
+// Or in app.js for a custom conditional view:
+h('div', { 'data-domino-view-state': 'view-' + currentView }, viewContent)
+```
+
+Values must be unique across the page (e.g., `wizard-step-2`, `settings-tab-general`, `panel-details`). Nesting is supported — a tab inside a wizard step produces the path `wizard-step-2/settings-tab-general`.
+
+### Comment Persistence
+
+Comments persist via `comment_api.py` mounted in the prototype's FastAPI app (`dev-tools-data/comments.json`). Falls back to `localStorage` if the server is unreachable. The `viewState` field is stored with each comment and used to filter visibility.
+
+### Customization
+
+- Toolbar position: `top: 6px; right: 16px` in `dev-tools.css`
+- API prefix: `CONFIG.apiBase` in `dev-tools.js`
+- All styles use the `ddt-` CSS prefix
+
+## Where to Find the Real Components
+
+The `example_domino_frontend_code` directory is gitignored. To populate it:
+
+```bash
+./grab_front_end_code.sh
+```
+
+**Two complementary references — use both:**
+
+1. **Storybook** (visual ground truth) — The `base-components` Storybook shows components rendered with the real theme. See Step 7 for setup.
+
+2. **Source code** (implementation details) — Read when you need exact prop names, token values, or to understand component internals. Key paths:
+   - **Component source**: `example_domino_frontend_code/frontend/packages/base-components/src/`
+   - **Barrel exports**: `example_domino_frontend_code/frontend/packages/base-components/src/index.ts`
+   - **Feature components**: `example_domino_frontend_code/frontend/packages/ui/src/`
+   - **Theme/tokens**: `example_domino_frontend_code/frontend/packages/core/src/styled/`
+   - **Stories**: `__stories__/` directories within component folders (useful even without running Storybook — they show prop usage examples)
+
+## Production Migration
+
+Because prototypes use Domino component names, migration is mechanical:
+
+1. Replace CDN with npm: `@domino/base-components`, `@domino/core`, `antd`, `styled-components`
+2. Delete `domino-components.js` + `domino-standins.js` → replace with real imports from `@domino/base-components`
+3. Replace `ConfigProvider` + `dominoTheme` with `Domino30ThemeProvider`
+4. Replace `h()` calls with JSX
+5. Adjust props where Domino diverges from antd (read the real source for current differences)
