@@ -103,6 +103,42 @@ function makeCreatedBy(user) {
   return { id: user.id, firstName: user.firstName, lastName: user.lastName, userName: user.name };
 }
 
+// ── Project Tags (mirrors Domino project tag taxonomy) ──────────
+var MOCK_PROJECT_TAGS = {
+  'proj-cdiscpilot': [
+    { key: 'Therapeutic-Area', value: 'Oncology / Lung-Cancer / nsclc' },
+    { key: 'Clinical-Phase', value: 'Phase-2' },
+    { key: 'Drug-Compound', value: 'Compound-127' },
+    { key: 'Team', value: 'AI-Drug-Discovery' },
+    { key: 'Project-Status', value: 'Active' },
+    { key: 'Data-Quality', value: 'Curated' },
+    { key: 'Organism', value: 'Human' },
+    { key: 'Technique', value: 'Genomic-Sequencing / RNA-Seq' },
+  ],
+  'proj-rwe-migraine': [
+    { key: 'Therapeutic-Area', value: 'Neurology / Migraine' },
+    { key: 'Clinical-Phase', value: 'Post-Marketing' },
+    { key: 'Drug-Compound', value: 'Erenumab' },
+    { key: 'Team', value: 'RWE-Analytics' },
+    { key: 'Project-Status', value: 'Active' },
+    { key: 'Data-Quality', value: 'Raw' },
+    { key: 'Technique', value: 'RWE / Claims-Analysis' },
+  ],
+  'proj-surgical-ai': [
+    { key: 'Therapeutic-Area', value: 'Surgery / Robotic-Assisted' },
+    { key: 'Clinical-Phase', value: 'Pre-Market' },
+    { key: 'Team', value: 'Medical-Device-AI' },
+    { key: 'Project-Status', value: 'Active' },
+    { key: 'Data-Quality', value: 'Curated' },
+    { key: 'Technique', value: 'Computer-Vision / Deep-Learning' },
+  ],
+  'proj-data-access': [
+    { key: 'Team', value: 'Data-Governance' },
+    { key: 'Project-Status', value: 'Active' },
+    { key: 'Data-Quality', value: 'Mixed' },
+  ],
+};
+
 // ── Bundles (Deliverables) ──────────────────────────────────────
 var MOCK_BUNDLES = [
   // ADaM deliverables — various states

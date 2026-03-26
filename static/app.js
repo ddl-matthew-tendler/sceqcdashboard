@@ -117,6 +117,18 @@ function findingStatusTag(status) {
   );
 }
 
+// Build Domino UI URL for a bundle
+function getDominoBundleUrl(bundle) {
+  var host = '';
+  try { host = window.location.origin; } catch(e) {}
+  // In Domino, the bundle URL pattern is: /u/{owner}/{project}/governance/bundle/{bundleId}/policy/{policyId}
+  if (bundle.projectOwner && bundle.projectName && bundle.id && bundle.policyId) {
+    return host + '/u/' + bundle.projectOwner + '/' + bundle.projectName +
+      '/governance/bundle/' + bundle.id + '/policy/' + bundle.policyId;
+  }
+  return null;
+}
+
 // Get the bundle's own stage names (from SCE QC)
 function getBundleStageNames(bundle) {
   if (!bundle.stages || bundle.stages.length === 0) return [];
@@ -193,6 +205,7 @@ function TopNav(props) {
 // ── Sidebar ─────────────────────────────────────────────────────
 var NAV_ITEMS = [
   { key: 'dashboard', icon: '\u25A3', label: 'Dashboard' },
+  { key: 'tracker', icon: '\u25C9', label: 'QC Tracker' },
   { key: 'milestones', icon: '\u2630', label: 'Milestones' },
   { key: 'approvals', icon: '\u2713', label: 'Approvals' },
   { key: 'findings', icon: '\u26A0', label: 'Findings & QC' },
@@ -218,7 +231,8 @@ function Sidebar(props) {
 
 // ── Stat Card ───────────────────────────────────────────────────
 function StatCard(props) {
-  return h('div', { className: 'stat-card' },
+  var cls = 'stat-card' + (props.onClick ? ' stat-card-clickable' : '') + (props.active ? ' stat-card-active' : '');
+  return h('div', { className: cls, onClick: props.onClick || null },
     h('div', { className: 'stat-card-label' }, props.label),
     h('div', { className: 'stat-card-value ' + (props.color || '') }, props.value),
     props.sub ? h('div', { className: 'stat-card-sub' }, props.sub) : null
@@ -245,8 +259,12 @@ function DashboardPage(props) {
   var loading = props.loading;
   var onSelectBundle = props.onSelectBundle;
   var terms = props.terms || DEFAULT_TERMS;
-  var B = terms.bundle;   // e.g. "Bundle" or "Deliverable"
-  var P = terms.policy;   // e.g. "Policy" or "QC Plan"
+  var B = terms.bundle;
+  var P = terms.policy;
+
+  var _tf = useState(null);
+  var tableFilter = _tf[0];
+  var setTableFilter = _tf[1];
 
   var stats = useMemo(function() {
     var total = bundles.length;
@@ -280,6 +298,21 @@ function DashboardPage(props) {
              totalFindings: totalFindings, openFindings: openFindings, avgProgress: avgProgress };
   }, [bundles]);
 
+  // Filtered bundles for table
+  var filteredBundles = useMemo(function() {
+    if (!tableFilter) return bundles;
+    if (tableFilter.type === 'state') return bundles.filter(function(b) { return b.state === tableFilter.value; });
+    if (tableFilter.type === 'openFindings') return bundles.filter(function(b) {
+      return b._findings && b._findings.some(function(f) { return f.status !== 'Done' && f.status !== 'WontDo'; });
+    });
+    if (tableFilter.type === 'stage') return bundles.filter(function(b) { return (b.stage || 'Unknown') === tableFilter.value; });
+    return bundles;
+  }, [bundles, tableFilter]);
+
+  var filterLabel = tableFilter
+    ? (tableFilter.type === 'state' ? tableFilter.value : tableFilter.type === 'openFindings' ? 'Open Findings' : 'Stage: ' + tableFilter.value)
+    : null;
+
   // Status chart
   useEffect(function() {
     if (bundles.length === 0) return;
@@ -289,7 +322,9 @@ function DashboardPage(props) {
       plotOptions: {
         pie: {
           innerSize: '55%',
+          cursor: 'pointer',
           dataLabels: { enabled: true, format: '{point.name}: {point.y}', style: { fontSize: '11px' } },
+          point: { events: { click: function() { setTableFilter({ type: 'state', value: this.name }); } } },
         },
       },
       series: [{
@@ -304,7 +339,7 @@ function DashboardPage(props) {
     });
   }, [bundles, stats]);
 
-  // Stage distribution chart — group bundles by their current stage name
+  // Stage distribution chart
   useEffect(function() {
     if (bundles.length === 0) return;
     var stageMap = {};
@@ -319,7 +354,7 @@ function DashboardPage(props) {
       title: { text: null },
       xAxis: { categories: stageNames, labels: { style: { fontSize: '11px' } } },
       yAxis: { title: { text: null }, allowDecimals: false },
-      plotOptions: { bar: { borderRadius: 3 } },
+      plotOptions: { bar: { borderRadius: 3, cursor: 'pointer', point: { events: { click: function() { setTableFilter({ type: 'stage', value: this.category }); } } } } },
       series: [{ name: B + 's', data: stageCounts, showInLegend: false }],
       credits: { enabled: false },
     });
@@ -369,10 +404,10 @@ function DashboardPage(props) {
 
     // Stat cards
     h('div', { className: 'stats-row' },
-      h(StatCard, { label: 'Total ' + B + 's', value: stats.total, color: 'primary' }),
-      h(StatCard, { label: 'Active', value: stats.active, color: 'info', sub: 'Currently in progress' }),
-      h(StatCard, { label: 'Complete', value: stats.complete, color: 'success' }),
-      h(StatCard, { label: 'Open Findings', value: stats.openFindings, color: stats.openFindings > 0 ? 'warning' : '', sub: stats.totalFindings + ' total findings' }),
+      h(StatCard, { label: 'Total ' + B + 's', value: stats.total, color: 'primary', active: !tableFilter, onClick: function() { setTableFilter(null); } }),
+      h(StatCard, { label: 'Active', value: stats.active, color: 'info', sub: 'Currently in progress', active: tableFilter && tableFilter.value === 'Active', onClick: function() { setTableFilter(tableFilter && tableFilter.value === 'Active' ? null : { type: 'state', value: 'Active' }); } }),
+      h(StatCard, { label: 'Complete', value: stats.complete, color: 'success', active: tableFilter && tableFilter.value === 'Complete', onClick: function() { setTableFilter(tableFilter && tableFilter.value === 'Complete' ? null : { type: 'state', value: 'Complete' }); } }),
+      h(StatCard, { label: 'Open Findings', value: stats.openFindings, color: stats.openFindings > 0 ? 'warning' : '', sub: stats.totalFindings + ' total findings', active: tableFilter && tableFilter.type === 'openFindings', onClick: function() { setTableFilter(tableFilter && tableFilter.type === 'openFindings' ? null : { type: 'openFindings' }); } }),
       h(StatCard, { label: 'Avg Progress', value: stats.avgProgress + '%', sub: 'Across active ' + B.toLowerCase() + 's' })
     ),
 
@@ -399,12 +434,15 @@ function DashboardPage(props) {
     // Table
     h('div', { className: 'panel' },
       h('div', { className: 'panel-header' },
-        h('span', { className: 'panel-title' }, 'All ' + B + 's'),
-        h('span', { style: { fontSize: 12, color: '#8F8FA3' } }, bundles.length + ' ' + B.toLowerCase() + 's')
+        h('span', { className: 'panel-title' }, filterLabel ? B + 's — ' + filterLabel : 'All ' + B + 's'),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+          filterLabel ? h(Tag, { closable: true, onClose: function() { setTableFilter(null); }, color: 'purple' }, filterLabel) : null,
+          h('span', { style: { fontSize: 12, color: '#8F8FA3' } }, filteredBundles.length + ' ' + B.toLowerCase() + 's')
+        )
       ),
       h('div', { className: 'panel-body-flush' },
         h(Table, {
-          dataSource: bundles,
+          dataSource: filteredBundles,
           columns: columns,
           rowKey: 'id',
           loading: loading,
@@ -438,14 +476,30 @@ function MilestonesPage(props) {
     h('div', { className: 'panel' },
       h('div', { className: 'panel-header' },
         h('span', { className: 'panel-title' }, 'Programming Milestones'),
-        h('span', { style: { fontSize: 12, color: '#8F8FA3' } }, activeBundles.length + ' active ' + B.toLowerCase() + 's')
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 16 } },
+          h('span', { style: { fontSize: 12, color: '#8F8FA3' } }, activeBundles.length + ' active ' + B.toLowerCase() + 's'),
+          // Color legend
+          h('div', { className: 'milestone-legend' },
+            h('span', { className: 'milestone-legend-item' },
+              h('span', { className: 'milestone-legend-swatch', style: { background: '#28A464' } }),
+              'Completed'
+            ),
+            h('span', { className: 'milestone-legend-item' },
+              h('span', { className: 'milestone-legend-swatch', style: { background: '#543FDE' } }),
+              'Current'
+            ),
+            h('span', { className: 'milestone-legend-item' },
+              h('span', { className: 'milestone-legend-swatch', style: { background: '#E0E0E0' } }),
+              'Pending'
+            )
+          )
+        )
       ),
       loading
         ? h('div', { className: 'loading-container' }, h(Spin, null))
         : activeBundles.length === 0
           ? h(EmptyState, { text: 'No active ' + B.toLowerCase() + 's', sub: B + 's will appear here once created in SCE QC' })
           : h('div', { className: 'panel-body-flush' },
-              // Each bundle row with its own stages
               activeBundles.map(function(bundle) {
                 var stageNames = getBundleStageNames(bundle);
                 var currentIdx = deriveBundleStageIndex(bundle);
@@ -459,10 +513,13 @@ function MilestonesPage(props) {
                       if (idx < currentIdx) cls += 'completed';
                       else if (idx === currentIdx) cls += 'current';
                       else cls += 'pending';
-                      // Shorten label: first 2 words
-                      var label = stage.split(' ').slice(0, 2).join(' ');
-                      return h('div', { key: stage, className: cls, title: stage },
-                        idx <= currentIdx ? label : ''
+                      // Shorten label to fit within bar
+                      var words = stage.split(' ');
+                      var label = words.length > 2 ? words.slice(0, 2).join(' ') : stage;
+                      return h(Tooltip, { key: stage, title: stage },
+                        h('div', { className: cls },
+                          idx <= currentIdx ? label : ''
+                        )
                       );
                     })
                   ),
@@ -538,6 +595,10 @@ function ApprovalsPage(props) {
   var B = terms.bundle;
   var P = terms.policy;
 
+  var _af = useState(null);
+  var approvalFilter = _af[0];
+  var setApprovalFilter = _af[1];
+
   // Flatten all approvals from all bundles
   var allApprovals = useMemo(function() {
     var result = [];
@@ -563,6 +624,24 @@ function ApprovalsPage(props) {
     return { pending: pending, approved: approved, conditional: conditional, review: review, total: allApprovals.length };
   }, [allApprovals]);
 
+  // Filtered approvals for table
+  var filteredApprovals = useMemo(function() {
+    if (!approvalFilter) return allApprovals;
+    return allApprovals.filter(function(a) {
+      var s = (a.status || '').toLowerCase().replace(/\s+/g, '');
+      if (approvalFilter === 'pending') return s !== 'approved' && s !== 'conditionallyapproved' && s !== 'pendingreview';
+      if (approvalFilter === 'review') return s === 'pendingreview';
+      if (approvalFilter === 'conditional') return s === 'conditionallyapproved';
+      if (approvalFilter === 'approved') return s === 'approved';
+      if (approvalFilter === 'pendingAll') return s !== 'approved' && s !== 'conditionallyapproved';
+      return true;
+    });
+  }, [allApprovals, approvalFilter]);
+
+  var approvalFilterLabel = approvalFilter === 'pending' ? 'Pending Submission' : approvalFilter === 'review' ? 'Pending Review' : approvalFilter === 'conditional' ? 'Conditionally Approved' : approvalFilter === 'approved' ? 'Approved' : approvalFilter === 'pendingAll' ? 'Pending' : null;
+
+  var chartFilterMap = { 'Pending Submission': 'pending', 'Pending Review': 'review', 'Conditionally Approved': 'conditional', 'Approved': 'approved' };
+
   // Approval funnel chart
   useEffect(function() {
     if (allApprovals.length === 0) return;
@@ -581,7 +660,7 @@ function ApprovalsPage(props) {
         ],
         showInLegend: false,
       }],
-      plotOptions: { column: { borderRadius: 4 } },
+      plotOptions: { column: { borderRadius: 4, cursor: 'pointer', point: { events: { click: function() { setApprovalFilter(chartFilterMap[this.category] || null); } } } } },
       credits: { enabled: false },
     });
   }, [allApprovals, approvalStats]);
@@ -621,10 +700,10 @@ function ApprovalsPage(props) {
     ),
 
     h('div', { className: 'stats-row' },
-      h(StatCard, { label: 'Total Approvals', value: approvalStats.total, color: 'primary' }),
-      h(StatCard, { label: 'Pending', value: approvalStats.pending + approvalStats.review, color: 'warning', sub: 'Awaiting action' }),
-      h(StatCard, { label: 'Approved', value: approvalStats.approved, color: 'success' }),
-      h(StatCard, { label: 'Conditional', value: approvalStats.conditional, color: 'info' })
+      h(StatCard, { label: 'Total Approvals', value: approvalStats.total, color: 'primary', active: !approvalFilter, onClick: function() { setApprovalFilter(null); } }),
+      h(StatCard, { label: 'Pending', value: approvalStats.pending + approvalStats.review, color: 'warning', sub: 'Awaiting action', active: approvalFilter === 'pendingAll', onClick: function() { setApprovalFilter(approvalFilter === 'pendingAll' ? null : 'pendingAll'); } }),
+      h(StatCard, { label: 'Approved', value: approvalStats.approved, color: 'success', active: approvalFilter === 'approved', onClick: function() { setApprovalFilter(approvalFilter === 'approved' ? null : 'approved'); } }),
+      h(StatCard, { label: 'Conditional', value: approvalStats.conditional, color: 'info', active: approvalFilter === 'conditional', onClick: function() { setApprovalFilter(approvalFilter === 'conditional' ? null : 'conditional'); } })
     ),
 
     h('div', { className: 'panel' },
@@ -638,12 +717,15 @@ function ApprovalsPage(props) {
 
     h('div', { className: 'panel' },
       h('div', { className: 'panel-header' },
-        h('span', { className: 'panel-title' }, 'All Approvals'),
-        h('span', { style: { fontSize: 12, color: '#8F8FA3' } }, allApprovals.length + ' total')
+        h('span', { className: 'panel-title' }, approvalFilterLabel ? 'Approvals — ' + approvalFilterLabel : 'All Approvals'),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+          approvalFilterLabel ? h(Tag, { closable: true, onClose: function() { setApprovalFilter(null); }, color: 'purple' }, approvalFilterLabel) : null,
+          h('span', { style: { fontSize: 12, color: '#8F8FA3' } }, filteredApprovals.length + ' total')
+        )
       ),
       h('div', { className: 'panel-body-flush' },
         h(Table, {
-          dataSource: allApprovals,
+          dataSource: filteredApprovals,
           columns: columns,
           rowKey: function(r) { return r.id || (r._bundleId + '-' + r.name); },
           loading: loading,
@@ -664,6 +746,10 @@ function FindingsPage(props) {
   var loading = props.loading;
   var terms = props.terms || DEFAULT_TERMS;
   var B = terms.bundle;
+
+  var _ff = useState(null);
+  var findingFilter = _ff[0];
+  var setFindingFilter = _ff[1];
 
   var allFindings = useMemo(function() {
     var result = [];
@@ -689,6 +775,24 @@ function FindingsPage(props) {
     return { bySev: bySev, byStatus: byStatus, open: open, total: allFindings.length };
   }, [allFindings]);
 
+  // Filtered findings for table
+  var filteredFindings = useMemo(function() {
+    if (!findingFilter) return allFindings;
+    if (findingFilter.type === 'severity') return allFindings.filter(function(f) { return f.severity === findingFilter.value; });
+    if (findingFilter.type === 'status') return allFindings.filter(function(f) { return f.status === findingFilter.value; });
+    if (findingFilter.type === 'open') return allFindings.filter(function(f) { return f.status !== 'Done' && f.status !== 'WontDo'; });
+    if (findingFilter.type === 'critical') return allFindings.filter(function(f) { return f.severity === 'S0'; });
+    if (findingFilter.type === 'resolved') return allFindings.filter(function(f) { return f.status === 'Done'; });
+    return allFindings;
+  }, [allFindings, findingFilter]);
+
+  var findingFilterLabel = findingFilter
+    ? (findingFilter.type === 'severity' ? findingFilter.value : findingFilter.type === 'status' ? findingFilter.value : findingFilter.type === 'open' ? 'Open' : findingFilter.type === 'critical' ? 'Critical (S0)' : findingFilter.type === 'resolved' ? 'Resolved' : null)
+    : null;
+
+  var sevChartMap = { 'S0 - Critical': 'S0', 'S1 - High': 'S1', 'S2 - Medium': 'S2', 'S3 - Low': 'S3' };
+  var statusChartMap = { 'To Do': 'ToDo', 'In Progress': 'InProgress', 'In Review': 'InReview', 'Done': 'Done', "Won't Do": 'WontDo' };
+
   // Severity chart
   useEffect(function() {
     if (allFindings.length === 0) return;
@@ -705,7 +809,7 @@ function FindingsPage(props) {
           { name: 'S3 - Low', y: findingStats.bySev.S3, color: '#0070CC' },
         ].filter(function(d) { return d.y > 0; }),
       }],
-      plotOptions: { pie: { dataLabels: { format: '{point.name}: {point.y}', style: { fontSize: '11px' } } } },
+      plotOptions: { pie: { cursor: 'pointer', dataLabels: { format: '{point.name}: {point.y}', style: { fontSize: '11px' } }, point: { events: { click: function() { setFindingFilter({ type: 'severity', value: sevChartMap[this.name] || this.name }); } } } } },
       credits: { enabled: false },
     });
   }, [allFindings, findingStats]);
@@ -729,7 +833,7 @@ function FindingsPage(props) {
         ],
         showInLegend: false,
       }],
-      plotOptions: { column: { borderRadius: 4 } },
+      plotOptions: { column: { borderRadius: 4, cursor: 'pointer', point: { events: { click: function() { setFindingFilter({ type: 'status', value: statusChartMap[this.category] || this.category }); } } } } },
       credits: { enabled: false },
     });
   }, [allFindings, findingStats]);
@@ -767,10 +871,10 @@ function FindingsPage(props) {
     ),
 
     h('div', { className: 'stats-row' },
-      h(StatCard, { label: 'Total Findings', value: findingStats.total, color: 'primary' }),
-      h(StatCard, { label: 'Open', value: findingStats.open, color: findingStats.open > 0 ? 'warning' : 'success' }),
-      h(StatCard, { label: 'Critical (S0)', value: findingStats.bySev.S0, color: findingStats.bySev.S0 > 0 ? 'danger' : '' }),
-      h(StatCard, { label: 'Resolved', value: findingStats.byStatus.Done, color: 'success' })
+      h(StatCard, { label: 'Total Findings', value: findingStats.total, color: 'primary', active: !findingFilter, onClick: function() { setFindingFilter(null); } }),
+      h(StatCard, { label: 'Open', value: findingStats.open, color: findingStats.open > 0 ? 'warning' : 'success', active: findingFilter && findingFilter.type === 'open', onClick: function() { setFindingFilter(findingFilter && findingFilter.type === 'open' ? null : { type: 'open' }); } }),
+      h(StatCard, { label: 'Critical (S0)', value: findingStats.bySev.S0, color: findingStats.bySev.S0 > 0 ? 'danger' : '', active: findingFilter && findingFilter.type === 'critical', onClick: function() { setFindingFilter(findingFilter && findingFilter.type === 'critical' ? null : { type: 'critical' }); } }),
+      h(StatCard, { label: 'Resolved', value: findingStats.byStatus.Done, color: 'success', active: findingFilter && findingFilter.type === 'resolved', onClick: function() { setFindingFilter(findingFilter && findingFilter.type === 'resolved' ? null : { type: 'resolved' }); } })
     ),
 
     h('div', { className: 'two-col' },
@@ -794,12 +898,15 @@ function FindingsPage(props) {
 
     h('div', { className: 'panel' },
       h('div', { className: 'panel-header' },
-        h('span', { className: 'panel-title' }, 'All Findings'),
-        h('span', { style: { fontSize: 12, color: '#8F8FA3' } }, allFindings.length + ' total')
+        h('span', { className: 'panel-title' }, findingFilterLabel ? 'Findings — ' + findingFilterLabel : 'All Findings'),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+          findingFilterLabel ? h(Tag, { closable: true, onClose: function() { setFindingFilter(null); }, color: 'purple' }, findingFilterLabel) : null,
+          h('span', { style: { fontSize: 12, color: '#8F8FA3' } }, filteredFindings.length + ' total')
+        )
       ),
       h('div', { className: 'panel-body-flush' },
         h(Table, {
-          dataSource: allFindings,
+          dataSource: filteredFindings,
           columns: columns,
           rowKey: function(r) { return r.id || (r._bundleName + '-' + r.name); },
           loading: loading,
@@ -820,6 +927,10 @@ function MetricsPage(props) {
   var terms = props.terms || DEFAULT_TERMS;
   var B = terms.bundle;
   var P = terms.policy;
+
+  var _mf = useState(null);
+  var metricsFilter = _mf[0];
+  var setMetricsFilter = _mf[1];
 
   var metrics = useMemo(function() {
     var activeBundles = bundles.filter(function(b) { return b.state === 'Active'; });
@@ -866,6 +977,23 @@ function MetricsPage(props) {
     };
   }, [bundles]);
 
+  // Filtered bundles for detail table
+  var filteredMetricsBundles = useMemo(function() {
+    if (!metricsFilter) return bundles;
+    if (metricsFilter.type === 'active') return bundles.filter(function(b) { return b.state === 'Active'; });
+    if (metricsFilter.type === 'complete') return bundles.filter(function(b) { return b.state === 'Complete'; });
+    if (metricsFilter.type === 'policy') return bundles.filter(function(b) { return (b.policyName || 'Unassigned') === metricsFilter.value; });
+    if (metricsFilter.type === 'assignee') return bundles.filter(function(b) {
+      var name = (b.stageAssignee && b.stageAssignee.name) ? b.stageAssignee.name : 'Unassigned';
+      return name === metricsFilter.value;
+    });
+    return bundles;
+  }, [bundles, metricsFilter]);
+
+  var metricsFilterLabel = metricsFilter
+    ? (metricsFilter.type === 'active' ? 'Active' : metricsFilter.type === 'complete' ? 'Completed' : metricsFilter.type === 'policy' ? P + ': ' + metricsFilter.value : metricsFilter.type === 'assignee' ? 'Assignee: ' + metricsFilter.value : null)
+    : null;
+
   // Policy breakdown chart
   useEffect(function() {
     var groups = metrics.policyGroups;
@@ -876,7 +1004,7 @@ function MetricsPage(props) {
       title: { text: null },
       xAxis: { categories: names, labels: { style: { fontSize: '11px' } } },
       yAxis: { title: { text: B + 's' }, allowDecimals: false, stackLabels: { enabled: true } },
-      plotOptions: { series: { stacking: 'normal', borderRadius: 2 } },
+      plotOptions: { series: { stacking: 'normal', borderRadius: 2, cursor: 'pointer', point: { events: { click: function() { setMetricsFilter({ type: 'policy', value: this.category }); } } } } },
       series: [
         { name: 'Active', data: names.map(function(n) { return groups[n].active; }), color: '#543FDE' },
         { name: 'Complete', data: names.map(function(n) { return groups[n].complete; }), color: '#28A464' },
@@ -897,7 +1025,7 @@ function MetricsPage(props) {
       xAxis: { categories: names, labels: { style: { fontSize: '11px' } } },
       yAxis: { title: { text: 'Assigned ' + B + 's' }, allowDecimals: false },
       series: [{ name: B + 's', data: names.map(function(n) { return assignees[n]; }), showInLegend: false }],
-      plotOptions: { bar: { borderRadius: 3 } },
+      plotOptions: { bar: { borderRadius: 3, cursor: 'pointer', point: { events: { click: function() { setMetricsFilter({ type: 'assignee', value: this.category }); } } } } },
       credits: { enabled: false },
     });
   }, [metrics]);
@@ -912,7 +1040,7 @@ function MetricsPage(props) {
       title: { text: null },
       xAxis: { categories: names, labels: { style: { fontSize: '11px' } } },
       yAxis: { title: { text: 'Findings' }, allowDecimals: false, stackLabels: { enabled: true } },
-      plotOptions: { series: { stacking: 'normal', borderRadius: 2 } },
+      plotOptions: { series: { stacking: 'normal', borderRadius: 2, cursor: 'pointer', point: { events: { click: function() { setMetricsFilter({ type: 'assignee', value: this.category }); } } } } },
       series: [
         { name: 'Open', data: names.map(function(n) { return fba[n].open; }), color: '#FF6543' },
         { name: 'Resolved', data: names.map(function(n) { return fba[n].resolved; }), color: '#28A464' },
@@ -928,8 +1056,8 @@ function MetricsPage(props) {
     ),
 
     h('div', { className: 'stats-row' },
-      h(StatCard, { label: 'Active ' + B + 's', value: metrics.active, color: 'primary' }),
-      h(StatCard, { label: 'Completed', value: metrics.complete, color: 'success' }),
+      h(StatCard, { label: 'Active ' + B + 's', value: metrics.active, color: 'primary', active: metricsFilter && metricsFilter.type === 'active', onClick: function() { setMetricsFilter(metricsFilter && metricsFilter.type === 'active' ? null : { type: 'active' }); } }),
+      h(StatCard, { label: 'Completed', value: metrics.complete, color: 'success', active: metricsFilter && metricsFilter.type === 'complete', onClick: function() { setMetricsFilter(metricsFilter && metricsFilter.type === 'complete' ? null : { type: 'complete' }); } }),
       h(StatCard, { label: 'Completion Rate', value: metrics.completionRate + '%', color: metrics.completionRate >= 50 ? 'success' : 'warning' }),
       h(StatCard, { label: P + 's In Use', value: Object.keys(metrics.policyGroups).length })
     ),
@@ -960,6 +1088,608 @@ function MetricsPage(props) {
             : h(EmptyState, { text: 'No findings data' })
         )
       )
+    ),
+
+    // Detail table (shown when a filter is active)
+    metricsFilter ? h('div', { className: 'panel', style: { marginTop: 20 } },
+      h('div', { className: 'panel-header' },
+        h('span', { className: 'panel-title' }, B + 's — ' + metricsFilterLabel),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+          h(Tag, { closable: true, onClose: function() { setMetricsFilter(null); }, color: 'purple' }, metricsFilterLabel),
+          h('span', { style: { fontSize: 12, color: '#8F8FA3' } }, filteredMetricsBundles.length + ' ' + B.toLowerCase() + 's')
+        )
+      ),
+      h('div', { className: 'panel-body-flush' },
+        h(Table, {
+          dataSource: filteredMetricsBundles,
+          columns: [
+            { title: B, dataIndex: 'name', key: 'name', render: function(t) { return h('span', { style: { fontWeight: 500 } }, t); } },
+            { title: 'Project', dataIndex: 'projectName', key: 'project', render: function(t) { return h('span', { style: { color: '#65657B', fontSize: 12 } }, t || '\u2014'); } },
+            { title: P, dataIndex: 'policyName', key: 'policy', render: function(t) { return h(Tag, null, t || '\u2014'); } },
+            { title: 'Stage', dataIndex: 'stage', key: 'stage', render: function(t) { return h('span', { style: { fontSize: 12 } }, t || '\u2014'); } },
+            { title: 'Assignee', key: 'assignee', render: function(_, r) { return (r.stageAssignee && r.stageAssignee.name) || '\u2014'; } },
+            { title: 'State', dataIndex: 'state', key: 'state', render: function(s) { return h(Tag, { color: stateColor(s) }, s); } },
+          ],
+          rowKey: 'id',
+          pagination: { pageSize: 10, size: 'small' },
+          size: 'small',
+        })
+      )
+    ) : null
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+//  COMPONENT: Stage Pipeline (inline SVG dots)
+// ═══════════════════════════════════════════════════════════════
+function StagePipeline(props) {
+  var bundle = props.bundle;
+  var stageNames = getBundleStageNames(bundle);
+  if (stageNames.length === 0) return h('span', { style: { color: '#8F8FA3', fontSize: 12 } }, 'No stages');
+  var currentIdx = deriveBundleStageIndex(bundle);
+  var isComplete = bundle.state === 'Complete';
+  var hasOpenFindings = bundle._findings && bundle._findings.some(function(f) {
+    return f.status !== 'Done' && f.status !== 'WontDo';
+  });
+
+  var dotR = 6;
+  var gap = 8;
+  var step = dotR * 2 + gap;
+  var svgW = stageNames.length * dotR * 2 + (stageNames.length - 1) * gap;
+  var svgH = dotR * 2 + 4;
+
+  var elements = [];
+
+  // Connector lines
+  for (var i = 0; i < stageNames.length - 1; i++) {
+    var x1 = dotR + i * step + dotR;
+    var x2 = x1 + gap;
+    var isBeforeCurrent = i < currentIdx || isComplete;
+    var isAtCurrent = i === currentIdx - 1;
+    var lineColor = (isComplete || i < currentIdx) ? '#28A464' : '#D1D1DB';
+    var dashArray = (isComplete || i < currentIdx) ? 'none' : '3,2';
+    elements.push(h('line', {
+      key: 'line-' + i,
+      x1: x1, y1: svgH / 2, x2: x2, y2: svgH / 2,
+      stroke: lineColor, strokeWidth: 2, strokeDasharray: dashArray
+    }));
+  }
+
+  // Dots
+  for (var j = 0; j < stageNames.length; j++) {
+    var cx = dotR + j * step;
+    var cy = svgH / 2;
+    var dotState;
+    if (isComplete || j < currentIdx) dotState = 'completed';
+    else if (j === currentIdx) dotState = hasOpenFindings ? 'blocked' : 'active';
+    else dotState = 'pending';
+
+    var fill, stroke, strokeW, className;
+    if (dotState === 'completed') { fill = '#28A464'; stroke = 'none'; strokeW = 0; className = ''; }
+    else if (dotState === 'active') { fill = '#F59E0B'; stroke = 'none'; strokeW = 0; className = 'stage-dot-pulse'; }
+    else if (dotState === 'blocked') { fill = '#C20A29'; stroke = 'none'; strokeW = 0; className = 'stage-dot-pulse'; }
+    else { fill = 'transparent'; stroke = '#D1D1DB'; strokeW = 2; className = ''; }
+
+    var assignee = bundle.stages[j] && bundle.stages[j].assignee;
+    var assigneeName = assignee ? assignee.name : 'Unassigned';
+    var statusText = dotState === 'completed' ? 'Completed' : dotState === 'active' ? 'In Progress' : dotState === 'blocked' ? 'Open Finding' : 'Pending';
+    var tipText = stageNames[j] + '\n' + assigneeName + ' \u2022 ' + statusText;
+
+    elements.push(
+      h(Tooltip, { key: 'dot-' + j, title: tipText },
+        h('circle', {
+          cx: cx, cy: cy, r: dotR - (strokeW ? 1 : 0),
+          fill: fill, stroke: stroke, strokeWidth: strokeW,
+          className: className,
+          style: { cursor: 'pointer' }
+        })
+      )
+    );
+  }
+
+  return h('svg', {
+    width: svgW, height: svgH,
+    className: 'stage-pipeline',
+    style: { verticalAlign: 'middle' }
+  }, elements);
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+//  COMPONENT: Status Flags (3 data-driven indicators)
+// ═══════════════════════════════════════════════════════════════
+function StatusFlags(props) {
+  var bundle = props.bundle;
+
+  var openFindings = bundle._findings ? bundle._findings.filter(function(f) {
+    return f.status !== 'Done' && f.status !== 'WontDo';
+  }).length : 0;
+
+  var isUnassigned = !bundle.stageAssignee || !bundle.stageAssignee.name;
+
+  var allApproved = bundle._approvals && bundle._approvals.length > 0 &&
+    bundle._approvals.every(function(a) { return a.status === 'Approved'; });
+
+  var flags = [];
+
+  if (openFindings > 0) {
+    flags.push(h(Tooltip, { key: 'findings', title: openFindings + ' open finding' + (openFindings > 1 ? 's' : '') },
+      h('span', { className: 'status-flag open-findings' }, '\u26A0 ' + openFindings)
+    ));
+  }
+
+  if (isUnassigned) {
+    flags.push(h(Tooltip, { key: 'unassigned', title: 'No assignee on current stage' },
+      h('span', { className: 'status-flag unassigned' }, '\u2205')
+    ));
+  }
+
+  if (allApproved) {
+    flags.push(h(Tooltip, { key: 'approved', title: 'All approvals approved' },
+      h('span', { className: 'status-flag approved' }, '\u2713')
+    ));
+  }
+
+  if (flags.length === 0) {
+    return h('span', { style: { color: '#D1D1DB', fontSize: 12 } }, '\u2014');
+  }
+
+  return h('div', { className: 'status-flags-row' }, flags);
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+//  COMPONENT: QC Tracker Expanded Row
+// ═══════════════════════════════════════════════════════════════
+function QCTrackerExpandedRow(props) {
+  var bundle = props.bundle;
+  var terms = props.terms || DEFAULT_TERMS;
+  var B = terms.bundle;
+  var P = terms.policy;
+  var stageNames = getBundleStageNames(bundle);
+  var currentIdx = deriveBundleStageIndex(bundle);
+  var isComplete = bundle.state === 'Complete';
+
+  var dominoUrl = getDominoBundleUrl(bundle);
+
+  return h('div', { className: 'tracker-expanded' },
+    // Left column: stage timeline
+    h('div', { className: 'tracker-expanded-left' },
+      h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 } },
+        h('div', { className: 'tracker-section-title', style: { marginBottom: 0 } }, 'Stage Timeline'),
+        dominoUrl
+          ? h(Button, {
+              type: 'primary', size: 'small',
+              onClick: function() { window.open(dominoUrl, '_blank'); },
+              style: { fontSize: 11 },
+            }, '\u2197 Open in Domino')
+          : null
+      ),
+      stageNames.map(function(name, idx) {
+        var dotState;
+        if (isComplete || idx < currentIdx) dotState = 'completed';
+        else if (idx === currentIdx) dotState = 'active';
+        else dotState = 'pending';
+
+        var stageData = bundle.stages[idx] || {};
+        var assignee = stageData.assignee;
+        var assigneeName = assignee ? assignee.name : null;
+
+        return h('div', { key: idx, className: 'tracker-timeline-item' },
+          h('div', { className: 'tracker-timeline-dot ' + dotState }),
+          idx < stageNames.length - 1
+            ? h('div', { className: 'tracker-timeline-line ' + dotState })
+            : null,
+          h('div', { className: 'tracker-timeline-content' },
+            h('div', { className: 'tracker-timeline-name' + (dotState === 'active' ? ' active' : '') }, name),
+            h('div', { className: 'tracker-timeline-meta' },
+              assigneeName
+                ? h('span', null, assigneeName)
+                : h('span', { className: 'tracker-unassigned' }, 'Unassigned'),
+              h('span', { className: 'tracker-stage-badge ' + dotState },
+                dotState === 'completed' ? 'Done' : dotState === 'active' ? 'Current' : 'Pending'
+              )
+            )
+          )
+        );
+      })
+    ),
+    // Right column: findings + approvals
+    h('div', { className: 'tracker-expanded-right' },
+      // Findings
+      bundle._findings && bundle._findings.length > 0
+        ? h('div', null,
+            h('div', { className: 'tracker-section-title' }, 'Findings (' + bundle._findings.length + ')'),
+            bundle._findings.slice(0, 5).map(function(f, i) {
+              return h('div', { key: i, className: 'tracker-finding-row' },
+                h(Tag, { color: severityColor(f.severity), style: { color: '#fff', border: 'none', minWidth: 28, textAlign: 'center', fontSize: 11 } }, f.severity),
+                h('span', { className: 'tracker-finding-name' }, f.name),
+                findingStatusTag(f.status)
+              );
+            }),
+            bundle._findings.length > 5
+              ? h('div', { style: { fontSize: 12, color: '#8F8FA3', padding: '4px 0' } }, '+ ' + (bundle._findings.length - 5) + ' more')
+              : null
+          )
+        : h('div', null,
+            h('div', { className: 'tracker-section-title' }, 'Findings'),
+            h('div', { style: { color: '#8F8FA3', fontSize: 12 } }, 'No findings')
+          ),
+
+      // Approvals
+      bundle._approvals && bundle._approvals.length > 0
+        ? h('div', { style: { marginTop: 16 } },
+            h('div', { className: 'tracker-section-title' }, 'Approvals (' + bundle._approvals.length + ')'),
+            bundle._approvals.map(function(a, i) {
+              return h('div', { key: i, className: 'tracker-approval-row' },
+                h('span', { className: 'tracker-approval-dot', style: { background: approvalStatusColor(a.status) } }),
+                h('span', { className: 'tracker-approval-name' }, a.name),
+                h('span', { className: 'tracker-approval-status' }, approvalStatusLabel(a.status))
+              );
+            })
+          )
+        : null,
+
+      // Gates
+      bundle._gates && bundle._gates.length > 0
+        ? h('div', { style: { marginTop: 16 } },
+            h('div', { className: 'tracker-section-title' }, 'Gates (' + bundle._gates.length + ')'),
+            bundle._gates.map(function(g, i) {
+              return h('div', { key: i, className: 'tracker-approval-row' },
+                h(Tag, { color: g.isOpen ? 'success' : 'error', style: { fontSize: 11 } }, g.isOpen ? 'Open' : 'Closed'),
+                h('span', { className: 'tracker-approval-name' }, g.name)
+              );
+            })
+          )
+        : null
+    )
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+//  COMPONENT: Bulk Action Bar
+// ═══════════════════════════════════════════════════════════════
+function BulkActionBar(props) {
+  var count = props.count;
+  var onClear = props.onClear;
+  var terms = props.terms || DEFAULT_TERMS;
+  var B = terms.bundle;
+
+  if (count === 0) return null;
+
+  return h('div', { className: 'bulk-action-bar' },
+    h('span', { className: 'bulk-action-count' }, count + ' ' + B.toLowerCase() + (count > 1 ? 's' : '') + ' selected'),
+    h(Button, { size: 'small', type: 'link', onClick: onClear }, 'Clear Selection')
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+//  PAGE: QC Tracker
+// ═══════════════════════════════════════════════════════════════
+function QCTrackerPage(props) {
+  var bundles = props.bundles;
+  var loading = props.loading;
+  var terms = props.terms || DEFAULT_TERMS;
+  var onSelectBundle = props.onSelectBundle;
+  var B = terms.bundle;
+  var P = terms.policy;
+
+  // Filter state
+  var _fs1 = useState(''); var searchText = _fs1[0]; var setSearchText = _fs1[1];
+  var _fs2 = useState([]); var filterPolicies = _fs2[0]; var setFilterPolicies = _fs2[1];
+  var _fs3 = useState(null); var filterState = _fs3[0]; var setFilterState = _fs3[1];
+  var _fs4 = useState(null); var filterAssignee = _fs4[0]; var setFilterAssignee = _fs4[1];
+  var _fs5 = useState([]); var filterFlags = _fs5[0]; var setFilterFlags = _fs5[1];
+  var _fs6 = useState([]); var selectedRowKeys = _fs6[0]; var setSelectedRowKeys = _fs6[1];
+  var _fs7 = useState([]); var expandedRowKeys = _fs7[0]; var setExpandedRowKeys = _fs7[1];
+  var _fs8 = useState([]); var filterProjects = _fs8[0]; var setFilterProjects = _fs8[1];
+  var _fs9 = useState([]); var filterTags = _fs9[0]; var setFilterTags = _fs9[1];
+
+  // Derive filter options from data
+  var policyOptions = useMemo(function() {
+    var names = {};
+    bundles.forEach(function(b) { if (b.policyName) names[b.policyName] = true; });
+    return Object.keys(names).sort();
+  }, [bundles]);
+
+  var assigneeOptions = useMemo(function() {
+    var names = {};
+    bundles.forEach(function(b) {
+      if (b.stageAssignee && b.stageAssignee.name) names[b.stageAssignee.name] = true;
+    });
+    return Object.keys(names).sort();
+  }, [bundles]);
+
+  var projectOptions = useMemo(function() {
+    var names = {};
+    bundles.forEach(function(b) { if (b.projectName) names[b.projectName] = true; });
+    return Object.keys(names).sort();
+  }, [bundles]);
+
+  var tagOptions = useMemo(function() {
+    var tags = {};
+    if (typeof MOCK_PROJECT_TAGS === 'undefined') return [];
+    bundles.forEach(function(b) {
+      var pTags = MOCK_PROJECT_TAGS[b.projectId] || [];
+      pTags.forEach(function(t) {
+        var label = t.key + ': ' + t.value;
+        tags[label] = true;
+      });
+    });
+    return Object.keys(tags).sort();
+  }, [bundles]);
+
+  // Unique stage names for column filter
+  var allStageNames = useMemo(function() {
+    var names = {};
+    bundles.forEach(function(b) { if (b.stage) names[b.stage] = true; });
+    return Object.keys(names).sort();
+  }, [bundles]);
+
+  // Apply filters
+  var filtered = useMemo(function() {
+    return bundles.filter(function(b) {
+      if (searchText && b.name.toLowerCase().indexOf(searchText.toLowerCase()) < 0) return false;
+      if (filterPolicies.length > 0 && filterPolicies.indexOf(b.policyName) < 0) return false;
+      if (filterProjects.length > 0 && filterProjects.indexOf(b.projectName) < 0) return false;
+      if (filterState && b.state !== filterState) return false;
+      if (filterAssignee) {
+        var name = b.stageAssignee && b.stageAssignee.name;
+        if (filterAssignee === '__unassigned__') { if (name) return false; }
+        else { if (name !== filterAssignee) return false; }
+      }
+      if (filterFlags.indexOf('open_findings') >= 0) {
+        var hasOpen = b._findings && b._findings.some(function(f) { return f.status !== 'Done' && f.status !== 'WontDo'; });
+        if (!hasOpen) return false;
+      }
+      if (filterFlags.indexOf('unassigned') >= 0) {
+        if (b.stageAssignee && b.stageAssignee.name) return false;
+      }
+      // Tag filter
+      if (filterTags.length > 0 && typeof MOCK_PROJECT_TAGS !== 'undefined') {
+        var pTags = MOCK_PROJECT_TAGS[b.projectId] || [];
+        var tagLabels = pTags.map(function(t) { return t.key + ': ' + t.value; });
+        var matchesTag = filterTags.some(function(ft) { return tagLabels.indexOf(ft) >= 0; });
+        if (!matchesTag) return false;
+      }
+      return true;
+    });
+  }, [bundles, searchText, filterPolicies, filterProjects, filterState, filterAssignee, filterFlags, filterTags]);
+
+  // Stats (computed from filtered, not all bundles)
+  var stats = useMemo(function() {
+    var openFindings = 0; var unassigned = 0; var complete = 0;
+    filtered.forEach(function(b) {
+      if (b.state === 'Complete') complete++;
+      if (!b.stageAssignee || !b.stageAssignee.name) unassigned++;
+      if (b._findings && b._findings.some(function(f) { return f.status !== 'Done' && f.status !== 'WontDo'; })) openFindings++;
+    });
+    return { total: filtered.length, openFindings: openFindings, unassigned: unassigned, complete: complete, active: filtered.length - complete };
+  }, [filtered]);
+
+  var activeFilterCount = (searchText ? 1 : 0) + (filterPolicies.length > 0 ? 1 : 0) + (filterProjects.length > 0 ? 1 : 0) + (filterState ? 1 : 0) + (filterAssignee ? 1 : 0) + filterFlags.length + (filterTags.length > 0 ? 1 : 0);
+
+  function clearFilters() {
+    setSearchText(''); setFilterPolicies([]); setFilterProjects([]); setFilterState(null); setFilterAssignee(null); setFilterFlags([]); setFilterTags([]);
+  }
+
+  // Clickable stat cards — set a filter when clicked
+  function handleStatClick(type) {
+    clearFilters();
+    if (type === 'active') setFilterState('Active');
+    else if (type === 'openFindings') setFilterFlags(['open_findings']);
+    else if (type === 'unassigned') setFilterFlags(['unassigned']);
+    else if (type === 'complete') setFilterState('Complete');
+    // 'total' clears filters (already done above)
+  }
+
+  // Excel-like column filters + sorters
+  var columns = [
+    {
+      title: B, dataIndex: 'name', key: 'name', width: 140, fixed: 'left',
+      sorter: function(a, b) { return a.name.localeCompare(b.name); },
+      render: function(name, record) {
+        return h('a', {
+          style: { fontWeight: 600, color: '#543FDE', fontSize: 12 },
+          onClick: function(e) { e.stopPropagation(); if (onSelectBundle) onSelectBundle(record); }
+        }, name);
+      }
+    },
+    { title: 'Project', dataIndex: 'projectName', key: 'project', width: 130,
+      filters: projectOptions.map(function(p) { return { text: p, value: p }; }),
+      onFilter: function(v, r) { return r.projectName === v; },
+      sorter: function(a, b) { return (a.projectName || '').localeCompare(b.projectName || ''); },
+      render: function(t) { return h('span', { style: { fontSize: 12 } }, t || '\u2014'); } },
+    { title: P, dataIndex: 'policyName', key: 'policy', width: 150, ellipsis: true,
+      filters: policyOptions.map(function(p) { return { text: p, value: p }; }),
+      onFilter: function(v, r) { return r.policyName === v; },
+      render: function(t) { return t ? h(Tag, { style: { fontSize: 10 } }, t) : '\u2014'; } },
+    { title: 'Progress', key: 'progress', width: 130,
+      sorter: function(a, b) { return getBundleProgress(a) - getBundleProgress(b); },
+      render: function(_, record) { return h(StagePipeline, { bundle: record }); } },
+    { title: 'Stage', dataIndex: 'stage', key: 'stage', width: 130, ellipsis: true,
+      filters: allStageNames.map(function(s) { return { text: s, value: s }; }),
+      onFilter: function(v, r) { return r.stage === v; },
+      sorter: function(a, b) { return (a.stage || '').localeCompare(b.stage || ''); },
+      render: function(t) { return h('span', { style: { fontSize: 12 } }, t || '\u2014'); } },
+    { title: 'Assignee', key: 'assignee', width: 100,
+      filters: [{ text: 'Unassigned', value: '__unassigned__' }].concat(
+        assigneeOptions.map(function(n) { return { text: n, value: n }; })
+      ),
+      onFilter: function(v, r) {
+        var name = r.stageAssignee && r.stageAssignee.name;
+        return v === '__unassigned__' ? !name : name === v;
+      },
+      sorter: function(a, b) {
+        var an = (a.stageAssignee && a.stageAssignee.name) || '';
+        var bn = (b.stageAssignee && b.stageAssignee.name) || '';
+        return an.localeCompare(bn);
+      },
+      render: function(_, record) {
+        var name = record.stageAssignee && record.stageAssignee.name;
+        return name
+          ? h('span', { style: { fontSize: 12 } }, name)
+          : h('span', { style: { color: '#F59E0B', fontSize: 11, fontWeight: 500 } }, 'Unassigned');
+      }
+    },
+    { title: 'State', dataIndex: 'state', key: 'state', width: 80,
+      filters: [
+        { text: 'Active', value: 'Active' },
+        { text: 'Complete', value: 'Complete' },
+        { text: 'Archived', value: 'Archived' },
+      ],
+      onFilter: function(v, r) { return r.state === v; },
+      render: function(s) { return h(Tag, { color: stateColor(s), style: { fontSize: 11 } }, s); } },
+    { title: 'Flags', key: 'flags', width: 70,
+      filters: [
+        { text: 'Open Findings', value: 'open_findings' },
+        { text: 'Unassigned', value: 'unassigned' },
+        { text: 'Approved', value: 'approved' },
+      ],
+      onFilter: function(v, r) {
+        if (v === 'open_findings') return r._findings && r._findings.some(function(f) { return f.status !== 'Done' && f.status !== 'WontDo'; });
+        if (v === 'unassigned') return !r.stageAssignee || !r.stageAssignee.name;
+        if (v === 'approved') return r._approvals && r._approvals.length > 0 && r._approvals.every(function(a) { return a.status === 'Approved'; });
+        return true;
+      },
+      render: function(_, record) { return h(StatusFlags, { bundle: record }); } },
+  ];
+
+  return h('div', null,
+    h('div', { className: 'page-header' },
+      h('h1', null, 'QC Tracker'),
+      h('p', null, 'Track all ' + B.toLowerCase() + 's across projects and ' + P.toLowerCase() + 's')
+    ),
+
+    // Global filters: Project + Tags
+    h('div', { className: 'global-filter-bar' },
+      h('span', { className: 'global-filter-label' }, 'Scope:'),
+      h(Select, {
+        mode: 'multiple', placeholder: 'All Projects',
+        value: filterProjects, onChange: setFilterProjects,
+        allowClear: true, maxTagCount: 2,
+        style: { minWidth: 220 },
+        size: 'small',
+        options: projectOptions.map(function(p) { return { label: p, value: p }; }),
+      }),
+      h(Select, {
+        mode: 'multiple', placeholder: 'Tags',
+        value: filterTags, onChange: setFilterTags,
+        allowClear: true, maxTagCount: 2,
+        style: { minWidth: 260 },
+        size: 'small',
+        options: tagOptions.map(function(t) { return { label: t, value: t }; }),
+      }),
+      (filterProjects.length > 0 || filterTags.length > 0)
+        ? h(Button, { type: 'link', size: 'small', onClick: function() { setFilterProjects([]); setFilterTags([]); } }, 'Clear scope')
+        : null
+    ),
+
+    // Stat cards — clickable to filter
+    h('div', { className: 'stats-row' },
+      h('div', { className: 'stat-card-clickable', onClick: function() { handleStatClick('total'); } },
+        h(StatCard, { label: 'Total ' + B + 's', value: stats.total, color: 'primary' })),
+      h('div', { className: 'stat-card-clickable', onClick: function() { handleStatClick('active'); } },
+        h(StatCard, { label: 'Active', value: stats.active, color: 'info' })),
+      h('div', { className: 'stat-card-clickable', onClick: function() { handleStatClick('openFindings'); } },
+        h(StatCard, { label: 'Open Findings', value: stats.openFindings, color: stats.openFindings > 0 ? 'danger' : '' })),
+      h('div', { className: 'stat-card-clickable', onClick: function() { handleStatClick('unassigned'); } },
+        h(StatCard, { label: 'Unassigned', value: stats.unassigned, color: stats.unassigned > 0 ? 'warning' : '' })),
+      h('div', { className: 'stat-card-clickable', onClick: function() { handleStatClick('complete'); } },
+        h(StatCard, { label: 'Complete', value: stats.complete, color: 'success' }))
+    ),
+
+    // Main panel
+    h('div', { className: 'panel' },
+      // Filter bar
+      h('div', { className: 'tracker-filter-bar' },
+        h(Input, {
+          placeholder: 'Search ' + B.toLowerCase() + 's\u2026',
+          value: searchText, onChange: function(e) { setSearchText(e.target.value); },
+          allowClear: true,
+          style: { width: 200 },
+          size: 'small',
+        }),
+        h(Select, {
+          mode: 'multiple', placeholder: 'All ' + P + 's',
+          value: filterPolicies, onChange: setFilterPolicies,
+          allowClear: true, maxTagCount: 1,
+          style: { minWidth: 180 },
+          size: 'small',
+          options: policyOptions.map(function(p) { return { label: p, value: p }; }),
+        }),
+        h(Select, {
+          placeholder: 'All States',
+          value: filterState, onChange: setFilterState,
+          allowClear: true,
+          style: { width: 120 },
+          size: 'small',
+          options: [
+            { label: 'Active', value: 'Active' },
+            { label: 'Complete', value: 'Complete' },
+            { label: 'Archived', value: 'Archived' },
+          ],
+        }),
+        h(Select, {
+          placeholder: 'Assignee',
+          value: filterAssignee, onChange: setFilterAssignee,
+          allowClear: true, showSearch: true,
+          style: { width: 140 },
+          size: 'small',
+          options: [{ label: 'Unassigned', value: '__unassigned__' }].concat(
+            assigneeOptions.map(function(n) { return { label: n, value: n }; })
+          ),
+        }),
+        h(Select, {
+          mode: 'multiple', placeholder: 'Flags',
+          value: filterFlags, onChange: setFilterFlags,
+          allowClear: true,
+          style: { width: 150 },
+          size: 'small',
+          options: [
+            { label: '\u26A0 Open Findings', value: 'open_findings' },
+            { label: '\u2205 Unassigned', value: 'unassigned' },
+          ],
+        }),
+        activeFilterCount > 0
+          ? h(Button, { type: 'link', size: 'small', onClick: clearFilters },
+              'Clear all (' + activeFilterCount + ')')
+          : null
+      ),
+
+      // Bulk actions
+      h(BulkActionBar, {
+        count: selectedRowKeys.length,
+        onClear: function() { setSelectedRowKeys([]); },
+        terms: terms,
+      }),
+
+      // Table with Excel-like column filters
+      h('div', { className: 'panel-body-flush' },
+        h(Table, {
+          dataSource: filtered,
+          columns: columns,
+          rowKey: function(r) { return r.id || r.name; },
+          loading: loading,
+          size: 'small',
+          scroll: { x: 1000 },
+          pagination: { pageSize: 15, size: 'small', showSizeChanger: false, showTotal: function(total) { return total + ' ' + B.toLowerCase() + 's'; } },
+          rowSelection: {
+            selectedRowKeys: selectedRowKeys,
+            onChange: function(keys) { setSelectedRowKeys(keys); },
+          },
+          expandable: {
+            expandedRowKeys: expandedRowKeys,
+            onExpandedRowsChange: function(keys) { setExpandedRowKeys(keys); },
+            expandedRowRender: function(record) {
+              return h(QCTrackerExpandedRow, { bundle: record, terms: terms });
+            },
+          },
+        })
+      )
     )
   );
 }
@@ -979,12 +1709,19 @@ function DetailDrawer(props) {
   if (!bundle) return null;
 
   var stageIdx = deriveBundleStageIndex(bundle);
+  var dominoUrl = getDominoBundleUrl(bundle);
 
   return h(Drawer, {
     title: bundle.name,
     open: visible,
     onClose: onClose,
     width: 480,
+    extra: dominoUrl
+      ? h(Button, {
+          type: 'primary', size: 'small',
+          onClick: function() { window.open(dominoUrl, '_blank'); },
+        }, '\u2197 Open in Domino')
+      : null,
   },
     // Overview
     h('div', { className: 'detail-section' },
@@ -1176,6 +1913,8 @@ function App() {
     switch (activePage) {
       case 'dashboard':
         return h(DashboardPage, { bundles: bundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms });
+      case 'tracker':
+        return h(QCTrackerPage, { bundles: bundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms });
       case 'milestones':
         return h(MilestonesPage, { bundles: bundles, loading: loading, terms: terms });
       case 'approvals':
