@@ -1253,6 +1253,10 @@ function QCTrackerExpandedRow(props) {
 
   var dominoUrl = getDominoBundleUrl(bundle);
 
+  // Format a timestamp
+  function fmtTime(ts) { return ts ? dayjs(ts).format('MMM D, YYYY h:mm A') : null; }
+  function fmtTimeAgo(ts) { return ts ? dayjs(ts).fromNow() : null; }
+
   return h('div', { className: 'tracker-expanded' },
     // Left column: stage timeline
     h('div', { className: 'tracker-expanded-left' },
@@ -1276,6 +1280,11 @@ function QCTrackerExpandedRow(props) {
         var assignee = stageData.assignee;
         var assigneeName = assignee ? assignee.name : null;
 
+        // Project member options for reassignment
+        var memberOptions = (typeof MOCK_PROJECT_MEMBERS !== 'undefined' ? MOCK_PROJECT_MEMBERS : []).map(function(m) {
+          return { label: m.firstName + ' ' + m.lastName + ' (' + m.userName + ')', value: m.userName };
+        });
+
         return h('div', { key: idx, className: 'tracker-timeline-item' },
           h('div', { className: 'tracker-timeline-dot ' + dotState }),
           idx < stageNames.length - 1
@@ -1284,16 +1293,46 @@ function QCTrackerExpandedRow(props) {
           h('div', { className: 'tracker-timeline-content' },
             h('div', { className: 'tracker-timeline-name' + (dotState === 'active' ? ' active' : '') }, name),
             h('div', { className: 'tracker-timeline-meta' },
-              assigneeName
-                ? h('span', null, assigneeName)
-                : h('span', { className: 'tracker-unassigned' }, 'Unassigned'),
+              h(Select, {
+                size: 'small',
+                placeholder: 'Assign...',
+                value: assigneeName || undefined,
+                style: { minWidth: 160, fontSize: 11 },
+                showSearch: true,
+                allowClear: true,
+                options: memberOptions,
+                onChange: function(val) {
+                  // In production: POST to Domino API to update stage assignee
+                  console.log('Reassign stage "' + name + '" on bundle "' + bundle.name + '" to: ' + (val || 'Unassigned'));
+                },
+                optionFilterProp: 'label',
+              }),
               h('span', { className: 'tracker-stage-badge ' + dotState },
                 dotState === 'completed' ? 'Done' : dotState === 'active' ? 'Current' : 'Pending'
               )
             )
           )
         );
-      })
+      }),
+      // Bundle metadata: created/updated info
+      h('div', { className: 'tracker-metadata', style: { marginTop: 16, padding: '10px 0', borderTop: '1px solid #E0E0E0' } },
+        bundle.createdBy
+          ? h('div', { className: 'tracker-metadata-row' },
+              h('span', { className: 'tracker-metadata-label' }, 'Created by'),
+              h('span', { className: 'tracker-metadata-value' }, bundle.createdBy.name || bundle.createdBy.userName || 'Unknown'),
+              fmtTime(bundle.createdAt)
+                ? h('span', { className: 'tracker-metadata-time' }, fmtTime(bundle.createdAt))
+                : null
+            )
+          : null,
+        bundle.updatedAt
+          ? h('div', { className: 'tracker-metadata-row' },
+              h('span', { className: 'tracker-metadata-label' }, 'Last updated'),
+              h('span', { className: 'tracker-metadata-value' }, fmtTimeAgo(bundle.updatedAt)),
+              h('span', { className: 'tracker-metadata-time' }, fmtTime(bundle.updatedAt))
+            )
+          : null
+      )
     ),
     // Right column: findings + approvals
     h('div', { className: 'tracker-expanded-right' },
@@ -1305,7 +1344,9 @@ function QCTrackerExpandedRow(props) {
               return h('div', { key: i, className: 'tracker-finding-row' },
                 h(Tag, { color: severityColor(f.severity), style: { color: '#fff', border: 'none', minWidth: 28, textAlign: 'center', fontSize: 11 } }, f.severity),
                 h('span', { className: 'tracker-finding-name' }, f.name),
-                findingStatusTag(f.status)
+                findingStatusTag(f.status),
+                f.assignee ? h('span', { className: 'tracker-finding-meta' }, f.assignee.name) : null,
+                f.dueDate ? h('span', { className: 'tracker-finding-meta' }, dayjs(f.dueDate).format('MMM D')) : null
               );
             }),
             bundle._findings.length > 5
@@ -1325,7 +1366,13 @@ function QCTrackerExpandedRow(props) {
               return h('div', { key: i, className: 'tracker-approval-row' },
                 h('span', { className: 'tracker-approval-dot', style: { background: approvalStatusColor(a.status) } }),
                 h('span', { className: 'tracker-approval-name' }, a.name),
-                h('span', { className: 'tracker-approval-status' }, approvalStatusLabel(a.status))
+                h('span', { className: 'tracker-approval-status' }, approvalStatusLabel(a.status)),
+                a.approvers && a.approvers.length > 0
+                  ? h('span', { className: 'tracker-approval-actors' }, a.approvers.map(function(ap) { return ap.name; }).join(', '))
+                  : null,
+                a.updatedAt
+                  ? h('span', { className: 'tracker-approval-time' }, fmtTimeAgo(a.updatedAt))
+                  : null
               );
             })
           )
@@ -1356,12 +1403,47 @@ function BulkActionBar(props) {
   var onClear = props.onClear;
   var terms = props.terms || DEFAULT_TERMS;
   var B = terms.bundle;
+  var selectedKeys = props.selectedKeys || [];
+
+  var _ba = useState(null);
+  var bulkAssignee = _ba[0];
+  var setBulkAssignee = _ba[1];
 
   if (count === 0) return null;
 
+  var memberOptions = (typeof MOCK_PROJECT_MEMBERS !== 'undefined' ? MOCK_PROJECT_MEMBERS : []).map(function(m) {
+    return { label: m.firstName + ' ' + m.lastName + ' (' + m.userName + ')', value: m.userName };
+  });
+
+  function handleBulkAssign() {
+    if (!bulkAssignee) return;
+    console.log('Bulk assign ' + count + ' deliverables to: ' + bulkAssignee, selectedKeys);
+    // In production: POST to Domino API for each selected bundle
+    antd.message.success('Assigned ' + count + ' ' + B.toLowerCase() + (count > 1 ? 's' : '') + ' to ' + bulkAssignee);
+    setBulkAssignee(null);
+  }
+
   return h('div', { className: 'bulk-action-bar' },
     h('span', { className: 'bulk-action-count' }, count + ' ' + B.toLowerCase() + (count > 1 ? 's' : '') + ' selected'),
-    h(Button, { size: 'small', type: 'link', onClick: onClear }, 'Clear Selection')
+    h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+      h(Select, {
+        size: 'small',
+        placeholder: 'Assign to...',
+        value: bulkAssignee || undefined,
+        style: { minWidth: 180 },
+        showSearch: true,
+        allowClear: true,
+        options: memberOptions,
+        onChange: setBulkAssignee,
+        optionFilterProp: 'label',
+      }),
+      h(Button, {
+        size: 'small', type: 'primary',
+        disabled: !bulkAssignee,
+        onClick: handleBulkAssign,
+      }, 'Assign'),
+      h(Button, { size: 'small', type: 'link', onClick: onClear, style: { color: '#fff' } }, 'Clear')
+    )
   );
 }
 
@@ -1492,8 +1574,9 @@ function QCTrackerPage(props) {
       title: B, dataIndex: 'name', key: 'name', width: 140, fixed: 'left',
       sorter: function(a, b) { return a.name.localeCompare(b.name); },
       render: function(name, record) {
+        var nameColor = record.state === 'Complete' ? '#28A464' : record.state === 'Archived' ? '#8F8FA3' : '#543FDE';
         return h('a', {
-          style: { fontWeight: 600, color: '#543FDE', fontSize: 12 },
+          style: { fontWeight: 600, color: nameColor, fontSize: 12 },
           onClick: function(e) { e.stopPropagation(); if (onSelectBundle) onSelectBundle(record); }
         }, name);
       }
@@ -1604,65 +1687,10 @@ function QCTrackerPage(props) {
 
     // Main panel
     h('div', { className: 'panel' },
-      // Filter bar
-      h('div', { className: 'tracker-filter-bar' },
-        h(Input, {
-          placeholder: 'Search ' + B.toLowerCase() + 's\u2026',
-          value: searchText, onChange: function(e) { setSearchText(e.target.value); },
-          allowClear: true,
-          style: { width: 200 },
-          size: 'small',
-        }),
-        h(Select, {
-          mode: 'multiple', placeholder: 'All ' + P + 's',
-          value: filterPolicies, onChange: setFilterPolicies,
-          allowClear: true, maxTagCount: 1,
-          style: { minWidth: 180 },
-          size: 'small',
-          options: policyOptions.map(function(p) { return { label: p, value: p }; }),
-        }),
-        h(Select, {
-          placeholder: 'All States',
-          value: filterState, onChange: setFilterState,
-          allowClear: true,
-          style: { width: 120 },
-          size: 'small',
-          options: [
-            { label: 'Active', value: 'Active' },
-            { label: 'Complete', value: 'Complete' },
-            { label: 'Archived', value: 'Archived' },
-          ],
-        }),
-        h(Select, {
-          placeholder: 'Assignee',
-          value: filterAssignee, onChange: setFilterAssignee,
-          allowClear: true, showSearch: true,
-          style: { width: 140 },
-          size: 'small',
-          options: [{ label: 'Unassigned', value: '__unassigned__' }].concat(
-            assigneeOptions.map(function(n) { return { label: n, value: n }; })
-          ),
-        }),
-        h(Select, {
-          mode: 'multiple', placeholder: 'Flags',
-          value: filterFlags, onChange: setFilterFlags,
-          allowClear: true,
-          style: { width: 150 },
-          size: 'small',
-          options: [
-            { label: '\u26A0 Open Findings', value: 'open_findings' },
-            { label: '\u2205 Unassigned', value: 'unassigned' },
-          ],
-        }),
-        activeFilterCount > 0
-          ? h(Button, { type: 'link', size: 'small', onClick: clearFilters },
-              'Clear all (' + activeFilterCount + ')')
-          : null
-      ),
-
       // Bulk actions
       h(BulkActionBar, {
         count: selectedRowKeys.length,
+        selectedKeys: selectedRowKeys,
         onClear: function() { setSelectedRowKeys([]); },
         terms: terms,
       }),

@@ -20,6 +20,13 @@ var MOCK_USERS = {
   prodProg:  { id: '6926318da4464d12be7f6e86', name: 'production_programmer', firstName: 'Production', lastName: 'Programmer' },
 };
 
+// Project members — used for stage assignment dropdowns
+// In production, fetched via GET /v4/projects/{projectId}/collaborators
+var MOCK_PROJECT_MEMBERS = Object.keys(MOCK_USERS).map(function(key) {
+  var u = MOCK_USERS[key];
+  return { id: u.id, userName: u.name, firstName: u.firstName, lastName: u.lastName };
+});
+
 // Real policy structures from the demo
 var MOCK_POLICIES = [
   {
