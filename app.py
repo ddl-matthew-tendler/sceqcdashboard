@@ -1,8 +1,11 @@
 import os
 import requests
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+
+load_dotenv()
 
 app = FastAPI()
 
@@ -131,7 +134,12 @@ def get_policy(policy_id: str):
     return gov_get(f"/policies/{policy_id}")
 
 
-# ── Users (for team metrics) ──────────────────────────────────────
+# ── Users ─────────────────────────────────────────────────────────
+
+@app.get("/api/users/self")
+def get_current_user():
+    return v4_get("/users/self")
+
 
 @app.get("/api/users")
 def list_users():
@@ -144,6 +152,13 @@ def list_users():
 def list_projects(limit: int = 50, offset: int = 0):
     params = {"limit": limit, "offset": offset}
     return v4_get("/projects", params=params)
+
+
+# ── Project Collaborators ─────────────────────────────────────────
+
+@app.get("/api/projects/{project_id}/collaborators")
+def list_project_collaborators(project_id: str):
+    return v4_get(f"/projects/{project_id}/collaborators")
 
 
 # ── Whitelabel terminology ─────────────────────────────────────────

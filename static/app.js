@@ -46,6 +46,25 @@ Highcharts.setOptions({
 // ── Default terminology (overridden by whitelabel config) ──────────
 var DEFAULT_TERMS = { bundle: 'Bundle', policy: 'Policy' };
 
+// ── API_GAPS: Write actions pending Domino API availability ────────
+var API_GAPS = {
+  stageReassign: {
+    label: 'Stage Reassignment',
+    message: 'This action is coming soon — the Domino write API for stage reassignment is in development.',
+    ready: false,
+  },
+  bulkAssign: {
+    label: 'Bulk Assign',
+    message: 'This action is coming soon — the Domino write API for bulk assignment is in development.',
+    ready: false,
+  },
+  applyRules: {
+    label: 'Apply Assignment Rules',
+    message: 'This action is coming soon — the Domino write API for applying rules is in development.',
+    ready: false,
+  },
+};
+
 // ── Pharma stage definitions (typical stat programming lifecycle) ──
 const PHARMA_STAGES = [
   'Protocol Setup',
@@ -1282,10 +1301,14 @@ function QCTrackerExpandedRow(props) {
         var assignee = stageData.assignee;
         var assigneeName = assignee ? assignee.name : null;
 
-        // Project member options for reassignment
-        var memberOptions = (typeof MOCK_PROJECT_MEMBERS !== 'undefined' ? MOCK_PROJECT_MEMBERS : []).map(function(m) {
-          return { label: m.firstName + ' ' + m.lastName + ' (' + m.userName + ')', value: m.userName };
+        // Project member options for reassignment (from live data)
+        var pmc = props.projectMembersCache || {};
+        var members = pmc[bundle.projectId] || [];
+        var memberOptions = members.map(function(m) {
+          return { label: (m.firstName || '') + ' ' + (m.lastName || '') + ' (' + m.userName + ')', value: m.userName };
         });
+
+        var gapInfo = API_GAPS.stageReassign;
 
         return h('div', { key: idx, className: 'tracker-timeline-item' },
           h('div', { className: 'tracker-timeline-dot ' + dotState }),
@@ -1295,20 +1318,26 @@ function QCTrackerExpandedRow(props) {
           h('div', { className: 'tracker-timeline-content' },
             h('div', { className: 'tracker-timeline-name' + (dotState === 'active' ? ' active' : '') }, name),
             h('div', { className: 'tracker-timeline-meta' },
-              h(Select, {
-                size: 'small',
-                placeholder: 'Assign...',
-                value: assigneeName || undefined,
-                style: { minWidth: 160, fontSize: 11 },
-                showSearch: true,
-                allowClear: true,
-                options: memberOptions,
-                onChange: function(val) {
-                  // In production: POST to Domino API to update stage assignee
-                  console.log('Reassign stage "' + name + '" on bundle "' + bundle.name + '" to: ' + (val || 'Unassigned'));
-                },
-                optionFilterProp: 'label',
-              }),
+              h(Tooltip, { title: gapInfo.ready ? null : gapInfo.message },
+                h(Select, {
+                  size: 'small',
+                  placeholder: 'Assign...',
+                  value: assigneeName || undefined,
+                  style: { minWidth: 160, fontSize: 11 },
+                  showSearch: true,
+                  allowClear: true,
+                  options: memberOptions,
+                  disabled: !gapInfo.ready,
+                  onChange: function(val) {
+                    if (!gapInfo.ready) {
+                      antd.message.warning(gapInfo.message);
+                      return;
+                    }
+                  },
+                  optionFilterProp: 'label',
+                })
+              ),
+              !gapInfo.ready ? h(Tag, { color: 'orange', style: { fontSize: 10, lineHeight: '16px', padding: '0 4px' } }, 'API Pending') : null,
               h('span', { className: 'tracker-stage-badge ' + dotState },
                 dotState === 'completed' ? 'Done' : dotState === 'active' ? 'Current' : 'Pending'
               )
@@ -1458,6 +1487,7 @@ function BulkActionBar(props) {
   var terms = props.terms || DEFAULT_TERMS;
   var B = terms.bundle;
   var selectedKeys = props.selectedKeys || [];
+  var pmc = props.projectMembersCache || {};
 
   var _ba = useState(null);
   var bulkAssignee = _ba[0];
@@ -1465,16 +1495,26 @@ function BulkActionBar(props) {
 
   if (count === 0) return null;
 
-  var memberOptions = (typeof MOCK_PROJECT_MEMBERS !== 'undefined' ? MOCK_PROJECT_MEMBERS : []).map(function(m) {
-    return { label: m.firstName + ' ' + m.lastName + ' (' + m.userName + ')', value: m.userName };
+  // Combine all project members for bulk assignment
+  var seen = {};
+  var memberOptions = [];
+  Object.keys(pmc).forEach(function(pid) {
+    (pmc[pid] || []).forEach(function(m) {
+      if (!seen[m.userName]) {
+        seen[m.userName] = true;
+        memberOptions.push({ label: (m.firstName || '') + ' ' + (m.lastName || '') + ' (' + m.userName + ')', value: m.userName });
+      }
+    });
   });
+
+  var gapInfo = API_GAPS.bulkAssign;
 
   function handleBulkAssign() {
     if (!bulkAssignee) return;
-    console.log('Bulk assign ' + count + ' deliverables to: ' + bulkAssignee, selectedKeys);
-    // In production: POST to Domino API for each selected bundle
-    antd.message.success('Assigned ' + count + ' ' + B.toLowerCase() + (count > 1 ? 's' : '') + ' to ' + bulkAssignee);
-    setBulkAssignee(null);
+    if (!gapInfo.ready) {
+      antd.message.warning(gapInfo.message);
+      return;
+    }
   }
 
   return h('div', { className: 'bulk-action-bar' },
@@ -1491,11 +1531,14 @@ function BulkActionBar(props) {
         onChange: setBulkAssignee,
         optionFilterProp: 'label',
       }),
-      h(Button, {
-        size: 'small', type: 'primary',
-        disabled: !bulkAssignee,
-        onClick: handleBulkAssign,
-      }, 'Assign'),
+      h(Tooltip, { title: gapInfo.ready ? null : gapInfo.message },
+        h(Button, {
+          size: 'small', type: 'primary',
+          disabled: !bulkAssignee || !gapInfo.ready,
+          onClick: handleBulkAssign,
+        }, 'Assign')
+      ),
+      !gapInfo.ready ? h(Tag, { color: 'orange', style: { fontSize: 10, lineHeight: '18px', padding: '0 4px' } }, 'API Pending') : null,
       h(Button, { size: 'small', type: 'link', onClick: onClear, style: { color: '#fff' } }, 'Clear')
     )
   );
@@ -1709,6 +1752,7 @@ function QCTrackerPage(props) {
         selectedKeys: selectedRowKeys,
         onClear: function() { setSelectedRowKeys([]); },
         terms: terms,
+        projectMembersCache: props.projectMembersCache,
       }),
 
       // Table with Excel-like column filters
@@ -1729,7 +1773,7 @@ function QCTrackerPage(props) {
             expandedRowKeys: expandedRowKeys,
             onExpandedRowsChange: function(keys) { setExpandedRowKeys(keys); },
             expandedRowRender: function(record) {
-              return h(QCTrackerExpandedRow, { bundle: record, terms: terms });
+              return h(QCTrackerExpandedRow, { bundle: record, terms: terms, projectMembersCache: props.projectMembersCache });
             },
           },
         })
@@ -1920,15 +1964,18 @@ function AssignmentRulesPage(props) {
     }, []);
   }, [projectBundles]);
 
-  // Stages for selected QC Plan (from MOCK_POLICIES or from bundle data)
+  // Stages for selected QC Plan (from live policies or from bundle stage data)
   var stageOptions = useMemo(function() {
     if (!formPlan) return [];
-    // Try MOCK_POLICIES first
-    if (typeof MOCK_POLICIES !== 'undefined') {
-      var policy = MOCK_POLICIES.find(function(p) { return p.name === formPlan; });
-      if (policy) return policy.stages.map(function(s) { return { label: s, value: s }; });
+    // Try live policies first (fetched from API)
+    var lp = props.livePolicies || [];
+    if (lp.length > 0) {
+      var policyOverview = lp.find(function(p) { return p.name === formPlan; });
+      if (policyOverview && policyOverview.id) {
+        // Policy overview doesn't have stages; extract from bundle data instead
+      }
     }
-    // Fallback: extract from bundle stages
+    // Extract from bundle stages (always works for bundles using this policy)
     var names = {};
     projectBundles.forEach(function(b) {
       if (b.policyName !== formPlan) return;
@@ -1938,14 +1985,16 @@ function AssignmentRulesPage(props) {
       });
     });
     return Object.keys(names).map(function(n) { return { label: n, value: n }; });
-  }, [formPlan, projectBundles]);
+  }, [formPlan, projectBundles, props.livePolicies]);
 
-  // Assignee options (project members)
+  // Assignee options (from live project members, scoped to selected project)
   var memberOptions = useMemo(function() {
-    return (typeof MOCK_PROJECT_MEMBERS !== 'undefined' ? MOCK_PROJECT_MEMBERS : []).map(function(m) {
-      return { label: m.firstName + ' ' + m.lastName + ' (' + m.userName + ')', value: m.userName };
+    var pmc = props.projectMembersCache || {};
+    var members = selectedProject ? (pmc[selectedProject] || []) : [];
+    return members.map(function(m) {
+      return { label: (m.firstName || '') + ' ' + (m.lastName || '') + ' (' + m.userName + ')', value: m.userName };
     });
-  }, []);
+  }, [selectedProject, props.projectMembersCache]);
 
   // Add match counts to rules
   var rulesWithCounts = useMemo(function() {
@@ -1975,8 +2024,10 @@ function AssignmentRulesPage(props) {
     var changes = [];
     projectRules.forEach(function(rule) {
       // Find the user label for display
-      var mem = (typeof MOCK_PROJECT_MEMBERS !== 'undefined' ? MOCK_PROJECT_MEMBERS : []).find(function(m) { return m.userName === rule.assignee; });
-      var newLabel = mem ? mem.firstName + ' ' + mem.lastName : rule.assignee;
+      var pmc = props.projectMembersCache || {};
+      var projMembers = selectedProject ? (pmc[selectedProject] || []) : [];
+      var mem = projMembers.find(function(m) { return m.userName === rule.assignee; });
+      var newLabel = mem ? (mem.firstName || '') + ' ' + (mem.lastName || '') : rule.assignee;
       projectBundles.forEach(function(b) {
         if (b.policyName !== rule.policyName) return;
         (b.stages || []).forEach(function(s) {
@@ -2054,6 +2105,12 @@ function AssignmentRulesPage(props) {
   }
 
   function handleApplyRules() {
+    var gapInfo = API_GAPS.applyRules;
+    if (!gapInfo.ready) {
+      antd.message.warning(gapInfo.message);
+      setApplyModalOpen(false);
+      return;
+    }
     var updated = bundles.map(function(b) {
       if (b.projectId !== selectedProject) return b;
       var matched = false;
@@ -2083,8 +2140,10 @@ function AssignmentRulesPage(props) {
     { title: 'Stage', dataIndex: 'stageName', key: 'stage' },
     { title: 'Assignee', dataIndex: 'assignee', key: 'assignee',
       render: function(v) {
-        var mem = (typeof MOCK_PROJECT_MEMBERS !== 'undefined' ? MOCK_PROJECT_MEMBERS : []).find(function(m) { return m.userName === v; });
-        return mem ? mem.firstName + ' ' + mem.lastName : v;
+        var pmc = props.projectMembersCache || {};
+        var projMembers = selectedProject ? (pmc[selectedProject] || []) : [];
+        var mem = projMembers.find(function(m) { return m.userName === v; });
+        return mem ? (mem.firstName || '') + ' ' + (mem.lastName || '') : v;
       }
     },
     { title: 'Matched', key: 'matched', width: 90, align: 'center',
@@ -2190,10 +2249,13 @@ function AssignmentRulesPage(props) {
                 type: 'primary',
                 onClick: function() { openAddModal(); },
               }, '+ Add Rule'),
-              h(Button, {
-                onClick: function() { setApplyModalOpen(true); },
-                disabled: projectRules.length === 0,
-              }, 'Apply Rules')
+              h(Tooltip, { title: API_GAPS.applyRules.ready ? null : API_GAPS.applyRules.message },
+                h(Button, {
+                  onClick: function() { setApplyModalOpen(true); },
+                  disabled: projectRules.length === 0,
+                }, 'Apply Rules')
+              ),
+              !API_GAPS.applyRules.ready ? h(Tag, { color: 'orange', style: { fontSize: 10, lineHeight: '22px' } }, 'API Pending') : null
             ),
             h('span', { style: { color: '#65657B', fontSize: 13 } },
               projectBundles.length + ' ' + B.toLowerCase() + (projectBundles.length !== 1 ? 's' : '') + ' in project'
@@ -2324,11 +2386,39 @@ function App() {
   var _s9 = useState(true); var useDummy = _s9[0]; var setUseDummy = _s9[1];
   var _s10 = useState([]); var assignmentRules = _s10[0]; var setAssignmentRules = _s10[1];
 
+  // ── Live data state ──────────────────────────────────────────
+  var _cu = useState(null); var currentUser = _cu[0]; var setCurrentUser = _cu[1];
+  var _pm = useState({}); var projectMembersCache = _pm[0]; var setProjectMembersCache = _pm[1];
+  var _pt = useState({}); var projectTagsMap = _pt[0]; var setProjectTagsMap = _pt[1];
+  var _lp = useState([]); var livePolicies = _lp[0]; var setLivePolicies = _lp[1];
+
   // ── Universal Scope Filters ──────────────────────────────────
   var _sc1 = useState([]); var scopeProjects = _sc1[0]; var setScopeProjects = _sc1[1];
   var _sc2 = useState([]); var scopeTags = _sc2[0]; var setScopeTags = _sc2[1];
   var _sc3 = useState('all'); var scopeView = _sc3[0]; var setScopeView = _sc3[1];
-  var _sc4 = useState('production_programmer'); var scopeCurrentUser = _sc4[0]; var setScopeCurrentUser = _sc4[1];
+  var _sc4 = useState(null); var scopeCurrentUser = _sc4[0]; var setScopeCurrentUser = _sc4[1];
+
+  // Load assignment rules from localStorage on mount
+  useEffect(function() {
+    try {
+      var saved = localStorage.getItem('sce_assignment_rules');
+      if (saved) setAssignmentRules(JSON.parse(saved));
+    } catch(e) { console.warn('Failed to load assignment rules from localStorage:', e); }
+  }, []);
+
+  // Persist assignment rules to localStorage on change
+  useEffect(function() {
+    try {
+      localStorage.setItem('sce_assignment_rules', JSON.stringify(assignmentRules));
+    } catch(e) { console.warn('Failed to save assignment rules to localStorage:', e); }
+  }, [assignmentRules]);
+
+  // Set scopeCurrentUser from fetched currentUser
+  useEffect(function() {
+    if (currentUser && currentUser.userName && !scopeCurrentUser) {
+      setScopeCurrentUser(currentUser.userName);
+    }
+  }, [currentUser]);
 
   // Derive project options from all bundles
   var scopeProjectOptions = useMemo(function() {
@@ -2342,23 +2432,39 @@ function App() {
     }, []);
   }, [bundles]);
 
-  // Derive tag options from all bundles
+  // Derive tag options from projectTagsMap (live data)
   var scopeTagOptions = useMemo(function() {
     var tags = {};
-    if (typeof MOCK_PROJECT_TAGS === 'undefined') return [];
     bundles.forEach(function(b) {
-      var pTags = MOCK_PROJECT_TAGS[b.projectId] || [];
-      pTags.forEach(function(t) { tags[t.key + ': ' + t.value] = true; });
+      var pTags = projectTagsMap[b.projectId] || [];
+      pTags.forEach(function(t) {
+        var label = t.name || (t.key + ': ' + t.value);
+        tags[label] = true;
+      });
     });
     return Object.keys(tags).sort().map(function(t) { return { label: t, value: t }; });
-  }, [bundles]);
+  }, [bundles, projectTagsMap]);
 
-  // Derive user options for "My Work" persona selector
+  // Derive user options for "My Work" persona selector from live project members
   var scopeUserOptions = useMemo(function() {
-    return (typeof MOCK_PROJECT_MEMBERS !== 'undefined' ? MOCK_PROJECT_MEMBERS : []).map(function(m) {
-      return { label: m.firstName + ' ' + m.lastName, value: m.userName };
+    var seen = {};
+    var opts = [];
+    // Add current user first
+    if (currentUser && currentUser.userName && !seen[currentUser.userName]) {
+      seen[currentUser.userName] = true;
+      opts.push({ label: (currentUser.firstName || '') + ' ' + (currentUser.lastName || '') + ' (me)', value: currentUser.userName });
+    }
+    // Add all project collaborators
+    Object.keys(projectMembersCache).forEach(function(pid) {
+      (projectMembersCache[pid] || []).forEach(function(m) {
+        if (!seen[m.userName]) {
+          seen[m.userName] = true;
+          opts.push({ label: (m.firstName || '') + ' ' + (m.lastName || ''), value: m.userName });
+        }
+      });
     });
-  }, []);
+    return opts;
+  }, [currentUser, projectMembersCache]);
 
   // Apply universal scope to get scopedBundles
   var scopedBundles = useMemo(function() {
@@ -2366,9 +2472,9 @@ function App() {
       // Project filter
       if (scopeProjects.length > 0 && scopeProjects.indexOf(b.projectName) < 0) return false;
       // Tag filter
-      if (scopeTags.length > 0 && typeof MOCK_PROJECT_TAGS !== 'undefined') {
-        var pTags = MOCK_PROJECT_TAGS[b.projectId] || [];
-        var tagLabels = pTags.map(function(t) { return t.key + ': ' + t.value; });
+      if (scopeTags.length > 0) {
+        var pTags = projectTagsMap[b.projectId] || [];
+        var tagLabels = pTags.map(function(t) { return t.name || (t.key + ': ' + t.value); });
         var matchesTag = scopeTags.some(function(ft) { return tagLabels.indexOf(ft) >= 0; });
         if (!matchesTag) return false;
       }
@@ -2415,7 +2521,7 @@ function App() {
       }
       return true;
     });
-  }, [bundles, scopeProjects, scopeTags, scopeView, scopeCurrentUser]);
+  }, [bundles, scopeProjects, scopeTags, scopeView, scopeCurrentUser, projectTagsMap]);
 
   var hasScopeFilters = scopeProjects.length > 0 || scopeTags.length > 0 || scopeView !== 'all';
 
@@ -2446,20 +2552,93 @@ function App() {
   function fetchLiveData() {
     setLoading(true);
     setError(null);
-    apiGet('api/bundles?limit=100')
-      .then(function(resp) {
-        var bundleList = resp.data || [];
+
+    // 1. Fetch current user, bundles, projects, policies in parallel
+    Promise.all([
+      apiGet('api/users/self').catch(function(e) { console.error('users/self failed:', e); return null; }),
+      apiGet('api/bundles?limit=200'),
+      apiGet('api/projects?limit=200').catch(function() { return []; }),
+      apiGet('api/policies?limit=200').catch(function() { return { data: [] }; }),
+      apiGet('api/attachment-overviews?limit=200').catch(function() { return { data: [] }; }),
+    ])
+      .then(function(topResults) {
+        var user = topResults[0];
+        var bundleResp = topResults[1];
+        var projects = topResults[2];
+        var policiesResp = topResults[3];
+        var attachResp = topResults[4];
+
         setConnected(true);
+
+        // Store current user
+        if (user && user.userName) {
+          setCurrentUser(user);
+        }
+
+        // Store live policies
+        var policyList = policiesResp.data || (Array.isArray(policiesResp) ? policiesResp : []);
+        setLivePolicies(policyList);
+
+        // Build project tags map from projects data
+        var tagsMap = {};
+        var projectsList = Array.isArray(projects) ? projects : [];
+        projectsList.forEach(function(p) {
+          if (p.tags && p.tags.length > 0) {
+            tagsMap[p.id] = p.tags; // shape: [{ id, name, isApproved }]
+          }
+        });
+        setProjectTagsMap(tagsMap);
+
+        // Build attachment map by bundleId
+        var attachList = attachResp.data || (Array.isArray(attachResp) ? attachResp : []);
+        var attachMap = {};
+        attachList.forEach(function(a) {
+          var bid = a.bundle && a.bundle.id;
+          if (bid) {
+            if (!attachMap[bid]) attachMap[bid] = [];
+            attachMap[bid].push(a);
+          }
+        });
+
+        // Fetch collaborators for unique project IDs (with cache)
+        var bundleList = bundleResp.data || [];
+        var uniqueProjectIds = {};
+        bundleList.forEach(function(b) { if (b.projectId) uniqueProjectIds[b.projectId] = true; });
+        var projectIds = Object.keys(uniqueProjectIds);
+
+        var collabPromises = projectIds.map(function(pid) {
+          return apiGet('api/projects/' + pid + '/collaborators')
+            .then(function(members) { return { pid: pid, members: Array.isArray(members) ? members : [] }; })
+            .catch(function() { return { pid: pid, members: [] }; });
+        });
+
+        return Promise.all([
+          Promise.resolve(bundleList),
+          Promise.resolve(attachMap),
+          Promise.all(collabPromises),
+        ]);
+      })
+      .then(function(results) {
+        var bundleList = results[0];
+        var attachMap = results[1];
+        var collabResults = results[2];
+
+        // Store project members cache
+        var membersCache = {};
+        collabResults.forEach(function(r) { membersCache[r.pid] = r.members; });
+        setProjectMembersCache(membersCache);
+
+        // 2. Per-bundle enrichment: approvals, findings, gates in parallel
         var enrichPromises = bundleList.map(function(bundle) {
           return Promise.all([
             apiGet('api/bundles/' + bundle.id + '/approvals').catch(function() { return []; }),
-            apiGet('api/bundles/' + bundle.id + '/findings?limit=100').catch(function() { return { data: [] }; }),
+            apiGet('api/bundles/' + bundle.id + '/findings?limit=200').catch(function() { return { data: [] }; }),
             apiGet('api/bundles/' + bundle.id + '/gates').catch(function() { return []; }),
-          ]).then(function(results) {
-            bundle._approvals = Array.isArray(results[0]) ? results[0] : [];
-            bundle._findings = results[1].data || (Array.isArray(results[1]) ? results[1] : []);
-            bundle._gates = Array.isArray(results[2]) ? results[2] : [];
-            bundle._attachments = Array.isArray(bundle.attachments) ? bundle.attachments : [];
+          ]).then(function(enrichResults) {
+            bundle._approvals = Array.isArray(enrichResults[0]) ? enrichResults[0] : [];
+            bundle._findings = enrichResults[1].data || (Array.isArray(enrichResults[1]) ? enrichResults[1] : []);
+            bundle._gates = Array.isArray(enrichResults[2]) ? enrichResults[2] : [];
+            bundle._attachments = attachMap[bundle.id] || [];
             return bundle;
           });
         });
@@ -2511,9 +2690,9 @@ function App() {
       case 'dashboard':
         return h(DashboardPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms });
       case 'tracker':
-        return h(QCTrackerPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms });
+        return h(QCTrackerPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms, projectMembersCache: projectMembersCache });
       case 'rules':
-        return h(AssignmentRulesPage, { bundles: bundles, setBundles: setBundles, assignmentRules: assignmentRules, setAssignmentRules: setAssignmentRules, terms: terms });
+        return h(AssignmentRulesPage, { bundles: bundles, setBundles: setBundles, assignmentRules: assignmentRules, setAssignmentRules: setAssignmentRules, terms: terms, projectMembersCache: projectMembersCache, livePolicies: livePolicies });
       case 'milestones':
         return h(MilestonesPage, { bundles: scopedBundles, loading: loading, terms: terms });
       case 'approvals':
