@@ -1521,13 +1521,16 @@ function QCTrackerPage(props) {
   var _fs5 = useState([]); var filterFlags = _fs5[0]; var setFilterFlags = _fs5[1];
   var _fs6 = useState([]); var selectedRowKeys = _fs6[0]; var setSelectedRowKeys = _fs6[1];
   var _fs7 = useState([]); var expandedRowKeys = _fs7[0]; var setExpandedRowKeys = _fs7[1];
-  var _fs8 = useState([]); var filterProjects = _fs8[0]; var setFilterProjects = _fs8[1];
-  var _fs9 = useState([]); var filterTags = _fs9[0]; var setFilterTags = _fs9[1];
-
-  // Derive filter options from data
+  // Derive filter options from scoped bundles (project/tag scope handled at App level)
   var policyOptions = useMemo(function() {
     var names = {};
     bundles.forEach(function(b) { if (b.policyName) names[b.policyName] = true; });
+    return Object.keys(names).sort();
+  }, [bundles]);
+
+  var projectOptions = useMemo(function() {
+    var names = {};
+    bundles.forEach(function(b) { if (b.projectName) names[b.projectName] = true; });
     return Object.keys(names).sort();
   }, [bundles]);
 
@@ -1539,25 +1542,6 @@ function QCTrackerPage(props) {
     return Object.keys(names).sort();
   }, [bundles]);
 
-  var projectOptions = useMemo(function() {
-    var names = {};
-    bundles.forEach(function(b) { if (b.projectName) names[b.projectName] = true; });
-    return Object.keys(names).sort();
-  }, [bundles]);
-
-  var tagOptions = useMemo(function() {
-    var tags = {};
-    if (typeof MOCK_PROJECT_TAGS === 'undefined') return [];
-    bundles.forEach(function(b) {
-      var pTags = MOCK_PROJECT_TAGS[b.projectId] || [];
-      pTags.forEach(function(t) {
-        var label = t.key + ': ' + t.value;
-        tags[label] = true;
-      });
-    });
-    return Object.keys(tags).sort();
-  }, [bundles]);
-
   // Unique stage names for column filter
   var allStageNames = useMemo(function() {
     var names = {};
@@ -1565,12 +1549,11 @@ function QCTrackerPage(props) {
     return Object.keys(names).sort();
   }, [bundles]);
 
-  // Apply filters
+  // Apply local filters (project/tag scope now handled at App level)
   var filtered = useMemo(function() {
     return bundles.filter(function(b) {
       if (searchText && b.name.toLowerCase().indexOf(searchText.toLowerCase()) < 0) return false;
       if (filterPolicies.length > 0 && filterPolicies.indexOf(b.policyName) < 0) return false;
-      if (filterProjects.length > 0 && filterProjects.indexOf(b.projectName) < 0) return false;
       if (filterState && b.state !== filterState) return false;
       if (filterAssignee) {
         var name = b.stageAssignee && b.stageAssignee.name;
@@ -1584,16 +1567,9 @@ function QCTrackerPage(props) {
       if (filterFlags.indexOf('unassigned') >= 0) {
         if (b.stageAssignee && b.stageAssignee.name) return false;
       }
-      // Tag filter
-      if (filterTags.length > 0 && typeof MOCK_PROJECT_TAGS !== 'undefined') {
-        var pTags = MOCK_PROJECT_TAGS[b.projectId] || [];
-        var tagLabels = pTags.map(function(t) { return t.key + ': ' + t.value; });
-        var matchesTag = filterTags.some(function(ft) { return tagLabels.indexOf(ft) >= 0; });
-        if (!matchesTag) return false;
-      }
       return true;
     });
-  }, [bundles, searchText, filterPolicies, filterProjects, filterState, filterAssignee, filterFlags, filterTags]);
+  }, [bundles, searchText, filterPolicies, filterState, filterAssignee, filterFlags]);
 
   // Stats (computed from filtered, not all bundles)
   var stats = useMemo(function() {
@@ -1606,10 +1582,10 @@ function QCTrackerPage(props) {
     return { total: filtered.length, openFindings: openFindings, unassigned: unassigned, complete: complete, active: filtered.length - complete };
   }, [filtered]);
 
-  var activeFilterCount = (searchText ? 1 : 0) + (filterPolicies.length > 0 ? 1 : 0) + (filterProjects.length > 0 ? 1 : 0) + (filterState ? 1 : 0) + (filterAssignee ? 1 : 0) + filterFlags.length + (filterTags.length > 0 ? 1 : 0);
+  var activeFilterCount = (searchText ? 1 : 0) + (filterPolicies.length > 0 ? 1 : 0) + (filterState ? 1 : 0) + (filterAssignee ? 1 : 0) + filterFlags.length;
 
   function clearFilters() {
-    setSearchText(''); setFilterPolicies([]); setFilterProjects([]); setFilterState(null); setFilterAssignee(null); setFilterFlags([]); setFilterTags([]);
+    setSearchText(''); setFilterPolicies([]); setFilterState(null); setFilterAssignee(null); setFilterFlags([]);
   }
 
   // Clickable stat cards — set a filter when clicked
@@ -1709,30 +1685,6 @@ function QCTrackerPage(props) {
     h('div', { className: 'page-header' },
       h('h1', null, 'QC Tracker'),
       h('p', null, 'Track all ' + B.toLowerCase() + 's across projects and ' + P.toLowerCase() + 's')
-    ),
-
-    // Global filters: Project + Tags
-    h('div', { className: 'global-filter-bar' },
-      h('span', { className: 'global-filter-label' }, 'Scope:'),
-      h(Select, {
-        mode: 'multiple', placeholder: 'All Projects',
-        value: filterProjects, onChange: setFilterProjects,
-        allowClear: true, maxTagCount: 2,
-        style: { minWidth: 220 },
-        size: 'small',
-        options: projectOptions.map(function(p) { return { label: p, value: p }; }),
-      }),
-      h(Select, {
-        mode: 'multiple', placeholder: 'Tags',
-        value: filterTags, onChange: setFilterTags,
-        allowClear: true, maxTagCount: 2,
-        style: { minWidth: 260 },
-        size: 'small',
-        options: tagOptions.map(function(t) { return { label: t, value: t }; }),
-      }),
-      (filterProjects.length > 0 || filterTags.length > 0)
-        ? h(Button, { type: 'link', size: 'small', onClick: function() { setFilterProjects([]); setFilterTags([]); } }, 'Clear scope')
-        : null
     ),
 
     // Stat cards — clickable to filter
@@ -2361,7 +2313,7 @@ function AssignmentRulesPage(props) {
 //  ROOT APP
 // ═══════════════════════════════════════════════════════════════
 function App() {
-  var _s1 = useState('dashboard'); var activePage = _s1[0]; var setActivePage = _s1[1];
+  var _s1 = useState('tracker'); var activePage = _s1[0]; var setActivePage = _s1[1];
   var _s2 = useState([]); var bundles = _s2[0]; var setBundles = _s2[1];
   var _s3 = useState(true); var loading = _s3[0]; var setLoading = _s3[1];
   var _s4 = useState(false); var connected = _s4[0]; var setConnected = _s4[1];
@@ -2371,6 +2323,101 @@ function App() {
   var _s8 = useState(DEFAULT_TERMS); var terms = _s8[0]; var setTerms = _s8[1];
   var _s9 = useState(true); var useDummy = _s9[0]; var setUseDummy = _s9[1];
   var _s10 = useState([]); var assignmentRules = _s10[0]; var setAssignmentRules = _s10[1];
+
+  // ── Universal Scope Filters ──────────────────────────────────
+  var _sc1 = useState([]); var scopeProjects = _sc1[0]; var setScopeProjects = _sc1[1];
+  var _sc2 = useState([]); var scopeTags = _sc2[0]; var setScopeTags = _sc2[1];
+  var _sc3 = useState('all'); var scopeView = _sc3[0]; var setScopeView = _sc3[1];
+  var _sc4 = useState('production_programmer'); var scopeCurrentUser = _sc4[0]; var setScopeCurrentUser = _sc4[1];
+
+  // Derive project options from all bundles
+  var scopeProjectOptions = useMemo(function() {
+    var seen = {};
+    return bundles.reduce(function(acc, b) {
+      if (b.projectName && !seen[b.projectName]) {
+        seen[b.projectName] = true;
+        acc.push({ label: b.projectName, value: b.projectName });
+      }
+      return acc;
+    }, []);
+  }, [bundles]);
+
+  // Derive tag options from all bundles
+  var scopeTagOptions = useMemo(function() {
+    var tags = {};
+    if (typeof MOCK_PROJECT_TAGS === 'undefined') return [];
+    bundles.forEach(function(b) {
+      var pTags = MOCK_PROJECT_TAGS[b.projectId] || [];
+      pTags.forEach(function(t) { tags[t.key + ': ' + t.value] = true; });
+    });
+    return Object.keys(tags).sort().map(function(t) { return { label: t, value: t }; });
+  }, [bundles]);
+
+  // Derive user options for "My Work" persona selector
+  var scopeUserOptions = useMemo(function() {
+    return (typeof MOCK_PROJECT_MEMBERS !== 'undefined' ? MOCK_PROJECT_MEMBERS : []).map(function(m) {
+      return { label: m.firstName + ' ' + m.lastName, value: m.userName };
+    });
+  }, []);
+
+  // Apply universal scope to get scopedBundles
+  var scopedBundles = useMemo(function() {
+    return bundles.filter(function(b) {
+      // Project filter
+      if (scopeProjects.length > 0 && scopeProjects.indexOf(b.projectName) < 0) return false;
+      // Tag filter
+      if (scopeTags.length > 0 && typeof MOCK_PROJECT_TAGS !== 'undefined') {
+        var pTags = MOCK_PROJECT_TAGS[b.projectId] || [];
+        var tagLabels = pTags.map(function(t) { return t.key + ': ' + t.value; });
+        var matchesTag = scopeTags.some(function(ft) { return tagLabels.indexOf(ft) >= 0; });
+        if (!matchesTag) return false;
+      }
+      // View filter
+      if (scopeView === 'mywork') {
+        var isAssigned = false;
+        (b.stages || []).forEach(function(s) {
+          if (s.assignee && s.assignee.name === scopeCurrentUser) isAssigned = true;
+        });
+        if (!isAssigned) return false;
+      } else if (scopeView === 'mywork_current') {
+        var currentStage = b.stage;
+        var match = false;
+        (b.stages || []).forEach(function(s) {
+          if (s.stage && s.stage.name === currentStage && s.assignee && s.assignee.name === scopeCurrentUser) match = true;
+        });
+        if (!match) return false;
+      } else if (scopeView === 'mywork_upcoming') {
+        var stageNames = (b.stages || []).map(function(s) { return s.stage ? s.stage.name : ''; });
+        var curIdx = stageNames.indexOf(b.stage);
+        var futureMatch = false;
+        (b.stages || []).forEach(function(s, idx) {
+          if (idx > curIdx && s.assignee && s.assignee.name === scopeCurrentUser) futureMatch = true;
+        });
+        if (!futureMatch) return false;
+      } else if (scopeView === 'mywork_completed') {
+        var stageNames2 = (b.stages || []).map(function(s) { return s.stage ? s.stage.name : ''; });
+        var curIdx2 = stageNames2.indexOf(b.stage);
+        var priorMatch = false;
+        (b.stages || []).forEach(function(s, idx) {
+          if (idx < curIdx2 && s.assignee && s.assignee.name === scopeCurrentUser) priorMatch = true;
+        });
+        if (!priorMatch) return false;
+      } else if (scopeView === 'unassigned') {
+        var currentStage2 = b.stage;
+        var currentAssigned = false;
+        (b.stages || []).forEach(function(s) {
+          if (s.stage && s.stage.name === currentStage2 && s.assignee && s.assignee.name) currentAssigned = true;
+        });
+        if (currentAssigned) return false;
+      } else if (scopeView === 'blocked') {
+        var hasOpen = b._findings && b._findings.some(function(f) { return f.status !== 'Done' && f.status !== 'WontDo'; });
+        if (!hasOpen) return false;
+      }
+      return true;
+    });
+  }, [bundles, scopeProjects, scopeTags, scopeView, scopeCurrentUser]);
+
+  var hasScopeFilters = scopeProjects.length > 0 || scopeTags.length > 0 || scopeView !== 'all';
 
   // Load mock/dummy data
   function loadMockData() {
@@ -2458,25 +2505,39 @@ function App() {
   }
 
   function renderPage() {
+    // Assignment Rules always gets unfiltered bundles (it has its own project selector)
+    // All other pages get scopedBundles
     switch (activePage) {
       case 'dashboard':
-        return h(DashboardPage, { bundles: bundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms });
+        return h(DashboardPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms });
       case 'tracker':
-        return h(QCTrackerPage, { bundles: bundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms });
+        return h(QCTrackerPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms });
       case 'rules':
         return h(AssignmentRulesPage, { bundles: bundles, setBundles: setBundles, assignmentRules: assignmentRules, setAssignmentRules: setAssignmentRules, terms: terms });
       case 'milestones':
-        return h(MilestonesPage, { bundles: bundles, loading: loading, terms: terms });
+        return h(MilestonesPage, { bundles: scopedBundles, loading: loading, terms: terms });
       case 'approvals':
-        return h(ApprovalsPage, { bundles: bundles, loading: loading, terms: terms });
+        return h(ApprovalsPage, { bundles: scopedBundles, loading: loading, terms: terms });
       case 'findings':
-        return h(FindingsPage, { bundles: bundles, loading: loading, terms: terms });
+        return h(FindingsPage, { bundles: scopedBundles, loading: loading, terms: terms });
       case 'metrics':
-        return h(MetricsPage, { bundles: bundles, terms: terms });
+        return h(MetricsPage, { bundles: scopedBundles, terms: terms });
       default:
-        return h(DashboardPage, { bundles: bundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms });
+        return h(DashboardPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms });
     }
   }
+
+  var viewOptions = [
+    { label: 'All Deliverables', value: 'all' },
+    { label: 'My Work (Any Stage)', value: 'mywork' },
+    { label: 'My Work (Current Stage)', value: 'mywork_current' },
+    { label: 'My Work (Upcoming)', value: 'mywork_upcoming' },
+    { label: 'My Work (Completed)', value: 'mywork_completed' },
+    { label: 'Unassigned', value: 'unassigned' },
+    { label: 'Blocked', value: 'blocked' },
+  ];
+
+  var isMyWorkView = scopeView.indexOf('mywork') === 0;
 
   return h(ConfigProvider, { theme: dominoTheme },
     h('div', null,
@@ -2484,6 +2545,54 @@ function App() {
       h('div', { className: 'app-layout' },
         h(Sidebar, { active: activePage, onNav: setActivePage }),
         h('div', { className: 'main-content' },
+          // Universal Scope Bar
+          h('div', { className: 'global-filter-bar' },
+            h('span', { className: 'global-filter-label' }, 'Scope:'),
+            h(Select, {
+              mode: 'multiple', placeholder: 'All Projects',
+              value: scopeProjects, onChange: setScopeProjects,
+              allowClear: true, maxTagCount: 2,
+              style: { minWidth: 220 }, size: 'small',
+              options: scopeProjectOptions,
+            }),
+            h(Select, {
+              mode: 'multiple', placeholder: 'Tags',
+              value: scopeTags, onChange: setScopeTags,
+              allowClear: true, maxTagCount: 2,
+              style: { minWidth: 220 }, size: 'small',
+              options: scopeTagOptions,
+            }),
+            h('span', { className: 'global-filter-divider' }),
+            h('span', { className: 'global-filter-label' }, 'View:'),
+            h(Select, {
+              value: scopeView, onChange: setScopeView,
+              style: { minWidth: 180 }, size: 'small',
+              options: viewOptions,
+            }),
+            isMyWorkView
+              ? h(Select, {
+                  value: scopeCurrentUser, onChange: setScopeCurrentUser,
+                  style: { minWidth: 180 }, size: 'small',
+                  showSearch: true, optionFilterProp: 'label',
+                  options: scopeUserOptions,
+                })
+              : null,
+            hasScopeFilters
+              ? h('span', { style: { marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 } },
+                  h(Tag, { color: 'purple' }, scopedBundles.length + ' of ' + bundles.length + ' deliverables'),
+                  h(Button, { type: 'link', size: 'small', onClick: function() {
+                    setScopeProjects([]); setScopeTags([]); setScopeView('all');
+                  } }, 'Clear all')
+                )
+              : null
+          ),
+          activePage === 'metrics' && hasScopeFilters
+            ? h(Alert, {
+                type: 'info', showIcon: true,
+                message: 'Team Metrics are scoped to the current filter. Some team members may have work outside this scope.',
+                style: { marginBottom: 12 },
+              })
+            : null,
           renderPage()
         )
       ),

@@ -779,6 +779,14 @@ body {
   font-size: 10px;
 }
 
+/* ── Scope Bar Divider ─────────────────────────────── */
+.global-filter-divider {
+  width: 1px;
+  height: 20px;
+  background: #D0CCEF;
+  margin: 0 4px;
+}
+
 /* ── Assignment Rules ──────────────────────────────── */
 .rules-preview-skip { opacity: 0.45; }
 .page-subtitle { color: #65657B; font-size: 13px; margin-top: 2px; }
