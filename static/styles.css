@@ -778,3 +778,7 @@ body {
   margin-left: auto;
   font-size: 10px;
 }
+
+/* ── Assignment Rules ──────────────────────────────── */
+.rules-preview-skip { opacity: 0.45; }
+.page-subtitle { color: #65657B; font-size: 13px; margin-top: 2px; }

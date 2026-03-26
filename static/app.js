@@ -4,7 +4,8 @@
    ================================================================ */
 
 const { ConfigProvider, Button, Table, Tag, Space, Spin, Drawer, Badge,
-        Tooltip, Progress, Select, Input, Empty, Tabs, Statistic, Switch } = antd;
+        Tooltip, Progress, Select, Input, Empty, Tabs, Statistic, Switch,
+        Modal, Alert, Radio } = antd;
 const { createElement: h, useState, useEffect, useCallback, useMemo } = React;
 
 dayjs.extend(dayjs_plugin_relativeTime);
@@ -206,6 +207,7 @@ function TopNav(props) {
 var NAV_ITEMS = [
   { key: 'dashboard', icon: '\u25A3', label: 'Dashboard' },
   { key: 'tracker', icon: '\u25C9', label: 'QC Tracker' },
+  { key: 'rules', icon: '\u2699', label: 'Assignment Rules' },
   { key: 'milestones', icon: '\u2630', label: 'Milestones' },
   { key: 'approvals', icon: '\u2713', label: 'Approvals' },
   { key: 'findings', icon: '\u26A0', label: 'Findings & QC' },
@@ -1903,6 +1905,459 @@ function DetailDrawer(props) {
 
 
 // ═══════════════════════════════════════════════════════════════
+//  ASSIGNMENT RULES PAGE
+// ═══════════════════════════════════════════════════════════════
+function AssignmentRulesPage(props) {
+  var bundles = props.bundles;
+  var setBundles = props.setBundles;
+  var assignmentRules = props.assignmentRules;
+  var setAssignmentRules = props.setAssignmentRules;
+  var terms = props.terms;
+  var B = terms.bundle || 'Bundle';
+  var P = terms.policy || 'Policy';
+
+  var _rp = useState(null); var selectedProject = _rp[0]; var setSelectedProject = _rp[1];
+  var _rm = useState(false); var addModalOpen = _rm[0]; var setAddModalOpen = _rm[1];
+  var _ra = useState(false); var applyModalOpen = _ra[0]; var setApplyModalOpen = _ra[1];
+  var _re = useState(null); var editingIdx = _re[0]; var setEditingIdx = _re[1];
+  var _rf1 = useState(undefined); var formPlan = _rf1[0]; var setFormPlan = _rf1[1];
+  var _rf2 = useState(undefined); var formStage = _rf2[0]; var setFormStage = _rf2[1];
+  var _rf3 = useState(undefined); var formAssignee = _rf3[0]; var setFormAssignee = _rf3[1];
+  var _rc = useState('skip'); var conflictMode = _rc[0]; var setConflictMode = _rc[1];
+
+  // Unique projects from bundles
+  var projectOptions = useMemo(function() {
+    var seen = {};
+    return bundles.reduce(function(acc, b) {
+      if (!seen[b.projectId]) {
+        seen[b.projectId] = true;
+        acc.push({ label: b.projectName, value: b.projectId });
+      }
+      return acc;
+    }, []);
+  }, [bundles]);
+
+  // Auto-select project if only one
+  useEffect(function() {
+    if (!selectedProject && projectOptions.length === 1) {
+      setSelectedProject(projectOptions[0].value);
+    }
+  }, [projectOptions]);
+
+  // Bundles for selected project
+  var projectBundles = useMemo(function() {
+    if (!selectedProject) return [];
+    return bundles.filter(function(b) { return b.projectId === selectedProject; });
+  }, [bundles, selectedProject]);
+
+  // Rules for selected project
+  var projectRules = useMemo(function() {
+    if (!selectedProject) return [];
+    return assignmentRules.filter(function(r) { return r.projectId === selectedProject; });
+  }, [assignmentRules, selectedProject]);
+
+  // QC Plans used in this project
+  var planOptions = useMemo(function() {
+    var seen = {};
+    return projectBundles.reduce(function(acc, b) {
+      if (!seen[b.policyName]) {
+        seen[b.policyName] = true;
+        acc.push({ label: b.policyName, value: b.policyName });
+      }
+      return acc;
+    }, []);
+  }, [projectBundles]);
+
+  // Stages for selected QC Plan (from MOCK_POLICIES or from bundle data)
+  var stageOptions = useMemo(function() {
+    if (!formPlan) return [];
+    // Try MOCK_POLICIES first
+    if (typeof MOCK_POLICIES !== 'undefined') {
+      var policy = MOCK_POLICIES.find(function(p) { return p.name === formPlan; });
+      if (policy) return policy.stages.map(function(s) { return { label: s, value: s }; });
+    }
+    // Fallback: extract from bundle stages
+    var names = {};
+    projectBundles.forEach(function(b) {
+      if (b.policyName !== formPlan) return;
+      (b.stages || []).forEach(function(s) {
+        var n = s.stage ? s.stage.name : '';
+        if (n) names[n] = true;
+      });
+    });
+    return Object.keys(names).map(function(n) { return { label: n, value: n }; });
+  }, [formPlan, projectBundles]);
+
+  // Assignee options (project members)
+  var memberOptions = useMemo(function() {
+    return (typeof MOCK_PROJECT_MEMBERS !== 'undefined' ? MOCK_PROJECT_MEMBERS : []).map(function(m) {
+      return { label: m.firstName + ' ' + m.lastName + ' (' + m.userName + ')', value: m.userName };
+    });
+  }, []);
+
+  // Add match counts to rules
+  var rulesWithCounts = useMemo(function() {
+    return projectRules.map(function(rule, idx) {
+      var total = 0;
+      var unassigned = 0;
+      projectBundles.forEach(function(b) {
+        if (b.policyName !== rule.policyName) return;
+        (b.stages || []).forEach(function(s) {
+          var stageName = s.stage ? s.stage.name : '';
+          if (stageName !== rule.stageName) return;
+          total++;
+          if (!s.assignee || !s.assignee.name) unassigned++;
+        });
+      });
+      return Object.assign({}, rule, { _total: total, _unassigned: unassigned, _idx: idx });
+    });
+  }, [projectRules, projectBundles]);
+
+  // Total unassigned that match any rule
+  var totalUnassignedMatch = useMemo(function() {
+    return rulesWithCounts.reduce(function(sum, r) { return sum + r._unassigned; }, 0);
+  }, [rulesWithCounts]);
+
+  // Apply preview: what changes will be made
+  var applyPreview = useMemo(function() {
+    var changes = [];
+    projectRules.forEach(function(rule) {
+      // Find the user label for display
+      var mem = (typeof MOCK_PROJECT_MEMBERS !== 'undefined' ? MOCK_PROJECT_MEMBERS : []).find(function(m) { return m.userName === rule.assignee; });
+      var newLabel = mem ? mem.firstName + ' ' + mem.lastName : rule.assignee;
+      projectBundles.forEach(function(b) {
+        if (b.policyName !== rule.policyName) return;
+        (b.stages || []).forEach(function(s) {
+          var stageName = s.stage ? s.stage.name : '';
+          if (stageName !== rule.stageName) return;
+          var current = s.assignee && s.assignee.name ? s.assignee.name : null;
+          var skip = (conflictMode === 'skip' && current);
+          changes.push({
+            key: b.id + '-' + stageName,
+            bundleName: b.name,
+            stageName: stageName,
+            currentAssignee: current || 'Unassigned',
+            newAssignee: newLabel,
+            willApply: !skip,
+          });
+        });
+      });
+    });
+    return changes;
+  }, [projectRules, projectBundles, conflictMode]);
+
+  var changesCount = applyPreview.filter(function(c) { return c.willApply; }).length;
+  var affectedBundles = {};
+  applyPreview.forEach(function(c) { if (c.willApply) affectedBundles[c.bundleName] = true; });
+  var affectedBundleCount = Object.keys(affectedBundles).length;
+
+  // Handlers
+  function openAddModal(editIdx) {
+    if (editIdx !== undefined && editIdx !== null) {
+      var globalIdx = assignmentRules.indexOf(projectRules[editIdx]);
+      setEditingIdx(globalIdx);
+      var rule = projectRules[editIdx];
+      setFormPlan(rule.policyName);
+      setFormStage(rule.stageName);
+      setFormAssignee(rule.assignee);
+    } else {
+      setEditingIdx(null);
+      setFormPlan(undefined);
+      setFormStage(undefined);
+      setFormAssignee(undefined);
+    }
+    setAddModalOpen(true);
+  }
+
+  function handleSaveRule() {
+    if (!formPlan || !formStage || !formAssignee) return;
+    var newRule = {
+      id: 'rule-' + Date.now(),
+      projectId: selectedProject,
+      policyName: formPlan,
+      stageName: formStage,
+      assignee: formAssignee,
+    };
+    if (editingIdx !== null && editingIdx !== undefined) {
+      var updated = assignmentRules.slice();
+      updated[editingIdx] = newRule;
+      setAssignmentRules(updated);
+    } else {
+      setAssignmentRules(assignmentRules.concat([newRule]));
+    }
+    setAddModalOpen(false);
+    setFormPlan(undefined);
+    setFormStage(undefined);
+    setFormAssignee(undefined);
+    setEditingIdx(null);
+  }
+
+  function handleDeleteRule(localIdx) {
+    var globalIdx = assignmentRules.indexOf(projectRules[localIdx]);
+    if (globalIdx >= 0) {
+      var updated = assignmentRules.slice();
+      updated.splice(globalIdx, 1);
+      setAssignmentRules(updated);
+    }
+  }
+
+  function handleApplyRules() {
+    var updated = bundles.map(function(b) {
+      if (b.projectId !== selectedProject) return b;
+      var matched = false;
+      var newStages = (b.stages || []).map(function(s) {
+        var stageName = s.stage ? s.stage.name : '';
+        var rule = projectRules.find(function(r) {
+          return r.policyName === b.policyName && r.stageName === stageName;
+        });
+        if (!rule) return s;
+        var current = s.assignee && s.assignee.name;
+        if (conflictMode === 'skip' && current) return s;
+        matched = true;
+        return Object.assign({}, s, { assignee: { id: '', name: rule.assignee } });
+      });
+      if (!matched) return b;
+      return Object.assign({}, b, { stages: newStages });
+    });
+    setApplyModalOpen(false);
+    setBundles(updated);
+  }
+
+  // Rules table columns
+  var rulesColumns = [
+    { title: P + ' (QC Plan)', dataIndex: 'policyName', key: 'plan',
+      render: function(v) { return h(Tag, { color: 'purple' }, v); }
+    },
+    { title: 'Stage', dataIndex: 'stageName', key: 'stage' },
+    { title: 'Assignee', dataIndex: 'assignee', key: 'assignee',
+      render: function(v) {
+        var mem = (typeof MOCK_PROJECT_MEMBERS !== 'undefined' ? MOCK_PROJECT_MEMBERS : []).find(function(m) { return m.userName === v; });
+        return mem ? mem.firstName + ' ' + mem.lastName : v;
+      }
+    },
+    { title: 'Matched', key: 'matched', width: 90, align: 'center',
+      render: function(_, r) {
+        return h('span', null,
+          h('span', { style: { fontWeight: 600 } }, r._total),
+          r._unassigned > 0
+            ? h('span', { style: { color: '#F59E0B', fontSize: 11, marginLeft: 4 } }, '(' + r._unassigned + ' open)')
+            : null
+        );
+      }
+    },
+    { title: '', key: 'actions', width: 100,
+      render: function(_, r, idx) {
+        return h(Space, { size: 4 },
+          h(Button, { type: 'link', size: 'small', onClick: function() { openAddModal(idx); } }, 'Edit'),
+          h(Button, { type: 'link', size: 'small', danger: true, onClick: function() { handleDeleteRule(idx); } }, 'Delete')
+        );
+      }
+    },
+  ];
+
+  // Apply preview columns
+  var previewColumns = [
+    { title: B, dataIndex: 'bundleName', key: 'bundle', ellipsis: true },
+    { title: 'Stage', dataIndex: 'stageName', key: 'stage', ellipsis: true },
+    { title: 'Current', dataIndex: 'currentAssignee', key: 'current', width: 130,
+      render: function(v) {
+        return v === 'Unassigned'
+          ? h('span', { style: { color: '#F59E0B' } }, 'Unassigned')
+          : v;
+      }
+    },
+    { title: 'New Assignee', dataIndex: 'newAssignee', key: 'new', width: 130,
+      render: function(v, r) {
+        return h('span', { style: { color: r.willApply ? '#28A464' : '#8F8FA3', fontWeight: r.willApply ? 600 : 400 } }, v);
+      }
+    },
+    { title: '', key: 'status', width: 70,
+      render: function(_, r) {
+        return r.willApply
+          ? h(Tag, { color: 'green' }, 'Apply')
+          : h(Tag, null, 'Skip');
+      }
+    },
+  ];
+
+  return h('div', null,
+    // Page header
+    h('div', { className: 'page-header' },
+      h('h2', null, 'Assignment Rules'),
+      h('p', { className: 'page-subtitle' }, 'Define rules to bulk-assign team members to ' + B.toLowerCase() + ' stages')
+    ),
+
+    // Project selector
+    h('div', { className: 'panel', style: { marginBottom: 16 } },
+      h('div', { className: 'panel-body', style: { padding: 16 } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 12 } },
+          h('span', { style: { fontWeight: 600, color: '#2E2E38', whiteSpace: 'nowrap' } }, 'Project:'),
+          h(Select, {
+            placeholder: 'Select a project...',
+            value: selectedProject || undefined,
+            onChange: function(v) { setSelectedProject(v); },
+            options: projectOptions,
+            style: { minWidth: 300 },
+            showSearch: true,
+            optionFilterProp: 'label',
+          })
+        )
+      )
+    ),
+
+    // If no project selected
+    !selectedProject
+      ? h('div', { className: 'panel' },
+          h('div', { className: 'panel-body', style: { padding: 40, textAlign: 'center' } },
+            h(Empty, { description: 'Select a project to manage assignment rules' })
+          )
+        )
+      : h('div', null,
+          // Unassigned match banner
+          totalUnassignedMatch > 0
+            ? h(Alert, {
+                type: 'info',
+                showIcon: true,
+                message: totalUnassignedMatch + ' unassigned stage' + (totalUnassignedMatch !== 1 ? 's' : '') + ' match your rules',
+                description: 'Click "Apply Rules" to assign them.',
+                style: { marginBottom: 16 },
+              })
+            : projectRules.length > 0
+              ? h(Alert, {
+                  type: 'success',
+                  showIcon: true,
+                  message: 'All matching stages are assigned',
+                  style: { marginBottom: 16 },
+                })
+              : null,
+
+          // Toolbar
+          h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 } },
+            h('div', { style: { display: 'flex', gap: 8 } },
+              h(Button, {
+                type: 'primary',
+                onClick: function() { openAddModal(); },
+              }, '+ Add Rule'),
+              h(Button, {
+                onClick: function() { setApplyModalOpen(true); },
+                disabled: projectRules.length === 0,
+              }, 'Apply Rules')
+            ),
+            h('span', { style: { color: '#65657B', fontSize: 13 } },
+              projectBundles.length + ' ' + B.toLowerCase() + (projectBundles.length !== 1 ? 's' : '') + ' in project'
+            )
+          ),
+
+          // Rules table
+          h('div', { className: 'panel' },
+            h('div', { className: 'panel-header' },
+              h('span', null, 'Rules (' + projectRules.length + ')')
+            ),
+            h('div', { className: 'panel-body-flush' },
+              projectRules.length === 0
+                ? h('div', { style: { padding: '32px 16px', textAlign: 'center', color: '#8F8FA3' } },
+                    h('div', { style: { fontSize: 28, marginBottom: 8 } }, '\u2699'),
+                    h('div', null, 'No rules yet. Add a rule to map a ' + P.toLowerCase() + ' stage to a team member.')
+                  )
+                : h(Table, {
+                    dataSource: rulesWithCounts,
+                    columns: rulesColumns,
+                    rowKey: 'id',
+                    pagination: false,
+                    size: 'small',
+                  })
+            )
+          ),
+
+          // Add/Edit Rule Modal
+          h(Modal, {
+            title: editingIdx !== null && editingIdx !== undefined ? 'Edit Assignment Rule' : 'Add Assignment Rule',
+            open: addModalOpen,
+            onOk: handleSaveRule,
+            onCancel: function() { setAddModalOpen(false); },
+            okText: editingIdx !== null && editingIdx !== undefined ? 'Update' : 'Add Rule',
+            okButtonProps: { disabled: !formPlan || !formStage || !formAssignee },
+          },
+            h('div', { style: { display: 'flex', flexDirection: 'column', gap: 16 } },
+              h('div', null,
+                h('div', { style: { marginBottom: 4, fontWeight: 500, fontSize: 12, color: '#65657B' } }, P + ' (QC Plan)'),
+                h(Select, {
+                  placeholder: 'Select a QC Plan...',
+                  value: formPlan,
+                  onChange: function(v) { setFormPlan(v); setFormStage(undefined); },
+                  options: planOptions,
+                  style: { width: '100%' },
+                })
+              ),
+              h('div', null,
+                h('div', { style: { marginBottom: 4, fontWeight: 500, fontSize: 12, color: '#65657B' } }, 'Stage'),
+                h(Select, {
+                  placeholder: formPlan ? 'Select a stage...' : 'Select a QC Plan first',
+                  value: formStage,
+                  onChange: function(v) { setFormStage(v); },
+                  options: stageOptions,
+                  disabled: !formPlan,
+                  style: { width: '100%' },
+                })
+              ),
+              h('div', null,
+                h('div', { style: { marginBottom: 4, fontWeight: 500, fontSize: 12, color: '#65657B' } }, 'Assignee'),
+                h(Select, {
+                  placeholder: 'Select a team member...',
+                  value: formAssignee,
+                  onChange: function(v) { setFormAssignee(v); },
+                  options: memberOptions,
+                  showSearch: true,
+                  optionFilterProp: 'label',
+                  style: { width: '100%' },
+                })
+              )
+            )
+          ),
+
+          // Apply Rules Modal
+          h(Modal, {
+            title: 'Apply Assignment Rules',
+            open: applyModalOpen,
+            onOk: handleApplyRules,
+            onCancel: function() { setApplyModalOpen(false); },
+            okText: 'Apply ' + changesCount + ' Assignment' + (changesCount !== 1 ? 's' : ''),
+            okButtonProps: { disabled: changesCount === 0 },
+            width: 700,
+          },
+            h('div', { style: { marginBottom: 16 } },
+              h('div', { style: { fontSize: 15, fontWeight: 600, marginBottom: 8 } },
+                changesCount > 0
+                  ? 'Will assign ' + changesCount + ' stage' + (changesCount !== 1 ? 's' : '') + ' across ' + affectedBundleCount + ' ' + B.toLowerCase() + (affectedBundleCount !== 1 ? 's' : '')
+                  : 'No changes to apply'
+              ),
+              h(Radio.Group, {
+                value: conflictMode,
+                onChange: function(e) { setConflictMode(e.target.value); },
+                style: { marginBottom: 12 },
+              },
+                h(Radio, { value: 'skip' }, 'Skip already-assigned stages'),
+                h(Radio, { value: 'overwrite' }, 'Overwrite all assignments')
+              )
+            ),
+            applyPreview.length > 0
+              ? h(Table, {
+                  dataSource: applyPreview,
+                  columns: previewColumns,
+                  rowKey: 'key',
+                  size: 'small',
+                  pagination: applyPreview.length > 10 ? { pageSize: 10 } : false,
+                  scroll: { y: 300 },
+                  rowClassName: function(r) { return r.willApply ? '' : 'rules-preview-skip'; },
+                })
+              : h('div', { style: { padding: 20, textAlign: 'center', color: '#8F8FA3' } }, 'No matching stages found')
+          )
+        )
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════
 //  ROOT APP
 // ═══════════════════════════════════════════════════════════════
 function App() {
@@ -1915,6 +2370,7 @@ function App() {
   var _s7 = useState(null); var error = _s7[0]; var setError = _s7[1];
   var _s8 = useState(DEFAULT_TERMS); var terms = _s8[0]; var setTerms = _s8[1];
   var _s9 = useState(true); var useDummy = _s9[0]; var setUseDummy = _s9[1];
+  var _s10 = useState([]); var assignmentRules = _s10[0]; var setAssignmentRules = _s10[1];
 
   // Load mock/dummy data
   function loadMockData() {
@@ -2007,6 +2463,8 @@ function App() {
         return h(DashboardPage, { bundles: bundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms });
       case 'tracker':
         return h(QCTrackerPage, { bundles: bundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms });
+      case 'rules':
+        return h(AssignmentRulesPage, { bundles: bundles, setBundles: setBundles, assignmentRules: assignmentRules, setAssignmentRules: setAssignmentRules, terms: terms });
       case 'milestones':
         return h(MilestonesPage, { bundles: bundles, loading: loading, terms: terms });
       case 'approvals':
