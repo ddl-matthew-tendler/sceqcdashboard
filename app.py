@@ -61,7 +61,7 @@ def _get_gov_host_candidates():
             candidates.append(("DOMINO_USER_HOST", user_host))
 
     # External hostname captured from browser requests (goes through ingress which routes governance)
-    ext_host = _external_host_cache.get("host", "").rstrip("/")
+    ext_host = (_external_host_cache.get("host") or "").rstrip("/")
     if ext_host and ext_host != primary:
         candidates.append(("external_host", ext_host))
 
@@ -234,6 +234,37 @@ def gov_post(path, json_body=None):
     raise HTTPException(status_code=resp.status_code, detail=resp.text)
 
 
+def gov_patch(path, json_body=None):
+    """PATCH governance endpoint (e.g. stage assignee updates)."""
+    gov_host = _get_gov_host() or get_domino_host()
+    if not gov_host:
+        raise HTTPException(status_code=503, detail="DOMINO_API_HOST not set")
+    url = f"{gov_host}/api/governance/v1{path}"
+
+    api_key = _get_api_key()
+    if api_key:
+        headers = {"X-Domino-Api-Key": api_key, "Content-Type": "application/json"}
+        resp = requests.patch(url, headers=headers, json=json_body, timeout=30)
+        if resp.status_code == 200:
+            return resp.json()
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+
+    token = _get_sidecar_token()
+    if not token:
+        raise HTTPException(status_code=503, detail="Cannot acquire auth token")
+
+    for headers in [
+        {"X-Domino-Api-Key": token, "Content-Type": "application/json"},
+        {"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        {"Authorization": f"Bearer {token}", "X-Domino-Api-Key": token, "Content-Type": "application/json"},
+    ]:
+        resp = requests.patch(url, headers=headers, json=json_body, timeout=30)
+        if resp.status_code == 200:
+            return resp.json()
+
+    raise HTTPException(status_code=resp.status_code, detail=resp.text)
+
+
 def v4_get(path, params=None):
     host = get_domino_host()
     if not host:
@@ -282,6 +313,14 @@ def get_bundle_findings(bundle_id: str, limit: int = 100, offset: int = 0):
 @app.get("/api/bundles/{bundle_id}/gates")
 def get_bundle_gates(bundle_id: str):
     return gov_get(f"/bundles/{bundle_id}/gates")
+
+
+# ── Stage Reassignment ───────────────────────────────────────────
+
+@app.patch("/api/bundles/{bundle_id}/stages/{stage_id}")
+def patch_bundle_stage(bundle_id: str, stage_id: str, body: dict):
+    """Reassign a stage owner. Body: {"assignee": {"id": "userId"}}"""
+    return gov_patch(f"/bundles/{bundle_id}/stages/{stage_id}", json_body=body)
 
 
 # ── Attachment Overviews ──────────────────────────────────────────

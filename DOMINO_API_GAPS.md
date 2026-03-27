@@ -14,40 +14,27 @@ The SCE QC Tracker is a Domino App built for pharmaceutical statistical programm
 
 ## Gap Details
 
-### 1. Stage Reassignment
+### 1. ~~Stage Reassignment~~ — RESOLVED
 
-- **Priority**: High
-- **User Impact**: A QC lead opens a deliverable's expanded row and wants to reassign a stage (e.g., "Double Programming") to a different team member. Today, the six stage assignment dropdowns are rendered but **disabled**, each showing an orange "API Pending" badge. The user cannot change any stage assignee. The app checks `API_GAPS.stageReassign.ready` and prevents interaction.
-- **Current Behavior**: The `onChange` handler at `app.js` line ~1332 is gated by `API_GAPS.stageReassign.ready === false`. If bypassed, it would only update local React state and log to the console — no data is sent to Domino. The dropdown options are correctly populated from live project collaborators via `GET /v4/projects/{id}/collaborators`.
-- **What We Need**:
-  ```
-  PUT /api/governance/v1/bundles/{bundleId}/stages/{stageId}/assignee
-
-  Request:
+- **Status**: **Implemented** (2026-03-27)
+- **Endpoint**: `PATCH /api/governance/v1/bundles/{bundleId}/stages/{stageId}`
+- **Request**: `{"assignee": {"id": "userId"}}`
+- **Response** (200 OK):
+  ```json
   {
-    "assigneeId": "userId"    // Domino user ID from collaborators list
-  }
-
-  Response (200 OK):
-  {
-    "stageId": "stage-abc-123",
+    "bundleId": "...",
+    "stageId": "...",
     "stage": {
-      "id": "stage-def-456",
-      "name": "Double Programming"
+      "id": "...",
+      "policyEntityId": "...",
+      "name": "Self QC",
+      "policyVersionId": "..."
     },
-    "assignee": {
-      "id": "userId",
-      "userName": "jane_doe",
-      "fullName": "Jane Doe"
-    },
-    "updatedAt": "2026-03-26T14:30:00Z",
-    "updatedBy": "current-user-id"
+    "assignee": {"id": "userId", "name": ""},
+    "assignedAt": "2026-03-27T02:23:06Z"
   }
   ```
-  - **HTTP method**: `PUT` (idempotent update of a single field on an existing resource).
-  - **Auth**: Same Bearer token / X-Domino-Api-Key pattern used by all existing governance endpoints.
-  - **Error cases**: 404 if bundleId or stageId not found; 403 if user lacks project write permissions; 400 if assigneeId is not a valid project collaborator.
-- **Notes**: This is the foundational write endpoint. Gaps 2, 3, and 6 all depend on this capability existing first. The URL pattern follows the existing governance convention (`/api/governance/v1/bundles/{id}/...`).
+- **Notes**: Discovered via live API probing. The endpoint was undocumented but fully functional. Uses PATCH (not PUT). The response also includes `stage.policyVersionId` which enables deep-linking to version-level governance URLs. The app now calls this endpoint from the expanded row stage timeline dropdowns and from the Stage Assignments page bulk reassign. `API_GAPS.stageReassign.ready` is set to `true`.
 
 ---
 

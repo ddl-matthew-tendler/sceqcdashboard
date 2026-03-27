@@ -53,8 +53,8 @@ function capFirst(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 var API_GAPS = {
   stageReassign: {
     label: 'Stage Reassignment',
-    message: 'This action is coming soon — the Domino write API for stage reassignment is in development.',
-    ready: false,
+    message: 'Reassign a stage owner via the Domino governance API.',
+    ready: true,
   },
   bulkAssign: {
     label: 'Bulk Assign',
@@ -95,6 +95,14 @@ function apiGet(path) { return apiFetch(path); }
 function apiPost(path, body) {
   return apiFetch(path, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+function apiPatch(path, body) {
+  return apiFetch(path, {
+    method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
@@ -143,9 +151,17 @@ function findingStatusTag(status) {
 // Build Domino UI URL for a bundle
 // Domino governance URL pattern:
 // /u/{owner}/{project}/governance/bundle/{bundleId}/policy/{policyId}/version/{versionId}/evidence/stage/{stage-slug}
+// Additional suffixes: /findings (findings list), /finding/{findingId} (specific finding)
 // We build as deep as our data allows, falling back to shallower URLs.
-function getDominoBundleUrl(bundle, stageName) {
+// opts: { stageName, findingId, findingsPage }
+function getDominoBundleUrl(bundle, optsOrStageName) {
   if (!bundle || !bundle.id) return null;
+  var opts = {};
+  if (typeof optsOrStageName === 'string') {
+    opts.stageName = optsOrStageName;
+  } else if (optsOrStageName) {
+    opts = optsOrStageName;
+  }
   var host = '';
   try { host = window.location.origin; } catch(e) {}
 
@@ -170,11 +186,18 @@ function getDominoBundleUrl(bundle, stageName) {
       url += '/version/' + versionId;
 
       // Add stage evidence path if stage name provided
-      if (stageName) {
-        var stageSlug = stageName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      if (opts.stageName) {
+        var stageSlug = opts.stageName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
         url += '/evidence/stage/' + stageSlug;
       }
     }
+  }
+
+  // Append findings page or specific finding
+  if (opts.findingsPage) {
+    url += '/findings';
+  } else if (opts.findingId) {
+    url += '/finding/' + opts.findingId;
   }
 
   return url;
@@ -281,6 +304,119 @@ function Sidebar(props) {
         h('span', null, item.label)
       );
     })
+  );
+}
+
+// ── Resizable Header Cell ─────────────────────────────────────
+// Wraps each <th> with a draggable resize handle on the right edge.
+function ResizableHeaderCell(props) {
+  var width = props.width;
+  var onResize = props.onResize;
+  // Extract non-DOM props to pass through
+  var rest = {};
+  Object.keys(props).forEach(function(k) {
+    if (k !== 'width' && k !== 'onResize') rest[k] = props[k];
+  });
+
+  if (!width || !onResize) {
+    return h('th', rest, props.children);
+  }
+
+  var _dragging = React.useRef(false);
+  var _startX = React.useRef(0);
+  var _startW = React.useRef(0);
+
+  function handleMouseDown(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    _dragging.current = true;
+    _startX.current = e.clientX;
+    _startW.current = width;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    function handleMouseMove(ev) {
+      if (!_dragging.current) return;
+      var diff = ev.clientX - _startX.current;
+      var newWidth = Math.max(50, _startW.current + diff);
+      onResize(newWidth);
+    }
+    function handleMouseUp() {
+      _dragging.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    }
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+  }
+
+  return h('th', Object.assign({}, rest, { style: Object.assign({}, rest.style || {}, { position: 'relative' }) }),
+    props.children,
+    h('div', {
+      className: 'resize-handle',
+      onMouseDown: handleMouseDown,
+    })
+  );
+}
+
+// ── Column Visibility Dropdown ────────────────────────────────
+function ColumnVisibilityDropdown(props) {
+  var columns = props.columns; // [{ key, title }]
+  var hiddenKeys = props.hiddenKeys; // Set or array
+  var onToggle = props.onToggle; // function(key)
+
+  var _vis = useState(false); var menuOpen = _vis[0]; var setMenuOpen = _vis[1];
+
+  return h('div', { style: { position: 'relative', display: 'inline-block' } },
+    h(Button, {
+      size: 'small',
+      type: 'default',
+      onClick: function() { setMenuOpen(!menuOpen); },
+      style: { fontSize: 11 },
+      title: 'Show/hide columns',
+    }, '\u2630 Columns'),
+    menuOpen
+      ? h('div', {
+          className: 'column-visibility-menu',
+          style: {
+            position: 'absolute', top: '100%', right: 0, zIndex: 1050,
+            background: '#fff', border: '1px solid #E0E0E0', borderRadius: 6,
+            padding: '8px 0', minWidth: 180, boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
+          },
+        },
+        h('div', { style: { padding: '4px 12px 8px', fontSize: 11, color: '#8F8FA3', fontWeight: 600, borderBottom: '1px solid #F0F0F0' } }, 'Toggle Columns'),
+        columns.map(function(col) {
+          var isHidden = hiddenKeys.indexOf(col.key) >= 0;
+          return h('label', {
+            key: col.key,
+            style: {
+              display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', cursor: 'pointer',
+              fontSize: 12, color: '#2E2E38',
+            },
+            onMouseEnter: function(e) { e.currentTarget.style.background = '#F5F5F8'; },
+            onMouseLeave: function(e) { e.currentTarget.style.background = ''; },
+          },
+            h('input', {
+              type: 'checkbox',
+              checked: !isHidden,
+              onChange: function() { onToggle(col.key); },
+              style: { accentColor: '#543FDE' },
+            }),
+            typeof col.title === 'string' ? col.title : col.key
+          );
+        }),
+        h('div', {
+          style: { padding: '6px 12px', borderTop: '1px solid #F0F0F0', marginTop: 4 },
+        },
+          h('a', {
+            style: { fontSize: 11, color: '#543FDE', cursor: 'pointer' },
+            onClick: function() { setMenuOpen(false); },
+          }, 'Close')
+        )
+      )
+      : null
   );
 }
 
@@ -1219,17 +1355,28 @@ function StagePopoverContent(props) {
 
     // Evidence summary cards
     h('div', { className: 'stage-popover-evidence' },
-      h('div', {
-        className: 'stage-popover-card' + (totalFindings > 0 && onFindingsClick ? ' clickable' : ''),
-        onClick: totalFindings > 0 && onFindingsClick ? function() { onClose(); onFindingsClick(bundle); } : undefined,
-      },
-        h('div', { className: 'stage-popover-card-value', style: { color: openFindings > 0 ? '#C20A29' : '#28A464' } },
-          openFindings > 0 ? openFindings : '\u2713'
-        ),
-        h('div', { className: 'stage-popover-card-label' },
-          openFindings > 0 ? 'Open Finding' + (openFindings > 1 ? 's' : '') : totalFindings > 0 ? 'All Resolved' : 'No Findings'
-        )
-      ),
+      (function() {
+        var findingsPageUrl = getDominoBundleUrl(bundle, { findingsPage: true });
+        var cardContent = [
+          h('div', { key: 'val', className: 'stage-popover-card-value', style: { color: openFindings > 0 ? '#C20A29' : '#28A464' } },
+            openFindings > 0 ? openFindings : '\u2713'
+          ),
+          h('div', { key: 'lbl', className: 'stage-popover-card-label' },
+            openFindings > 0 ? 'Open Finding' + (openFindings > 1 ? 's' : '') : totalFindings > 0 ? 'All Resolved' : 'No Findings'
+          ),
+        ];
+        if (totalFindings > 0 && findingsPageUrl) {
+          return h('a', {
+            className: 'stage-popover-card clickable',
+            href: findingsPageUrl, target: '_blank', rel: 'noopener noreferrer',
+            style: { textDecoration: 'none', color: 'inherit' },
+          }, cardContent);
+        }
+        return h('div', {
+          className: 'stage-popover-card' + (totalFindings > 0 && onFindingsClick ? ' clickable' : ''),
+          onClick: totalFindings > 0 && onFindingsClick ? function() { onClose(); onFindingsClick(bundle); } : undefined,
+        }, cardContent);
+      })(),
       h('div', { className: 'stage-popover-card' },
         h('div', { className: 'stage-popover-card-value', style: { color: totalApprovals > 0 ? (approvedCount === totalApprovals ? '#28A464' : '#0070CC') : '#8F8FA3' } },
           totalApprovals > 0 ? approvedCount + '/' + totalApprovals : '\u2014'
@@ -1334,12 +1481,20 @@ function StatusFlags(props) {
   var flags = [];
 
   if (openFindings > 0) {
-    flags.push(h(Tooltip, { key: 'findings', title: 'Click to view ' + openFindings + ' open finding' + (openFindings > 1 ? 's' : '') },
-      h('span', {
-        className: 'status-flag open-findings',
-        style: { cursor: 'pointer' },
-        onClick: function(e) { e.stopPropagation(); if (onFindingsClick) onFindingsClick(bundle); },
-      }, '\u26A0 ' + openFindings)
+    var findingsUrl = getDominoBundleUrl(bundle, { findingsPage: true });
+    flags.push(h(Tooltip, { key: 'findings', title: 'Click to view ' + openFindings + ' open finding' + (openFindings > 1 ? 's' : '') + ' in Domino' },
+      findingsUrl
+        ? h('a', {
+            className: 'status-flag open-findings',
+            href: findingsUrl, target: '_blank', rel: 'noopener noreferrer',
+            style: { cursor: 'pointer', textDecoration: 'none' },
+            onClick: function(e) { e.stopPropagation(); },
+          }, '\u26A0 ' + openFindings)
+        : h('span', {
+            className: 'status-flag open-findings',
+            style: { cursor: 'pointer' },
+            onClick: function(e) { e.stopPropagation(); if (onFindingsClick) onFindingsClick(bundle); },
+          }, '\u26A0 ' + openFindings)
     ));
   }
 
@@ -1414,10 +1569,11 @@ function QCTrackerExpandedRow(props) {
         var pmc = props.projectMembersCache || {};
         var members = pmc[bundle.projectId] || [];
         var memberOptions = members.map(function(m) {
-          return { label: (m.firstName || '') + ' ' + (m.lastName || '') + ' (' + m.userName + ')', value: m.userName };
+          return { label: (m.firstName || '') + ' ' + (m.lastName || '') + ' (' + m.userName + ')', value: m.id };
         });
 
         var gapInfo = API_GAPS.stageReassign;
+        var stageId = stageData.stageId || (stageData.stage && stageData.stage.id);
 
         return h('div', { key: idx, className: 'tracker-timeline-item' },
           h('div', { className: 'tracker-timeline-dot ' + dotState }),
@@ -1427,17 +1583,37 @@ function QCTrackerExpandedRow(props) {
           h('div', { className: 'tracker-timeline-content' },
             h('div', { className: 'tracker-timeline-name' + (dotState === 'active' ? ' active' : '') }, name),
             h('div', { className: 'tracker-timeline-meta' },
-              // #1/#2: Hide disabled assign + API Pending in favor of assignee display or clean unassigned state
+              // Reassignment Select — calls PATCH /api/bundles/{bundleId}/stages/{stageId}
               gapInfo.ready
                 ? h(Select, {
                     size: 'small',
                     placeholder: 'Assign...',
-                    value: assigneeName || undefined,
+                    value: assignee ? assignee.id : undefined,
                     style: { minWidth: 160, fontSize: 11 },
                     showSearch: true,
                     allowClear: true,
                     options: memberOptions,
-                    onChange: function(val) {},
+                    onChange: function(userId) {
+                      if (!stageId) { antd.message.error('Missing stage ID'); return; }
+                      var body = { assignee: userId ? { id: userId } : null };
+                      apiPatch('api/bundles/' + bundle.id + '/stages/' + stageId, body)
+                        .then(function(resp) {
+                          antd.message.success('Stage reassigned');
+                          // Update local state: find the stage and update assignee
+                          if (resp && resp.assignee) {
+                            stageData.assignee = resp.assignee;
+                          } else if (!userId) {
+                            stageData.assignee = null;
+                          }
+                          // Store policyVersionId if returned
+                          if (resp && resp.stage && resp.stage.policyVersionId) {
+                            bundle._policyVersionId = resp.stage.policyVersionId;
+                          }
+                        })
+                        .catch(function(err) {
+                          antd.message.error('Reassignment failed: ' + (err.message || err));
+                        });
+                    },
                     optionFilterProp: 'label',
                   })
                 : assigneeName
@@ -1479,10 +1655,11 @@ function QCTrackerExpandedRow(props) {
           ? h('div', null,
               h('div', { className: 'tracker-section-title' }, 'Findings (' + bundle._findings.length + ')'),
               bundle._findings.slice(0, 5).map(function(f, i) {
+                var findingUrl = f.id ? getDominoBundleUrl(bundle, { findingId: f.id }) : dominoUrl;
                 return h('div', { key: i, className: 'tracker-finding-row' },
                   h(Tag, { color: severityColor(f.severity), style: { color: '#fff', border: 'none', minWidth: 28, textAlign: 'center', fontSize: 11 } }, f.severity),
-                  dominoUrl
-                    ? h('a', { href: dominoUrl, target: '_blank', rel: 'noopener noreferrer', className: 'tracker-finding-name', style: { color: '#543FDE' }, title: f.name }, f.name)
+                  findingUrl
+                    ? h('a', { href: findingUrl, target: '_blank', rel: 'noopener noreferrer', className: 'tracker-finding-name', style: { color: '#543FDE' }, title: 'View finding in Domino: ' + f.name }, f.name)
                     : h('span', { className: 'tracker-finding-name', title: f.name }, f.name),
                   findingStatusTag(f.status)
                 );
@@ -1669,7 +1846,7 @@ function FindingsDrawer(props) {
   var onClose = props.onClose;
   var bundle = props.bundle;
   var findings = bundle ? (bundle._findings || []) : [];
-  var dominoUrl = bundle ? getDominoBundleUrl(bundle) : null;
+  var findingsPageUrl = bundle ? getDominoBundleUrl(bundle, { findingsPage: true }) : null;
 
   var columns = [
     { title: 'Severity', dataIndex: 'severity', key: 'severity', width: 80,
@@ -1680,13 +1857,14 @@ function FindingsDrawer(props) {
     },
     { title: 'Name', dataIndex: 'name', key: 'name', width: 180, ellipsis: true,
       render: function(t, r) {
-        if (!dominoUrl) return h('span', { style: { fontWeight: 500, fontSize: 12 } }, t || '\u2014');
+        var findingUrl = bundle && r.id ? getDominoBundleUrl(bundle, { findingId: r.id }) : null;
+        if (!findingUrl) return h('span', { style: { fontWeight: 500, fontSize: 12 } }, t || '\u2014');
         return h('a', {
-          href: dominoUrl,
+          href: findingUrl,
           target: '_blank',
           rel: 'noopener noreferrer',
           style: { fontWeight: 500, fontSize: 12, color: '#543FDE' },
-          title: 'View in Domino',
+          title: 'View finding in Domino',
         }, t || '\u2014');
       }
     },
@@ -1716,8 +1894,8 @@ function FindingsDrawer(props) {
     open: visible,
     onClose: onClose,
     width: 720,
-    extra: dominoUrl
-      ? h(Button, { type: 'primary', size: 'small', onClick: function() { window.open(dominoUrl, '_blank'); }, style: { fontSize: 11 } }, '\u2197 View in Domino')
+    extra: findingsPageUrl
+      ? h(Button, { type: 'primary', size: 'small', onClick: function() { window.open(findingsPageUrl, '_blank'); }, style: { fontSize: 11 } }, '\u2197 View Findings in Domino')
       : null,
   },
     findings.length > 0
@@ -1823,6 +2001,10 @@ function QCTrackerPage(props) {
   var _fd2 = useState(null); var findingsDrawerBundle = _fd2[0]; var setFindingsDrawerBundle = _fd2[1];
   var _ad1 = useState(false); var attachDrawerOpen = _ad1[0]; var setAttachDrawerOpen = _ad1[1];
   var _ad2 = useState(null); var attachDrawerBundle = _ad2[0]; var setAttachDrawerBundle = _ad2[1];
+  // Column widths state (resizable)
+  var _cw = useState({}); var colWidths = _cw[0]; var setColWidths = _cw[1];
+  // Hidden columns state
+  var _hc = useState([]); var hiddenCols = _hc[0]; var setHiddenCols = _hc[1];
   // Derive filter options from scoped bundles (project/tag scope handled at App level)
   var policyOptions = useMemo(function() {
     var names = {};
@@ -1900,10 +2082,20 @@ function QCTrackerPage(props) {
     // 'total' clears filters (already done above)
   }
 
-  // Excel-like column filters + sorters
+  // Deliverable name options for column filter
+  var deliverableOptions = useMemo(function() {
+    var names = {};
+    bundles.forEach(function(b) { if (b.name) names[b.name] = true; });
+    return Object.keys(names).sort();
+  }, [bundles]);
+
+  // Excel-like column filters + sorters (filterSearch enables search inside filter dropdowns)
   var columns = [
     {
       title: capFirst(B), dataIndex: 'name', key: 'name', width: 140, fixed: 'left',
+      filters: deliverableOptions.map(function(n) { return { text: n, value: n }; }),
+      filterSearch: true,
+      onFilter: function(v, r) { return r.name === v; },
       sorter: function(a, b) { return a.name.localeCompare(b.name); },
       render: function(name, record) {
         var nameColor = record.state === 'Complete' ? '#28A464' : record.state === 'Archived' ? '#8F8FA3' : '#543FDE';
@@ -1915,11 +2107,13 @@ function QCTrackerPage(props) {
     },
     { title: 'Project', dataIndex: 'projectName', key: 'project', width: 130,
       filters: projectOptions.map(function(p) { return { text: p, value: p }; }),
+      filterSearch: true,
       onFilter: function(v, r) { return r.projectName === v; },
       sorter: function(a, b) { return (a.projectName || '').localeCompare(b.projectName || ''); },
       render: function(t) { return h('span', { style: { fontSize: 12 } }, t || '\u2014'); } },
     { title: capFirst(P), dataIndex: 'policyName', key: 'policy', width: 150, ellipsis: true,
       filters: policyOptions.map(function(p) { return { text: p, value: p }; }),
+      filterSearch: true,
       onFilter: function(v, r) { return r.policyName === v; },
       render: function(t) { return t ? h(Tag, { style: { fontSize: 10 } }, t) : '\u2014'; } },
     { title: 'Progress', key: 'progress', width: 130,
@@ -1927,6 +2121,7 @@ function QCTrackerPage(props) {
       render: function(_, record) { return h(StagePipeline, { bundle: record, onFindingsClick: function(b) { setFindingsDrawerBundle(b); setFindingsDrawerOpen(true); } }); } },
     { title: 'Stage', dataIndex: 'stage', key: 'stage', width: 130, ellipsis: true,
       filters: allStageNames.map(function(s) { return { text: s, value: s }; }),
+      filterSearch: true,
       onFilter: function(v, r) { return r.stage === v; },
       sorter: function(a, b) { return (a.stage || '').localeCompare(b.stage || ''); },
       render: function(t) { return h('span', { style: { fontSize: 12 } }, t || '\u2014'); } },
@@ -1934,6 +2129,7 @@ function QCTrackerPage(props) {
       filters: [{ text: 'Unassigned', value: '__unassigned__' }].concat(
         assigneeOptions.map(function(n) { return { text: n, value: n }; })
       ),
+      filterSearch: true,
       onFilter: function(v, r) {
         var name = r.stageAssignee && r.stageAssignee.name;
         return v === '__unassigned__' ? !name : name === v;
@@ -2017,28 +2213,64 @@ function QCTrackerPage(props) {
         projectMembersCache: props.projectMembersCache,
       }),
 
-      // Table with Excel-like column filters
-      h('div', { className: 'panel-body-flush' },
-        h(Table, {
-          dataSource: filtered,
-          columns: columns,
-          rowKey: function(r) { return r.id || r.name; },
-          loading: loading,
-          size: 'small',
-          scroll: { x: 1000 },
-          pagination: { pageSize: 15, size: 'small', showSizeChanger: false, showTotal: function(total) { return total + ' ' + B.toLowerCase() + 's'; } },
-          rowSelection: {
-            selectedRowKeys: selectedRowKeys,
-            onChange: function(keys) { setSelectedRowKeys(keys); },
-          },
-          expandable: {
-            expandedRowKeys: expandedRowKeys,
-            onExpandedRowsChange: function(keys) { setExpandedRowKeys(keys); },
-            expandedRowRender: function(record) {
-              return h(QCTrackerExpandedRow, { bundle: record, terms: terms, projectMembersCache: props.projectMembersCache });
-            },
+      // Column visibility + resize controls
+      h('div', { style: { display: 'flex', justifyContent: 'flex-end', padding: '4px 12px' } },
+        h(ColumnVisibilityDropdown, {
+          columns: columns.map(function(c) { return { key: c.key, title: typeof c.title === 'string' ? c.title : c.key }; }),
+          hiddenKeys: hiddenCols,
+          onToggle: function(key) {
+            setHiddenCols(function(prev) {
+              return prev.indexOf(key) >= 0 ? prev.filter(function(k) { return k !== key; }) : prev.concat([key]);
+            });
           },
         })
+      ),
+
+      // Table with Excel-like column filters, resizable + hideable columns
+      h('div', { className: 'panel-body-flush' },
+        (function() {
+          // Apply column widths and visibility
+          var visibleCols = columns.filter(function(c) { return hiddenCols.indexOf(c.key) < 0; });
+          var resizableCols = visibleCols.map(function(col) {
+            var w = colWidths[col.key] || col.width;
+            return Object.assign({}, col, {
+              width: w,
+              onHeaderCell: function(column) {
+                return {
+                  width: w,
+                  onResize: function(newWidth) {
+                    setColWidths(function(prev) {
+                      var next = Object.assign({}, prev);
+                      next[col.key] = newWidth;
+                      return next;
+                    });
+                  },
+                };
+              },
+            });
+          });
+          return h(Table, {
+            dataSource: filtered,
+            columns: resizableCols,
+            components: { header: { cell: ResizableHeaderCell } },
+            rowKey: function(r) { return r.id || r.name; },
+            loading: loading,
+            size: 'small',
+            scroll: { x: 1000 },
+            pagination: { pageSize: 15, size: 'small', showSizeChanger: false, showTotal: function(total) { return total + ' ' + B.toLowerCase() + 's'; } },
+            rowSelection: {
+              selectedRowKeys: selectedRowKeys,
+              onChange: function(keys) { setSelectedRowKeys(keys); },
+            },
+            expandable: {
+              expandedRowKeys: expandedRowKeys,
+              onExpandedRowsChange: function(keys) { setExpandedRowKeys(keys); },
+              expandedRowRender: function(record) {
+                return h(QCTrackerExpandedRow, { bundle: record, terms: terms, projectMembersCache: props.projectMembersCache });
+              },
+            },
+          });
+        })()
       ),
       h(FindingsDrawer, {
         visible: findingsDrawerOpen,
@@ -2139,11 +2371,20 @@ function DetailDrawer(props) {
     // Findings summary
     bundle._findings && bundle._findings.length > 0
       ? h('div', { className: 'detail-section' },
-          h('div', { className: 'detail-section-title' }, 'Findings (' + bundle._findings.length + ')'),
+          h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' } },
+            h('div', { className: 'detail-section-title' }, 'Findings (' + bundle._findings.length + ')'),
+            (function() {
+              var fpUrl = getDominoBundleUrl(bundle, { findingsPage: true });
+              return fpUrl ? h('a', { href: fpUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 11, color: '#543FDE' } }, 'View all in Domino \u2197') : null;
+            })()
+          ),
           bundle._findings.slice(0, 5).map(function(f, i) {
+            var fUrl = f.id ? getDominoBundleUrl(bundle, { findingId: f.id }) : null;
             return h('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid #F5F5F8' } },
               h(Tag, { color: severityColor(f.severity), style: { color: '#fff', border: 'none', minWidth: 28, textAlign: 'center' } }, f.severity),
-              h('span', { style: { flex: 1, fontSize: 13 } }, f.name),
+              fUrl
+                ? h('a', { href: fUrl, target: '_blank', rel: 'noopener noreferrer', style: { flex: 1, fontSize: 13, color: '#543FDE', textDecoration: 'none' }, title: 'View finding in Domino' }, f.name)
+                : h('span', { style: { flex: 1, fontSize: 13 } }, f.name),
               findingStatusTag(f.status)
             );
           }),
@@ -2690,9 +2931,11 @@ function StageAssignmentsPage(props) {
           projectName: bundle.projectName,
           policyName: bundle.policyName,
           stageName: stageName,
+          stageId: stageObj.stageId || (stageObj.stage && stageObj.stage.id),
           stageIdx: idx,
           status: status,
           assigneeName: assigneeName,
+          assigneeId: stageObj.assignee && stageObj.assignee.id ? stageObj.assignee.id : null,
           bundleState: bundle.state,
         });
       });
@@ -2789,7 +3032,23 @@ function StageAssignmentsPage(props) {
       antd.message.warning(gap.message);
       return;
     }
-    // When API is ready, perform reassignment here
+    if (!reassignTarget) return;
+    // Find the selected stage rows and call PATCH for each
+    var selectedStages = allStages.filter(function(r) { return selectedRowKeys.indexOf(r.key) >= 0; });
+    var promises = selectedStages.map(function(row) {
+      return apiPatch('api/bundles/' + row.bundleId + '/stages/' + row.stageId, { assignee: { id: reassignTarget } })
+        .catch(function(err) { return { error: err.message || err, bundleName: row.bundleName, stageName: row.stageName }; });
+    });
+    Promise.all(promises).then(function(results) {
+      var failures = results.filter(function(r) { return r && r.error; });
+      if (failures.length === 0) {
+        antd.message.success('Reassigned ' + selectedStages.length + ' stage' + (selectedStages.length !== 1 ? 's' : ''));
+        // Trigger a data refresh if available
+        if (props.onRefresh) props.onRefresh();
+      } else {
+        antd.message.warning(failures.length + ' of ' + selectedStages.length + ' reassignments failed');
+      }
+    });
     setReassignModalOpen(false);
     setSelectedRowKeys([]);
     setReassignTarget(undefined);

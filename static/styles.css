@@ -973,6 +973,26 @@ body {
   background: repeating-linear-gradient(90deg, #D1D1DB 0, #D1D1DB 2px, transparent 2px, transparent 4px);
 }
 
+/* ── Resizable Column Handle ──────────────────────── */
+.resize-handle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 1;
+}
+.resize-handle:hover,
+.resize-handle:active {
+  background: rgba(84, 63, 222, 0.2);
+}
+
+/* ── Column Visibility Menu ──────────────────────── */
+.column-visibility-menu label:hover {
+  background: #F5F5F8;
+}
+
 /* ── Assignment Rules ──────────────────────────────── */
 .rules-preview-skip { opacity: 0.45; }
 .page-subtitle { color: #65657B; font-size: 13px; margin-top: 2px; }
