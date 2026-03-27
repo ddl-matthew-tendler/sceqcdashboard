@@ -281,7 +281,6 @@ function TopNav(props) {
 // ── Sidebar ─────────────────────────────────────────────────────
 var NAV_ITEMS = [
   { key: 'tracker', icon: '\u25C9', label: 'QC Tracker' },
-  { key: 'dashboard', icon: '\u25A3', label: 'Portfolio Overview' },
   { key: 'milestones', icon: '\u2630', label: 'Milestones' },
   { key: 'approvals', icon: '\u2713', label: 'Approvals' },
   { key: 'findings', icon: '\u26A0', label: 'Findings & QC' },
@@ -2055,31 +2054,47 @@ function QCTrackerPage(props) {
     });
   }, [bundles, searchText, filterPolicies, filterState, filterAssignee, filterFlags]);
 
-  // Stats (computed from filtered, not all bundles)
+  // Stats (computed from all bundles, not filtered — so stat cards show true totals)
   var stats = useMemo(function() {
-    var openFindings = 0; var unassigned = 0; var complete = 0;
-    filtered.forEach(function(b) {
+    var openFindings = 0; var totalFindings = 0; var unassigned = 0; var complete = 0; var archived = 0;
+    bundles.forEach(function(b) {
       if (b.state === 'Complete') complete++;
+      if (b.state === 'Archived') archived++;
       if (!b.stageAssignee || !b.stageAssignee.name) unassigned++;
-      if (b._findings && b._findings.some(function(f) { return f.status !== 'Done' && f.status !== 'WontDo'; })) openFindings++;
+      if (b._findings) {
+        totalFindings += b._findings.length;
+        if (b._findings.some(function(f) { return f.status !== 'Done' && f.status !== 'WontDo'; })) openFindings++;
+      }
     });
-    return { total: filtered.length, openFindings: openFindings, unassigned: unassigned, complete: complete, active: filtered.length - complete };
-  }, [filtered]);
+    var active = bundles.length - complete - archived;
+    return { total: bundles.length, openFindings: openFindings, totalFindings: totalFindings, unassigned: unassigned, complete: complete, active: active, archived: archived };
+  }, [bundles]);
 
   var activeFilterCount = (searchText ? 1 : 0) + (filterPolicies.length > 0 ? 1 : 0) + (filterState ? 1 : 0) + (filterAssignee ? 1 : 0) + filterFlags.length;
 
+  // Track which stat card is highlighted (for toggle behavior)
+  var _sc = useState(null); var activeStatCard = _sc[0]; var setActiveStatCard = _sc[1];
+
   function clearFilters() {
     setSearchText(''); setFilterPolicies([]); setFilterState(null); setFilterAssignee(null); setFilterFlags([]);
+    setActiveStatCard(null);
   }
 
-  // Clickable stat cards — set a filter when clicked
+  // Clickable stat cards — toggle filter when clicked
   function handleStatClick(type) {
-    clearFilters();
+    if (activeStatCard === type) {
+      // Click the same card again — deselect
+      clearFilters();
+      return;
+    }
+    // Clear other filters, apply this one
+    setSearchText(''); setFilterPolicies([]); setFilterState(null); setFilterAssignee(null); setFilterFlags([]);
+    setActiveStatCard(type);
     if (type === 'active') setFilterState('Active');
     else if (type === 'openFindings') setFilterFlags(['open_findings']);
     else if (type === 'unassigned') setFilterFlags(['unassigned']);
     else if (type === 'complete') setFilterState('Complete');
-    // 'total' clears filters (already done above)
+    // 'total' clears all filters
   }
 
   // Deliverable name options for column filter
@@ -2182,24 +2197,98 @@ function QCTrackerPage(props) {
       render: function(_, record) { return h(StatusFlags, { bundle: record, onFindingsClick: function(b) { setFindingsDrawerBundle(b); setFindingsDrawerOpen(true); } }); } },
   ];
 
+  // Charts — Status Distribution donut + Deliverables by Stage bar
+  useEffect(function() {
+    if (bundles.length === 0) return;
+    var el = document.getElementById('qc-chart-status');
+    if (!el) return;
+    Highcharts.chart('qc-chart-status', {
+      chart: { type: 'pie', height: 180, backgroundColor: 'transparent' },
+      title: { text: null },
+      plotOptions: {
+        pie: {
+          innerSize: '55%', cursor: 'pointer',
+          dataLabels: { enabled: true, format: '{point.name}: {point.y}', style: { fontSize: '10px' } },
+          point: { events: { click: function() {
+            var state = this.name;
+            if (activeStatCard === state.toLowerCase()) { clearFilters(); }
+            else { setSearchText(''); setFilterPolicies([]); setFilterAssignee(null); setFilterFlags([]); setFilterState(state); setActiveStatCard(state.toLowerCase()); }
+          } } },
+        },
+      },
+      series: [{
+        name: capFirst(B) + 's',
+        data: [
+          { name: 'Active', y: stats.active, color: '#543FDE' },
+          { name: 'Complete', y: stats.complete, color: '#28A464' },
+          { name: 'Archived', y: stats.archived, color: '#B0B0C0' },
+        ].filter(function(d) { return d.y > 0; }),
+      }],
+      credits: { enabled: false },
+    });
+  }, [bundles, stats, activeStatCard]);
+
+  useEffect(function() {
+    if (bundles.length === 0) return;
+    var el = document.getElementById('qc-chart-stages');
+    if (!el) return;
+    var stageMap = {};
+    bundles.forEach(function(b) { var s = b.stage || 'Unknown'; stageMap[s] = (stageMap[s] || 0) + 1; });
+    var stageNames = Object.keys(stageMap);
+    var stageCounts = stageNames.map(function(n) { return stageMap[n]; });
+    Highcharts.chart('qc-chart-stages', {
+      chart: { type: 'bar', height: Math.max(160, stageNames.length * 24), backgroundColor: 'transparent' },
+      title: { text: null },
+      xAxis: { categories: stageNames, labels: { style: { fontSize: '10px' } } },
+      yAxis: { title: { text: null }, allowDecimals: false },
+      plotOptions: { bar: { borderRadius: 3, cursor: 'pointer', point: { events: { click: function() {
+        setSearchText(''); setFilterPolicies([]); setFilterState(null); setFilterAssignee(null); setFilterFlags([]);
+        setActiveStatCard(null);
+        // Use column filter for stage — not stat card
+      } } } } },
+      series: [{ name: capFirst(B) + 's', data: stageCounts, showInLegend: false }],
+      credits: { enabled: false },
+    });
+  }, [bundles]);
+
   return h('div', null,
     h('div', { className: 'page-header' },
       h('h1', null, 'QC Tracker'),
-      h('p', null, 'Track all ' + B.toLowerCase() + 's across projects and ' + P.toLowerCase() + 's')
+      h('p', null, 'Track all ' + capFirst(B).toLowerCase() + 's across projects and ' + capFirst(P).toLowerCase() + 's')
     ),
 
-    // Stat cards — clickable to filter
+    // Stat cards — clickable with toggle highlight + subtitles
     h('div', { className: 'stats-row' },
-      h('div', { className: 'stat-card-clickable', onClick: function() { handleStatClick('total'); } },
-        h(StatCard, { label: 'Total ' + capFirst(B) + 's', value: stats.total, color: 'primary' })),
-      h('div', { className: 'stat-card-clickable', onClick: function() { handleStatClick('active'); } },
-        h(StatCard, { label: 'Active', value: stats.active, color: 'info' })),
-      h('div', { className: 'stat-card-clickable', onClick: function() { handleStatClick('openFindings'); } },
-        h(StatCard, { label: 'Open Findings', value: stats.openFindings, color: stats.openFindings > 0 ? 'danger' : '' })),
-      h('div', { className: 'stat-card-clickable', onClick: function() { handleStatClick('unassigned'); } },
-        h(StatCard, { label: 'Unassigned', value: stats.unassigned, color: stats.unassigned > 0 ? 'warning' : '' })),
-      h('div', { className: 'stat-card-clickable', onClick: function() { handleStatClick('complete'); } },
-        h(StatCard, { label: 'Complete', value: stats.complete, color: 'success' }))
+      h('div', { className: 'stat-card-clickable' + (activeStatCard === 'total' ? ' stat-card-active' : ''), onClick: function() { handleStatClick('total'); } },
+        h(StatCard, { label: 'Total ' + capFirst(B) + 's', value: stats.total, color: 'primary', sub: 'Across all projects' })),
+      h('div', { className: 'stat-card-clickable' + (activeStatCard === 'active' ? ' stat-card-active' : ''), onClick: function() { handleStatClick('active'); } },
+        h(StatCard, { label: 'Active', value: stats.active, color: 'info', sub: 'Currently in progress' })),
+      h('div', { className: 'stat-card-clickable' + (activeStatCard === 'openFindings' ? ' stat-card-active' : ''), onClick: function() { handleStatClick('openFindings'); } },
+        h(StatCard, { label: 'Open Findings', value: stats.openFindings, color: stats.openFindings > 0 ? 'danger' : '', sub: stats.totalFindings + ' total findings' })),
+      h('div', { className: 'stat-card-clickable' + (activeStatCard === 'unassigned' ? ' stat-card-active' : ''), onClick: function() { handleStatClick('unassigned'); } },
+        h(StatCard, { label: 'Unassigned', value: stats.unassigned, color: stats.unassigned > 0 ? 'warning' : '', sub: 'No stage owner' })),
+      h('div', { className: 'stat-card-clickable' + (activeStatCard === 'complete' ? ' stat-card-active' : ''), onClick: function() { handleStatClick('complete'); } },
+        h(StatCard, { label: 'Complete', value: stats.complete, color: 'success', sub: 'Fully reviewed' }))
+    ),
+
+    // Charts row — compact
+    h('div', { className: 'two-col', style: { marginBottom: 16 } },
+      h('div', { className: 'panel' },
+        h('div', { className: 'panel-header' }, h('span', { className: 'panel-title' }, capFirst(B) + ' Status Distribution')),
+        h('div', { className: 'panel-body', style: { padding: '4px 8px' } },
+          bundles.length > 0
+            ? h('div', { id: 'qc-chart-status', style: { height: 180 } })
+            : h(EmptyState, { text: 'No data' })
+        )
+      ),
+      h('div', { className: 'panel' },
+        h('div', { className: 'panel-header' }, h('span', { className: 'panel-title' }, capFirst(B) + 's by Stage')),
+        h('div', { className: 'panel-body', style: { padding: '4px 8px' } },
+          bundles.length > 0
+            ? h('div', { id: 'qc-chart-stages', style: { minHeight: 160 } })
+            : h(EmptyState, { text: 'No data' })
+        )
+      )
     ),
 
     // Main panel
@@ -2213,8 +2302,16 @@ function QCTrackerPage(props) {
         projectMembersCache: props.projectMembersCache,
       }),
 
-      // Column visibility + resize controls
-      h('div', { style: { display: 'flex', justifyContent: 'flex-end', padding: '4px 12px' } },
+      // Search + Column visibility controls
+      h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px' } },
+        h(Input, {
+          placeholder: 'Search ' + capFirst(B).toLowerCase() + 's...',
+          value: searchText,
+          onChange: function(e) { setSearchText(e.target.value); setActiveStatCard(null); },
+          allowClear: true,
+          style: { width: 260, fontSize: 12 },
+          prefix: h('span', { style: { color: '#8F8FA3' } }, '\uD83D\uDD0D'),
+        }),
         h(ColumnVisibilityDropdown, {
           columns: columns.map(function(c) { return { key: c.key, title: typeof c.title === 'string' ? c.title : c.key }; }),
           hiddenKeys: hiddenCols,
@@ -2257,7 +2354,7 @@ function QCTrackerPage(props) {
             loading: loading,
             size: 'small',
             scroll: { x: 1000 },
-            pagination: { pageSize: 15, size: 'small', showSizeChanger: false, showTotal: function(total) { return total + ' ' + B.toLowerCase() + 's'; } },
+            pagination: { defaultPageSize: 20, size: 'small', showSizeChanger: true, pageSizeOptions: ['20', '50', '100', String(filtered.length > 100 ? filtered.length : 200)], showTotal: function(total) { return total + ' ' + capFirst(B).toLowerCase() + 's'; } },
             rowSelection: {
               selectedRowKeys: selectedRowKeys,
               onChange: function(keys) { setSelectedRowKeys(keys); },
@@ -3056,6 +3153,50 @@ function StageAssignmentsPage(props) {
 
   var statusColorMap = { Current: 'gold', Future: 'blue', Completed: 'green' };
 
+  var bundleNameFilters = useMemo(function() {
+    var seen = {};
+    return allStages.reduce(function(acc, r) {
+      if (!seen[r.bundleName]) { seen[r.bundleName] = true; acc.push({ text: r.bundleName, value: r.bundleName }); }
+      return acc;
+    }, []).sort(function(a, b) { return a.text.localeCompare(b.text); });
+  }, [allStages]);
+
+  var stageNameFilters = useMemo(function() {
+    var seen = {};
+    return allStages.reduce(function(acc, r) {
+      if (!seen[r.stageName]) { seen[r.stageName] = true; acc.push({ text: r.stageName, value: r.stageName }); }
+      return acc;
+    }, []).sort(function(a, b) { return a.text.localeCompare(b.text); });
+  }, [allStages]);
+
+  var projectNameFilters = useMemo(function() {
+    var seen = {};
+    return allStages.reduce(function(acc, r) {
+      if (!seen[r.projectName]) { seen[r.projectName] = true; acc.push({ text: r.projectName, value: r.projectName }); }
+      return acc;
+    }, []).sort(function(a, b) { return a.text.localeCompare(b.text); });
+  }, [allStages]);
+
+  var policyNameFilters = useMemo(function() {
+    var seen = {};
+    return allStages.reduce(function(acc, r) {
+      if (!seen[r.policyName]) { seen[r.policyName] = true; acc.push({ text: r.policyName, value: r.policyName }); }
+      return acc;
+    }, []).sort(function(a, b) { return a.text.localeCompare(b.text); });
+  }, [allStages]);
+
+  var assigneeNameFilters = useMemo(function() {
+    var seen = {};
+    var arr = [{ text: 'Unassigned', value: '__unassigned__' }];
+    allStages.forEach(function(r) {
+      if (r.assigneeName && !seen[r.assigneeName]) {
+        seen[r.assigneeName] = true;
+        arr.push({ text: r.assigneeName, value: r.assigneeName });
+      }
+    });
+    return arr.sort(function(a, b) { return a.text.localeCompare(b.text); });
+  }, [allStages]);
+
   var columns = [
     {
       title: B,
@@ -3064,6 +3205,9 @@ function StageAssignmentsPage(props) {
       sorter: function(a, b) { return a.bundleName.localeCompare(b.bundleName); },
       width: 180,
       ellipsis: true,
+      filters: bundleNameFilters,
+      filterSearch: true,
+      onFilter: function(value, record) { return record.bundleName === value; },
     },
     {
       title: 'Project',
@@ -3072,6 +3216,9 @@ function StageAssignmentsPage(props) {
       sorter: function(a, b) { return a.projectName.localeCompare(b.projectName); },
       width: 160,
       ellipsis: true,
+      filters: projectNameFilters,
+      filterSearch: true,
+      onFilter: function(value, record) { return record.projectName === value; },
     },
     {
       title: P,
@@ -3080,6 +3227,9 @@ function StageAssignmentsPage(props) {
       sorter: function(a, b) { return a.policyName.localeCompare(b.policyName); },
       width: 160,
       ellipsis: true,
+      filters: policyNameFilters,
+      filterSearch: true,
+      onFilter: function(value, record) { return record.policyName === value; },
     },
     {
       title: 'Stage',
@@ -3087,6 +3237,9 @@ function StageAssignmentsPage(props) {
       key: 'stageName',
       sorter: function(a, b) { return a.stageName.localeCompare(b.stageName); },
       width: 150,
+      filters: stageNameFilters,
+      filterSearch: true,
+      onFilter: function(value, record) { return record.stageName === value; },
     },
     {
       title: 'Status',
@@ -3097,6 +3250,9 @@ function StageAssignmentsPage(props) {
         var order = { Current: 0, Future: 1, Completed: 2 };
         return (order[a.status] || 0) - (order[b.status] || 0);
       },
+      filters: [{ text: 'Current', value: 'Current' }, { text: 'Future', value: 'Future' }, { text: 'Completed', value: 'Completed' }],
+      filterSearch: true,
+      onFilter: function(value, record) { return record.status === value; },
       render: function(status) {
         return h(Tag, { color: statusColorMap[status] || 'default' }, status);
       },
@@ -3110,6 +3266,12 @@ function StageAssignmentsPage(props) {
         var aa = a.assigneeName || '';
         var bb = b.assigneeName || '';
         return aa.localeCompare(bb);
+      },
+      filters: assigneeNameFilters,
+      filterSearch: true,
+      onFilter: function(value, record) {
+        if (value === '__unassigned__') return !record.assigneeName;
+        return record.assigneeName === value;
       },
       render: function(name) {
         if (!name) return h(Tag, { color: 'red', style: { fontSize: 11 } }, 'Unassigned');
@@ -3266,7 +3428,7 @@ function StageAssignmentsPage(props) {
       rowKey: 'key',
       size: 'small',
       rowSelection: rowSelection,
-      pagination: filtered.length > 50 ? { pageSize: 50, showSizeChanger: true, pageSizeOptions: ['25', '50', '100'] } : false,
+      pagination: { defaultPageSize: 20, size: 'small', showSizeChanger: true, pageSizeOptions: ['20', '50', '100', String(filtered.length > 100 ? filtered.length : 200)], showTotal: function(total) { return total + ' stages'; } },
       scroll: { y: 'calc(100vh - 380px)' },
     }),
 
@@ -3642,8 +3804,6 @@ function App() {
     // Assignment Rules always gets unfiltered bundles (it has its own project selector)
     // All other pages get scopedBundles
     switch (activePage) {
-      case 'dashboard':
-        return h(DashboardPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms });
       case 'tracker':
         return h(QCTrackerPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms, projectMembersCache: projectMembersCache });
       case 'rules':

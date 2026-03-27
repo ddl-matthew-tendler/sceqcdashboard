@@ -150,6 +150,8 @@ body {
   border: 1px solid #E0E0E0;
   border-radius: 8px;
   padding: 18px 20px;
+  height: 100%;
+  box-sizing: border-box;
 }
 
 .stat-card-label {
