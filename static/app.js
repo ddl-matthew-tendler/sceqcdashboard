@@ -2673,7 +2673,19 @@ function CSVUploadDrawer(props) {
       else if (lower === 'policyname' || lower === 'qcplanname' || lower === 'qcplan' || lower === 'policy' || lower === 'policyid' || lower === 'qcplanid') autoMap.policyName = h;
       else if (lower === 'projectname' || lower === 'project' || lower === 'projectid') autoMap.projectName = h;
     });
-    setMapping(autoMap);
+    // Check for saved mapping from previous upload
+    var savedMapping = null;
+    try { var sm = localStorage.getItem('sce_csv_column_mapping'); if (sm) savedMapping = JSON.parse(sm); } catch(e) {}
+    if (savedMapping && headers.some(function(h) { return Object.values(savedMapping).indexOf(h) >= 0; })) {
+      // Saved mapping has at least one matching header — use it
+      var merged = {};
+      Object.keys(savedMapping).forEach(function(k) {
+        if (headers.indexOf(savedMapping[k]) >= 0) merged[k] = savedMapping[k];
+      });
+      setMapping(merged);
+    } else {
+      setMapping(autoMap);
+    }
     setStep(1);
   }
 
@@ -2888,7 +2900,7 @@ function CSVUploadDrawer(props) {
     destroyOnClose: true,
     footer: step === 1 ? h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: 8 } },
       h(Button, { onClick: function() { setStep(0); reset(); } }, 'Back'),
-      h(Button, { type: 'primary', onClick: function() { setStep(2); } }, 'Next: Preview')
+      h(Button, { type: 'primary', onClick: function() { try { localStorage.setItem('sce_csv_column_mapping', JSON.stringify(mapping)); } catch(e) {} setStep(2); } }, 'Next: Preview')
     ) : step === 2 ? h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: 8 } },
       h(Button, { onClick: function() { setStep(1); } }, 'Back'),
       h(Button, { type: 'primary', disabled: previewRows.filter(function(r) { return r._valid; }).length === 0, onClick: startUpload },
@@ -2937,9 +2949,10 @@ function CSVUploadDrawer(props) {
 
     // Step 1: Column mapping
     step === 1 ? h('div', null,
-      h('div', { style: { marginBottom: 16 } },
+      h('div', { style: { marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 } },
         h(Tag, { color: 'blue' }, csvRows.length + ' rows found'),
-        h(Tag, null, csvHeaders.length + ' columns')
+        h(Tag, null, csvHeaders.length + ' columns'),
+        (function() { try { return localStorage.getItem('sce_csv_column_mapping') ? h(Tag, { color: 'green' }, 'Using saved column mapping') : null; } catch(e) { return null; } })()
       ),
       h('div', { style: { fontSize: 13, fontWeight: 600, marginBottom: 12, color: '#2E2E38' } }, 'Map your CSV columns to fields:'),
       REQUIRED_FIELDS.map(function(field) {
