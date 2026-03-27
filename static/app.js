@@ -4700,6 +4700,13 @@ function RiskOptimizerPage(props) {
   var _overrideReason = useState(''); var overrideReason = _overrideReason[0]; var setOverrideReason = _overrideReason[1];
   var _configTab = useState('keywords'); var configTab = _configTab[0]; var setConfigTab = _configTab[1];
 
+  // Setup wizard state
+  var _wizardDismissed = useState(function() {
+    try { return localStorage.getItem('sce_risk_wizard_done') === 'true'; } catch(e) { return false; }
+  });
+  var wizardDismissed = _wizardDismissed[0]; var setWizardDismissed = _wizardDismissed[1];
+  var _wizardStep = useState(0); var wizardStep = _wizardStep[0]; var setWizardStep = _wizardStep[1];
+
   // Editable keyword text areas for config modal
   var _editHigh = useState(''); var editHighKeywords = _editHigh[0]; var setEditHighKeywords = _editHigh[1];
   var _editMed = useState(''); var editMedKeywords = _editMed[0]; var setEditMedKeywords = _editMed[1];
@@ -5161,6 +5168,166 @@ function RiskOptimizerPage(props) {
     );
   }
 
+  // ── Setup Wizard ──
+  var showWizard = taggedPolicyCount === 0 && allPolicies.length > 0 && !wizardDismissed;
+
+  function handleWizardDone() {
+    setWizardDismissed(true);
+    try { localStorage.setItem('sce_risk_wizard_done', 'true'); } catch(e) {}
+    setActiveTab('overview');
+  }
+
+  var wizardSteps = [
+    { title: 'Review Keywords', description: 'Review the risk classification keywords' },
+    { title: 'Tag Policies', description: 'Classify each ' + P.toLowerCase() + ' by rigor level' },
+    { title: 'Review Results', description: 'See risk analysis and recommendations' },
+  ];
+
+  function renderWizard() {
+    return h('div', null,
+      // Wizard header
+      h('div', { style: { textAlign: 'center', marginBottom: 24 } },
+        h('h2', { style: { fontSize: 20, fontWeight: 600, color: '#2E2E38', marginBottom: 4 } }, 'Risk Optimizer Setup'),
+        h('p', { style: { fontSize: 13, color: '#8F8FA3', margin: 0 } },
+          'Complete these 3 steps to enable risk-based QC policy recommendations.'
+        )
+      ),
+
+      // Step indicators
+      h('div', { style: { display: 'flex', justifyContent: 'center', gap: 0, marginBottom: 28 } },
+        wizardSteps.map(function(s, i) {
+          var isActive = i === wizardStep;
+          var isDone = i < wizardStep;
+          return h('div', { key: i, style: { display: 'flex', alignItems: 'center' } },
+            h('div', {
+              style: {
+                display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer', minWidth: 140,
+              },
+              onClick: function() { setWizardStep(i); },
+            },
+              h('div', {
+                style: {
+                  width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 14, fontWeight: 600,
+                  background: isDone ? '#28A464' : isActive ? '#543FDE' : '#E0E0E0',
+                  color: isDone || isActive ? '#fff' : '#8F8FA3',
+                  transition: 'all 0.2s',
+                },
+              }, isDone ? '\u2713' : String(i + 1)),
+              h('div', { style: { fontSize: 12, fontWeight: isActive ? 600 : 400, color: isActive ? '#2E2E38' : '#8F8FA3', marginTop: 6 } }, s.title),
+              h('div', { style: { fontSize: 10, color: '#8F8FA3', marginTop: 2 } }, s.description)
+            ),
+            i < wizardSteps.length - 1
+              ? h('div', { style: { width: 60, height: 2, background: isDone ? '#28A464' : '#E0E0E0', marginBottom: 32, marginLeft: 4, marginRight: 4 } })
+              : null
+          );
+        })
+      ),
+
+      // Step content
+      h('div', { className: 'panel', style: { padding: 20 } },
+
+        // Step 1: Review Keywords
+        wizardStep === 0 ? h('div', null,
+          h('div', { className: 'panel-header', style: { marginBottom: 12 } },
+            h('span', { className: 'panel-title' }, 'Step 1: Review Risk Keywords')
+          ),
+          h('p', { style: { fontSize: 13, color: '#65657B', marginBottom: 16 } },
+            'The risk engine classifies each ' + B.toLowerCase() + ' by matching its name and ' + P.toLowerCase() + ' name against these keyword lists. ' +
+            'Review the defaults and adjust if needed for your therapeutic area.'
+          ),
+          ['highRisk', 'mediumRisk', 'lowRisk'].map(function(tier) {
+            var cfg = riskConfig[tier];
+            var colors = { highRisk: '#C20A29', mediumRisk: '#F59E0B', lowRisk: '#28A464' };
+            var labels = { highRisk: 'High Risk', mediumRisk: 'Medium Risk', lowRisk: 'Low Risk' };
+            return h('div', { key: tier, style: { marginBottom: 16 } },
+              h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 } },
+                h('div', { style: { width: 10, height: 10, borderRadius: '50%', background: colors[tier] } }),
+                h('span', { style: { fontSize: 13, fontWeight: 600 } }, labels[tier]),
+                h('span', { style: { fontSize: 11, color: '#8F8FA3', marginLeft: 4 } }, '\u2014 ' + cfg.description)
+              ),
+              h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 4 } },
+                cfg.keywords.map(function(kw, j) {
+                  return h(Tag, { key: j, style: { fontSize: 10 } }, kw);
+                })
+              )
+            );
+          }),
+          h('div', { style: { marginTop: 8, fontSize: 12, color: '#8F8FA3' } },
+            'You can edit these keywords later via the Config button.'
+          )
+        ) : null,
+
+        // Step 2: Tag Policies
+        wizardStep === 1 ? h('div', null,
+          h('div', { className: 'panel-header', style: { marginBottom: 12 } },
+            h('span', { className: 'panel-title' }, 'Step 2: Tag Your ' + P + 's')
+          ),
+          h('p', { style: { fontSize: 13, color: '#65657B', marginBottom: 16 } },
+            'Classify each ' + P.toLowerCase() + ' by how rigorous its QC process is. ' +
+            'This tells the optimizer what level of scrutiny each policy provides, so it can detect mismatches.'
+          ),
+          h('div', { style: { display: 'flex', gap: 16, marginBottom: 16 } },
+            h(Tag, { color: '#C20A29' }, '\uD83D\uDD34 Most Rigorous — e.g. double programming, independent replication'),
+            h(Tag, { color: '#F59E0B' }, '\uD83D\uDFE1 Moderate — e.g. code review + spot checks'),
+            h(Tag, { color: '#28A464' }, '\uD83D\uDFE2 Lightweight — e.g. output crosscheck, automated validation')
+          ),
+          taggedPolicyCount > 0
+            ? h(Alert, { type: 'success', showIcon: true, style: { marginBottom: 12, borderRadius: 8 },
+                message: taggedPolicyCount + ' of ' + allPolicies.length + ' policies tagged',
+                description: taggedPolicyCount === allPolicies.length ? 'All policies tagged! Click Next to see your results.' : 'Keep going \u2014 tag the remaining policies for best results.'
+              })
+            : null,
+          renderPolicyTiers()
+        ) : null,
+
+        // Step 3: Review Results
+        wizardStep === 2 ? h('div', null,
+          h('div', { className: 'panel-header', style: { marginBottom: 12 } },
+            h('span', { className: 'panel-title' }, 'Step 3: Review Results')
+          ),
+          taggedPolicyCount === 0
+            ? h(Alert, { type: 'warning', showIcon: true, style: { marginBottom: 16, borderRadius: 8 },
+                message: 'No policies tagged yet',
+                description: 'Go back to Step 2 to tag at least one policy. Without tags, calibration results will all show as "Untagged".',
+                action: h(Button, { size: 'small', onClick: function() { setWizardStep(1); } }, 'Go Back'),
+              })
+            : h('p', { style: { fontSize: 13, color: '#65657B', marginBottom: 16 } },
+                'Here\'s how your ' + B.toLowerCase() + 's are classified based on the keywords and policy tier tags you set.'
+              ),
+          h('div', { className: 'stats-row', style: { marginBottom: 16 } },
+            h(StatCard, { label: 'High Risk', value: summary.high, color: 'danger', sub: 'Need most rigorous QC' }),
+            h(StatCard, { label: 'Medium Risk', value: summary.medium, color: 'warning', sub: 'Code review + spot check' }),
+            h(StatCard, { label: 'Low Risk', value: summary.low, color: 'success', sub: 'Output crosscheck sufficient' })
+          ),
+          h('div', { className: 'stats-row' },
+            h(StatCard, { label: 'Over-QC\'d', value: summary.overQc, color: 'warning',
+              sub: summary.overQc > 0 ? 'More rigorous QC than needed' : 'None detected' }),
+            h(StatCard, { label: 'Well-Matched', value: summary.wellMatched, color: 'success',
+              sub: summary.wellMatched > 0 ? 'Policy aligns with risk' : 'None detected' }),
+            h(StatCard, { label: 'Under-QC\'d', value: summary.underQc, color: 'danger',
+              sub: summary.underQc > 0 ? 'Less rigorous QC than recommended' : 'None detected' })
+          )
+        ) : null
+      ),
+
+      // Wizard navigation
+      h('div', { style: { display: 'flex', justifyContent: 'space-between', marginTop: 16 } },
+        h('div', null,
+          h(Button, { type: 'text', onClick: handleWizardDone, style: { color: '#8F8FA3' } }, 'Skip Setup')
+        ),
+        h('div', { style: { display: 'flex', gap: 8 } },
+          wizardStep > 0
+            ? h(Button, { onClick: function() { setWizardStep(wizardStep - 1); } }, 'Back')
+            : null,
+          wizardStep < 2
+            ? h(Button, { type: 'primary', onClick: function() { setWizardStep(wizardStep + 1); } }, 'Next')
+            : h(Button, { type: 'primary', onClick: handleWizardDone }, 'Finish Setup')
+        )
+      )
+    );
+  }
+
   // ── Render ──
   return h('div', { style: { padding: 24 } },
     // Header
@@ -5171,17 +5338,20 @@ function RiskOptimizerPage(props) {
           'Identify over-QC\'d and under-QC\'d deliverables. Recommend right-sized policies.'
         )
       ),
-      h('div', { style: { display: 'flex', gap: 8 } },
+      !showWizard ? h('div', { style: { display: 'flex', gap: 8 } },
         h(Button, { size: 'small', onClick: handleOpenConfig, icon: h('span', null, '\u2699') }, 'Config'),
         h(Button, { size: 'small', type: activeTab === 'overview' ? 'primary' : 'default', onClick: function() { setActiveTab('overview'); } }, 'Overview'),
         h(Button, { size: 'small', type: activeTab === 'bundles' ? 'primary' : 'default', onClick: function() { setActiveTab('bundles'); } }, B + 's'),
         h(Button, { size: 'small', type: activeTab === 'policies' ? 'primary' : 'default', onClick: function() { setActiveTab('policies'); } }, P + ' Tiers'),
         h(Button, { size: 'small', type: activeTab === 'audit' ? 'primary' : 'default', onClick: function() { setActiveTab('audit'); } }, 'Audit Log')
-      )
+      ) : null
     ),
 
-    // Setup alert if policies not tagged
-    untaggedPolicyCount > 0 && allPolicies.length > 0
+    // Show wizard OR normal content
+    showWizard ? renderWizard() : null,
+
+    // Normal content (hidden during wizard)
+    !showWizard && untaggedPolicyCount > 0 && allPolicies.length > 0
       ? h(Alert, {
           type: 'info',
           showIcon: true,
