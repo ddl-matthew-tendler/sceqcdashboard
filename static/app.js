@@ -4620,8 +4620,12 @@ var DEFAULT_RISK_CONFIG = {
       'confirmatory', 'interim analysis', 'bayesian', 'adaptive design',
       'non-inferiority', 'bioequivalence', 'exposure-response', 'dose-response',
       'cox regression', 'time-to-event', 'hazard ratio',
+      'adtte', 'adeff', 'adpc', 'adpp', 'adpk', 'adrs', 'adtr',
+      'primary analysis', 'registration study', 'pivotal', 'superiority',
+      'propensity score', 'instrumental variable', 'competing risk',
+      'multi-state model', 'joint model',
     ],
-    description: 'Reserve most rigorous QC (e.g. double programming) for these deliverables.',
+    description: 'Matches against evidence name, QC plan name, and deliverable name. Reserve most rigorous QC (e.g. double programming) for these deliverables.',
   },
   mediumRisk: {
     label: 'Medium',
@@ -4629,10 +4633,14 @@ var DEFAULT_RISK_CONFIG = {
     keywords: [
       'secondary endpoint', 'subgroup', 'sensitivity analysis', 'subset',
       'adam', 'adae', 'adcm', 'adlb', 'advs', 'admh', 'adeg',
+      'adex', 'adds', 'addv', 'adhy', 'adqs', 'adce', 'adlbc', 'adlbh', 'adlbu',
       'forest plot', 'shift table', 'responder analysis',
       'missing data', 'imputation', 'ancova', 'mixed model',
+      'supportive analysis', 'subpopulation', 'covariate',
+      'logistic regression', 'repeated measures', 'mmrm', 'gee', 'cmh',
+      'stratified analysis',
     ],
-    description: 'Code review plus spot check is sufficient.',
+    description: 'Matches against evidence name, QC plan name, and deliverable name. Code review plus spot check is sufficient.',
   },
   lowRisk: {
     label: 'Low',
@@ -4642,8 +4650,12 @@ var DEFAULT_RISK_CONFIG = {
       'dm', 'ae listing', 'conmed', 'medical history', 'lab listing',
       'summary table', 'descriptive', 'frequency', 'count table',
       'formatting', 'title page', 'toc', 'appendix',
+      'adsl', 'patient profile', 'data listing', 'subject listing',
+      'vital signs listing', 'lab shift', 'mh listing', 'cm listing',
+      'baseline characteristics', 'big n', 'header', 'footnote',
+      'shell', 'mock', 'define.xml', 'reviewer guide',
     ],
-    description: 'Output crosschecking or automated validation is sufficient.',
+    description: 'Matches against evidence name, QC plan name, and deliverable name. Output crosschecking or automated validation is sufficient.',
   },
 };
 
@@ -4693,7 +4705,6 @@ function RiskOptimizerPage(props) {
   // UI state
   var _tab = useState('overview'); var activeTab = _tab[0]; var setActiveTab = _tab[1];
   var _search = useState(''); var searchText = _search[0]; var setSearchText = _search[1];
-  var _configOpen = useState(false); var configModalOpen = _configOpen[0]; var setConfigModalOpen = _configOpen[1];
   var _reassignOpen = useState(false); var reassignModalOpen = _reassignOpen[0]; var setReassignModalOpen = _reassignOpen[1];
   var _overrideOpen = useState(false); var overrideModalOpen = _overrideOpen[0]; var setOverrideModalOpen = _overrideOpen[1];
   var _selectedBundle = useState(null); var selectedBundle = _selectedBundle[0]; var setSelectedBundle = _selectedBundle[1];
@@ -4701,19 +4712,12 @@ function RiskOptimizerPage(props) {
   var _reassignRationale = useState(''); var reassignRationale = _reassignRationale[0]; var setReassignRationale = _reassignRationale[1];
   var _overrideLevel = useState(null); var overrideLevel = _overrideLevel[0]; var setOverrideLevel = _overrideLevel[1];
   var _overrideReason = useState(''); var overrideReason = _overrideReason[0]; var setOverrideReason = _overrideReason[1];
-  var _configTab = useState('keywords'); var configTab = _configTab[0]; var setConfigTab = _configTab[1];
-
   // Setup wizard state
   var _wizardDismissed = useState(function() {
     try { return localStorage.getItem('sce_risk_wizard_done') === 'true'; } catch(e) { return false; }
   });
   var wizardDismissed = _wizardDismissed[0]; var setWizardDismissed = _wizardDismissed[1];
   var _wizardStep = useState(0); var wizardStep = _wizardStep[0]; var setWizardStep = _wizardStep[1];
-
-  // Editable keyword text areas for config modal
-  var _editHigh = useState(''); var editHighKeywords = _editHigh[0]; var setEditHighKeywords = _editHigh[1];
-  var _editMed = useState(''); var editMedKeywords = _editMed[0]; var setEditMedKeywords = _editMed[1];
-  var _editLow = useState(''); var editLowKeywords = _editLow[0]; var setEditLowKeywords = _editLow[1];
 
   // Persist to localStorage
   useEffect(function() {
@@ -4735,6 +4739,8 @@ function RiskOptimizerPage(props) {
 
   // ── Risk Scoring Engine ──
   function scoreBundle(bundle) {
+    // Matches against evidence name, QC plan name, and deliverable type patterns
+    // (SDTM domains, ADaM prefixes, TFL conventions).
     // If there's a manual override, use it
     var override = riskOverrides[bundle.id];
     if (override) {
@@ -4743,7 +4749,15 @@ function RiskOptimizerPage(props) {
 
     var name = (bundle.name || '').toLowerCase();
     var policyName = (bundle.policyName || '').toLowerCase();
-    var combined = name + ' ' + policyName;
+    // Derive deliverable type hints from the name for additional matching context
+    var deliverableType = '';
+    if (/^ad[a-z]/.test(name)) deliverableType = ' adam_dataset';
+    if (/^t_/.test(name) || name.indexOf('table') >= 0 || name.indexOf('output') >= 0) deliverableType = ' tfl_output';
+    var sdtmDomains = ['dm', 'ae', 'lb', 'vs', 'eg', 'cm', 'mh', 'ds', 'ex', 'sv', 'ta', 'ti', 'ts', 'se', 'pc', 'pp'];
+    sdtmDomains.forEach(function(d) {
+      if (name === d || name.indexOf(d + '_') === 0 || name.indexOf(d + '.') === 0) deliverableType += ' sdtm_domain';
+    });
+    var combined = name + ' ' + policyName + deliverableType;
 
     var highScore = 0; var highMatches = [];
     var medScore = 0; var medMatches = [];
@@ -4970,33 +4984,16 @@ function RiskOptimizerPage(props) {
     antd.message.info('Risk override removed for ' + bundleName + '. Algorithm score restored.');
   }
 
-  function handleOpenConfig() {
-    setEditHighKeywords(riskConfig.highRisk.keywords.join(', '));
-    setEditMedKeywords(riskConfig.mediumRisk.keywords.join(', '));
-    setEditLowKeywords(riskConfig.lowRisk.keywords.join(', '));
-    setConfigModalOpen(true);
-  }
-
-  function handleSaveConfig() {
-    function parseKeywords(text) {
-      return text.split(',').map(function(s) { return s.trim().toLowerCase(); }).filter(Boolean);
-    }
+  function updateKeywords(tierKey, newKeywords) {
     setRiskConfig(function(prev) {
-      return Object.assign({}, prev, {
-        highRisk: Object.assign({}, prev.highRisk, { keywords: parseKeywords(editHighKeywords) }),
-        mediumRisk: Object.assign({}, prev.mediumRisk, { keywords: parseKeywords(editMedKeywords) }),
-        lowRisk: Object.assign({}, prev.lowRisk, { keywords: parseKeywords(editLowKeywords) }),
-      });
+      var next = JSON.parse(JSON.stringify(prev));
+      next[tierKey].keywords = newKeywords;
+      return next;
     });
-    antd.message.success('Risk classification config updated.');
-    setConfigModalOpen(false);
   }
 
   function handleResetConfig() {
     setRiskConfig(JSON.parse(JSON.stringify(DEFAULT_RISK_CONFIG)));
-    setEditHighKeywords(DEFAULT_RISK_CONFIG.highRisk.keywords.join(', '));
-    setEditMedKeywords(DEFAULT_RISK_CONFIG.mediumRisk.keywords.join(', '));
-    setEditLowKeywords(DEFAULT_RISK_CONFIG.lowRisk.keywords.join(', '));
     antd.message.info('Config reset to defaults.');
   }
 
@@ -5123,15 +5120,6 @@ function RiskOptimizerPage(props) {
     },
   ];
 
-  // ── Summary Cards ──
-  function summaryCard(title, value, color, subtitle) {
-    return h('div', { style: { background: '#1E1E2E', borderRadius: 8, padding: '16px 20px', flex: '1 1 0', minWidth: 120 } },
-      h('div', { style: { fontSize: 12, color: '#8F8FA3', marginBottom: 4 } }, title),
-      h('div', { style: { fontSize: 28, fontWeight: 700, color: color } }, value),
-      subtitle ? h('div', { style: { fontSize: 11, color: '#65657B', marginTop: 2 } }, subtitle) : null
-    );
-  }
-
   // ── Policy Tier Selector ──
   function renderPolicyTiers() {
     if (allPolicies.length === 0) {
@@ -5143,8 +5131,8 @@ function RiskOptimizerPage(props) {
       ),
       allPolicies.map(function(policy) {
         var currentTier = policyTiers[policy.id] || null;
-        return h('div', { key: policy.id, style: { display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', background: '#1E1E2E', borderRadius: 6 } },
-          h('span', { style: { flex: 1, fontSize: 13, color: '#E0E0EC' } }, policy.name),
+        return h('div', { key: policy.id, style: { display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', background: '#FAFAFA', borderRadius: 6 } },
+          h('span', { style: { flex: 1, fontSize: 13, color: '#2E2E38' } }, policy.name),
           h(Select, {
             size: 'small',
             style: { width: 160 },
@@ -5172,7 +5160,7 @@ function RiskOptimizerPage(props) {
   }
 
   // ── Setup Wizard ──
-  var showWizard = taggedPolicyCount === 0 && allPolicies.length > 0 && !wizardDismissed;
+  var showWizard = taggedPolicyCount === 0 && !wizardDismissed;
 
   function handleWizardDone() {
     setWizardDismissed(true);
@@ -5257,7 +5245,7 @@ function RiskOptimizerPage(props) {
             );
           }),
           h('div', { style: { marginTop: 8, fontSize: 12, color: '#8F8FA3' } },
-            'You can edit these keywords later via the Config button.'
+            'You can edit these keywords later via the Config tab.'
           )
         ) : null,
 
@@ -5315,10 +5303,7 @@ function RiskOptimizerPage(props) {
       ),
 
       // Wizard navigation
-      h('div', { style: { display: 'flex', justifyContent: 'space-between', marginTop: 16 } },
-        h('div', null,
-          h(Button, { type: 'text', onClick: handleWizardDone, style: { color: '#8F8FA3' } }, 'Skip Setup')
-        ),
+      h('div', { style: { display: 'flex', justifyContent: 'flex-end', marginTop: 16 } },
         h('div', { style: { display: 'flex', gap: 8 } },
           wizardStep > 0
             ? h(Button, { onClick: function() { setWizardStep(wizardStep - 1); } }, 'Back')
@@ -5342,11 +5327,11 @@ function RiskOptimizerPage(props) {
         )
       ),
       !showWizard ? h('div', { style: { display: 'flex', gap: 8 } },
-        h(Button, { size: 'small', onClick: handleOpenConfig, icon: h('span', null, '\u2699') }, 'Config'),
         h(Button, { size: 'small', type: activeTab === 'overview' ? 'primary' : 'default', onClick: function() { setActiveTab('overview'); } }, 'Overview'),
         h(Button, { size: 'small', type: activeTab === 'bundles' ? 'primary' : 'default', onClick: function() { setActiveTab('bundles'); } }, B + 's'),
         h(Button, { size: 'small', type: activeTab === 'policies' ? 'primary' : 'default', onClick: function() { setActiveTab('policies'); } }, P + ' Tiers'),
-        h(Button, { size: 'small', type: activeTab === 'audit' ? 'primary' : 'default', onClick: function() { setActiveTab('audit'); } }, 'Audit Log')
+        h(Button, { size: 'small', type: activeTab === 'audit' ? 'primary' : 'default', onClick: function() { setActiveTab('audit'); } }, 'Audit Log'),
+        h(Button, { size: 'small', type: activeTab === 'config' ? 'primary' : 'default', onClick: function() { setActiveTab('config'); }, icon: h('span', null, '\u2699') }, 'Config')
       ) : null
     ),
 
@@ -5367,7 +5352,7 @@ function RiskOptimizerPage(props) {
       : null,
 
     // ── Overview Tab ──
-    activeTab === 'overview' ? h('div', null,
+    !showWizard && activeTab === 'overview' ? h('div', null,
       // Summary cards row
       h('div', { className: 'stats-row' },
         h(StatCard, { label: 'Total ' + B + 's', value: scoredBundles.length, color: 'primary' }),
@@ -5422,7 +5407,7 @@ function RiskOptimizerPage(props) {
     ) : null,
 
     // ── Bundles Tab ──
-    activeTab === 'bundles' ? h('div', null,
+    !showWizard && activeTab === 'bundles' ? h('div', null,
       h('div', { style: { display: 'flex', gap: 12, marginBottom: 12, alignItems: 'center' } },
         h(Input, {
           placeholder: 'Search deliverables, projects, policies, risk level...',
@@ -5445,8 +5430,8 @@ function RiskOptimizerPage(props) {
     ) : null,
 
     // ── Policy Tiers Tab ──
-    activeTab === 'policies' ? h('div', null,
-      h('div', { className: 'panel', style: { padding: 20, background: '#1E1E2E', borderRadius: 8 } },
+    !showWizard && activeTab === 'policies' ? h('div', null,
+      h('div', { className: 'panel', style: { padding: 20, borderRadius: 8 } },
         h('div', { className: 'panel-header', style: { marginBottom: 12 } },
           h('span', { className: 'panel-title' }, P + ' Rigor Tiers'),
           h('span', { style: { marginLeft: 8, fontSize: 12, color: '#8F8FA3' } },
@@ -5458,7 +5443,7 @@ function RiskOptimizerPage(props) {
     ) : null,
 
     // ── Audit Log Tab ──
-    activeTab === 'audit' ? h('div', null,
+    !showWizard && activeTab === 'audit' ? h('div', null,
       h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 } },
         h('span', { style: { fontSize: 12, color: '#8F8FA3' } }, auditLog.length + ' audit entries'),
         auditLog.length > 0
@@ -5581,62 +5566,96 @@ function RiskOptimizerPage(props) {
       ) : null
     ),
 
-    // ── Config Modal ──
-    h(Modal, {
-      title: '\u2699 Risk Classification Config',
-      open: configModalOpen,
-      onCancel: function() { setConfigModalOpen(false); },
-      onOk: handleSaveConfig,
-      okText: 'Save Config',
-      width: 640,
-      footer: function(_, _ref) {
-        return h('div', { style: { display: 'flex', justifyContent: 'space-between' } },
-          h(Button, { danger: true, type: 'text', onClick: handleResetConfig }, 'Reset to Defaults'),
-          h('div', { style: { display: 'flex', gap: 8 } },
-            h(Button, { onClick: function() { setConfigModalOpen(false); } }, 'Cancel'),
-            h(Button, { type: 'primary', onClick: handleSaveConfig }, 'Save Config')
-          )
-        );
-      },
-    },
-      h('div', null,
-        h('p', { style: { fontSize: 12, color: '#8F8FA3', marginBottom: 16 } },
-          'Edit the keyword lists below. The risk engine matches these against deliverable names and policy names. Separate keywords with commas. A non-engineer can tune these without code changes.'
+    // ── Config Tab ──
+    !showWizard && activeTab === 'config' ? h('div', null,
+      h('div', { className: 'panel', style: { padding: 20, borderRadius: 8 } },
+        h('div', { className: 'panel-header', style: { marginBottom: 12 } },
+          h('span', { className: 'panel-title' }, 'Risk Classification Config')
         ),
-        h('div', { style: { marginBottom: 16 } },
-          h('label', { style: { fontWeight: 600, color: riskConfig.highRisk.color, display: 'block', marginBottom: 4 } },
-            '\u{1F534} High Risk Keywords'
-          ),
-          h('div', { style: { fontSize: 11, color: '#65657B', marginBottom: 4 } }, riskConfig.highRisk.description),
-          h(Input.TextArea, {
-            rows: 3,
-            value: editHighKeywords,
-            onChange: function(e) { setEditHighKeywords(e.target.value); },
-          })
+        h('p', { style: { fontSize: 12, color: '#8F8FA3', marginBottom: 20 } },
+          'Edit the keyword lists below. The risk engine matches these against evidence name, QC plan name, and deliverable name. A non-engineer can tune these without code changes.'
         ),
-        h('div', { style: { marginBottom: 16 } },
-          h('label', { style: { fontWeight: 600, color: riskConfig.mediumRisk.color, display: 'block', marginBottom: 4 } },
-            '\u{1F7E1} Medium Risk Keywords'
-          ),
-          h('div', { style: { fontSize: 11, color: '#65657B', marginBottom: 4 } }, riskConfig.mediumRisk.description),
-          h(Input.TextArea, {
-            rows: 3,
-            value: editMedKeywords,
-            onChange: function(e) { setEditMedKeywords(e.target.value); },
-          })
-        ),
-        h('div', null,
-          h('label', { style: { fontWeight: 600, color: riskConfig.lowRisk.color, display: 'block', marginBottom: 4 } },
-            '\u{1F7E2} Low Risk Keywords'
-          ),
-          h('div', { style: { fontSize: 11, color: '#65657B', marginBottom: 4 } }, riskConfig.lowRisk.description),
-          h(Input.TextArea, {
-            rows: 3,
-            value: editLowKeywords,
-            onChange: function(e) { setEditLowKeywords(e.target.value); },
-          })
+        h(KeywordEditor, {
+          tierKey: 'highRisk',
+          keywords: riskConfig.highRisk.keywords,
+          color: riskConfig.highRisk.color,
+          label: 'High Risk',
+          description: riskConfig.highRisk.description,
+          onUpdate: function(kws) { updateKeywords('highRisk', kws); },
+        }),
+        h(KeywordEditor, {
+          tierKey: 'mediumRisk',
+          keywords: riskConfig.mediumRisk.keywords,
+          color: riskConfig.mediumRisk.color,
+          label: 'Medium Risk',
+          description: riskConfig.mediumRisk.description,
+          onUpdate: function(kws) { updateKeywords('mediumRisk', kws); },
+        }),
+        h(KeywordEditor, {
+          tierKey: 'lowRisk',
+          keywords: riskConfig.lowRisk.keywords,
+          color: riskConfig.lowRisk.color,
+          label: 'Low Risk',
+          description: riskConfig.lowRisk.description,
+          onUpdate: function(kws) { updateKeywords('lowRisk', kws); },
+        }),
+        h('div', { style: { marginTop: 16, paddingTop: 16, borderTop: '1px solid #E8E8EE' } },
+          h(Button, { danger: true, onClick: handleResetConfig }, 'Reset to Defaults')
         )
       )
+    ) : null
+  );
+}
+
+// ── KeywordEditor Component (interactive pill-based keyword editing) ──
+function KeywordEditor(props) {
+  var keywords = props.keywords;
+  var color = props.color;
+  var label = props.label;
+  var description = props.description;
+  var onUpdate = props.onUpdate;
+
+  var _newKw = useState('');
+  var newKw = _newKw[0]; var setNewKw = _newKw[1];
+
+  function handleAdd() {
+    var kw = newKw.trim().toLowerCase();
+    if (kw && keywords.indexOf(kw) === -1) {
+      onUpdate(keywords.concat([kw]));
+      setNewKw('');
+    }
+  }
+
+  function handleRemove(kw) {
+    onUpdate(keywords.filter(function(k) { return k !== kw; }));
+  }
+
+  return h('div', { style: { marginBottom: 20 } },
+    h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 } },
+      h('div', { style: { width: 10, height: 10, borderRadius: '50%', background: color } }),
+      h('span', { style: { fontSize: 14, fontWeight: 600, color: '#2E2E38' } }, label),
+      h('span', { style: { fontSize: 11, color: '#8F8FA3', marginLeft: 4 } }, '\u2014 ' + description)
+    ),
+    h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 } },
+      keywords.map(function(kw) {
+        return h(Tag, {
+          key: kw,
+          closable: true,
+          onClose: function(e) { e.preventDefault(); handleRemove(kw); },
+          style: { fontSize: 11, borderRadius: 12, padding: '2px 10px' },
+        }, kw);
+      })
+    ),
+    h('div', { style: { display: 'flex', gap: 8, maxWidth: 400 } },
+      h(Input, {
+        size: 'small',
+        placeholder: 'Add keyword...',
+        value: newKw,
+        onChange: function(e) { setNewKw(e.target.value); },
+        onPressEnter: handleAdd,
+        style: { flex: 1 },
+      }),
+      h(Button, { size: 'small', onClick: handleAdd, disabled: !newKw.trim() }, 'Add')
     )
   );
 }
@@ -5665,9 +5684,9 @@ function RiskDistributionChart(props) {
     Highcharts.chart(chartRef.current, {
       chart: { type: 'bar', backgroundColor: 'transparent', height: Math.max(200, categories.length * 50 + 80) },
       title: { text: null },
-      xAxis: { categories: categories, labels: { style: { color: '#B0B0C0', fontSize: '11px' } } },
-      yAxis: { min: 0, title: { text: 'Deliverables', style: { color: '#8F8FA3' } }, stackLabels: { enabled: true, style: { color: '#E0E0EC' } }, gridLineColor: '#2A2A3E' },
-      legend: { itemStyle: { color: '#B0B0C0' } },
+      xAxis: { categories: categories, labels: { style: { color: '#65657B', fontSize: '11px' } } },
+      yAxis: { min: 0, title: { text: 'Deliverables', style: { color: '#8F8FA3' } }, stackLabels: { enabled: true, style: { color: '#2E2E38' } }, gridLineColor: '#E8E8EE' },
+      legend: { itemStyle: { color: '#65657B' } },
       plotOptions: { series: { stacking: 'normal', borderRadius: 3 } },
       series: [
         { name: 'High Risk', data: categories.map(function(c) { return projects[c].high; }), color: riskConfig.highRisk.color },
