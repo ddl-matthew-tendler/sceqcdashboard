@@ -2,7 +2,7 @@ import os
 import logging
 import requests
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
@@ -11,6 +11,21 @@ load_dotenv()
 app = FastAPI()
 logger = logging.getLogger("app")
 logging.basicConfig(level=logging.INFO)
+
+# Capture the external hostname from incoming browser requests.
+# Inside Domino, the nginx proxy sets X-Forwarded-Host with the real hostname.
+_external_host_cache = {"host": None}
+
+
+@app.middleware("http")
+async def capture_external_host(request: Request, call_next):
+    if not _external_host_cache["host"]:
+        fwd = request.headers.get("x-forwarded-host") or request.headers.get("host")
+        if fwd and "domino" in fwd.lower() or (fwd and "." in fwd and "localhost" not in fwd):
+            scheme = request.headers.get("x-forwarded-proto", "https")
+            _external_host_cache["host"] = f"{scheme}://{fwd}"
+            logger.info(f"Captured external host: {_external_host_cache['host']}")
+    return await call_next(request)
 
 
 def get_domino_host():
@@ -45,11 +60,15 @@ def _get_gov_host_candidates():
         if user_host != primary:
             candidates.append(("DOMINO_USER_HOST", user_host))
 
+    # External hostname captured from browser requests (goes through ingress which routes governance)
+    ext_host = _external_host_cache.get("host", "").rstrip("/")
+    if ext_host and ext_host != primary:
+        candidates.append(("external_host", ext_host))
+
     # Common internal Kubernetes service names for governance
     for svc in [
         "http://governance-service.domino-platform:80",
         "http://governance-svc.domino-platform:80",
-        "http://nucleus-frontend.domino-platform:80",
     ]:
         if svc.rstrip("/") != primary:
             candidates.append(("k8s:" + svc.split("//")[1].split(".")[0], svc))
@@ -59,6 +78,12 @@ def _get_gov_host_candidates():
 
 def _get_gov_host():
     """Return the working governance API host, probing if needed."""
+    # Re-probe if we failed before but now have the external host
+    if _gov_host_cache["probed"] and _gov_host_cache["host"] is None:
+        if _external_host_cache.get("host") and not _gov_host_cache.get("tried_external"):
+            logger.info("Re-probing governance host with newly captured external host")
+            _gov_host_cache["probed"] = False
+
     if _gov_host_cache["probed"]:
         return _gov_host_cache["host"]
 
@@ -92,6 +117,7 @@ def _get_gov_host():
     logger.warning("Governance host probe: no candidate worked, falling back to DOMINO_API_HOST")
     _gov_host_cache["host"] = None
     _gov_host_cache["probed"] = True
+    _gov_host_cache["tried_external"] = bool(_external_host_cache.get("host"))
     return None
 
 
@@ -406,6 +432,7 @@ def debug_auth():
         "has_DOMINO_API_HOST": has_host,
         "domino_host": get_domino_host() or "(not set)",
         "gov_host": _get_gov_host() or "(same as domino_host)",
+        "external_host_captured": _external_host_cache.get("host", "(not yet)"),
         "sidecar_token_preview": sidecar_token,
         "sidecar_raw_preview": sidecar_raw,
         "host_vars": host_vars,
