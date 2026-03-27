@@ -353,8 +353,8 @@ The SCE QC Tracker is a Domino App built for pharmaceutical statistical programm
 |-----|----------|----------|-------------------|
 | 1. Stage Reassignment | ~~High~~ RESOLVED | ~~Blocks all individual assignment changes~~ Complete | `PATCH /api/governance/v1/bundles/{bundleId}/stages/{stageId}` with `{"assignee": {"id": "userId"}}` |
 | 2. Bulk Assign | High | Blocks efficient multi-deliverable assignment | `POST /api/governance/v1/bundles/bulk-assign` |
-| 3. Apply Assignment Rules | Medium | Blocks rule-based auto-assignment; depends on Gap 1 | `POST /api/governance/v1/bundles/apply-rules` |
-| 4. Assignment Rules Persistence | Medium | Blocks multi-user/multi-session rule sharing | `GET/PUT /api/governance/v1/projects/{projectId}/assignment-rules` |
+| 3. Apply Bulk Assignment Rules | Medium | Blocks rule-based auto-assignment; depends on Gap 1 | `POST /api/governance/v1/bundles/apply-rules` |
+| 4. Bulk Assignment Rules Persistence | Medium | Blocks multi-user/multi-session rule sharing | `GET/PUT /api/governance/v1/projects/{projectId}/assignment-rules` |
 | 5. Pagination | Medium | Silently drops data in projects with 200+ deliverables | Pagination metadata on existing `GET` endpoints |
 | 6. Write Action Audit Trail | Low | Required for GxP compliance; depends on Gaps 1-3 | Audit metadata on all write responses + `GET .../audit-log` |
 | 7. Data Explorer / Cross-App Discovery | Low | Nice-to-have; current workaround is functional | Query param on `GET /api/apps/beta/apps` or app-to-app link registry |

@@ -1,19 +1,21 @@
 # SCE QC Dashboard
 
-A Domino App for portfolio-level visibility into governance deliverables, QC findings, approvals, and stage assignments across projects.
+A Domino App for portfolio-level visibility into QC deliverables, findings, approvals, and stage assignments across projects.
 
 ## Pages
 
 | Page | Purpose |
 |------|---------|
-| **QC Tracker** | Main table of all deliverables with inline stage progress dots, expandable detail rows (approvals, findings, gates, attachments), and column filters |
+| **QC Tracker** | Main table of all deliverables with inline stage progress dots, expandable detail rows (approvals, findings, gates, attachments), column filters, and CSV import |
 | **Portfolio Overview** | Summary charts — deliverables by state, findings by severity, stage distribution |
-| **Milestones** | Timeline view of deliverable progress toward completion |
-| **Approvals** | Cross-deliverable approval status tracking |
+| **Milestones** | Timeline view of deliverable stage progression for active deliverables |
+| **Approvals** | Cross-deliverable approval status tracking with 4 KPI cards (Pending Submission, Pending Review, Conditionally Approved, Approved) |
 | **Findings & QC** | Aggregated findings view across all deliverables |
-| **Team Metrics** | Workload distribution and assignment metrics |
-| **Assignment Rules** | Per-project rules for bulk-assigning team members to stages |
-| **Stage Assignments** | Flattened view of all stages across all deliverables — find unassigned work and reassign in bulk |
+| **Team Metrics** | Quality indicators, cycle times, rework indicators, and workload distribution with interactive chart drill-down |
+| **Stage Manager** | View all stages across deliverables — identify unassigned work, reassign owners, and manage workload |
+| **Bulk Assignment Rules** | Per-project rules for bulk-assigning team members to stages |
+| **Automation** | Define scripts that run automatically when QC stages complete |
+| **Risk Optimizer** | Keyword-based risk scoring with configurable tiers, policy tagging, and calibration analysis |
 
 ## Architecture
 
@@ -85,7 +87,7 @@ When the app can't connect to Domino APIs, it falls back to mock data and shows 
 
 ## API gaps
 
-Write operations (stage reassignment, bulk assign, apply rules) have no Domino API yet. These actions show an "API Pending" badge and display a message when attempted. See `DOMINO_API_GAPS.md` for proposed endpoint designs.
+Stage reassignment and bundle creation are live. Remaining write operations (bulk assign, apply rules) have no Domino API yet. These actions show an "API Pending" badge and display a message when attempted. See `DOMINO_API_GAPS.md` for proposed endpoint designs.
 
 ## Documentation
 

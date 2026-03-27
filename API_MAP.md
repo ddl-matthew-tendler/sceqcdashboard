@@ -40,13 +40,14 @@ Phase 2 — All fire simultaneously (single Promise.all):
 
 **Note on project owners (D16)**: The `/v4/projects/{id}/collaborators` endpoint returns only explicitly added collaborators, not the project owner. The app extracts the owner from the `/v4/projects` response and merges them into the collaborator list if not already present. This ensures all assignee dropdowns include the project owner.
 
-## Write Endpoints (API Pending)
+## Write Endpoints
 
 | Action | UI Location | Status | Notes |
 |--------|------------|--------|-------|
-| Stage Reassignment | QC Tracker expanded row | **LIVE** | PATCH method, body: {assignee: {id: userId}}. Implemented and working. Upstream: `PATCH /api/governance/v1/bundles/{bundleId}/stages/{stageId}` |
+| Stage Reassignment | QC Tracker expanded row, Stage Manager bulk reassign | **LIVE** | PATCH method, body: {assignee: {id: userId}}. Upstream: `PATCH /api/governance/v1/bundles/{bundleId}/stages/{stageId}` |
+| Create Bundle | CSV Import drawer | **LIVE** | POST method, body: {name, policyId, projectId}. Upstream: `POST /api/governance/v1/bundles` |
 | Bulk Assign | QC Tracker bulk action bar | API Pending | Button disabled, tooltip explains |
-| Apply Assignment Rules | Assignment Rules page | API Pending | Warning toast on attempt |
+| Apply Bulk Assignment Rules | Bulk Assignment Rules page | API Pending | Warning toast on attempt |
 
 These are gated by the `API_GAPS` config object in `app.js`. Set `ready: true` when the Domino write API becomes available.
 

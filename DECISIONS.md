@@ -119,3 +119,33 @@
 ### D28: Whitelabel Terms — Always Use capFirst()
 **Decision**: All chart titles and UI labels that use whitelabel terms (`terms.bundle`, `terms.policy`) must wrap them in `capFirst()` for proper capitalization.
 **Rationale**: The live Domino API returns lowercase terms (e.g., "deliverable", "qc plan"). Without `capFirst()`, chart titles render as "deliverables by qc plan" instead of "Deliverables by QC Plan". This was caught during live testing.
+
+## 2026-03-27: UI Overhaul — Naming, CSV Import, Chart Drill-Down
+
+### D29: Remove "Governance" from UI Vocabulary
+**Decision**: All user-visible strings containing "governance" have been replaced with neutral terms ("QC", "quality", or simply removed). API URL paths (`/governance/bundles/...`) are left intact since they are actual Domino endpoint routes. Documentation files referencing the Domino Governance API by its technical name are also left intact.
+**Rationale**: "Governance" is an internal Domino platform term, not the language end-users think in. Users think in terms of "QC", "deliverables", and "stages". Removing the word improves clarity without affecting functionality.
+
+### D30: Page Renames — Stage Manager, Bulk Assignment Rules, Deliverable Stages
+**Decision**: Renamed "Stage Assignments" → "Stage Manager", "Assignment Rules" → "Bulk Assignment Rules", and "Programming Milestones" → "Deliverable Stages". Updated sidebar labels, page headers, modal titles, API_GAPS labels, and page subtitles.
+**Rationale**: "Stage Manager" conveys the page's purpose: identify unassigned stages, reassign owners, manage workload. "Bulk Assignment Rules" distinguishes from individual stage reassignment. "Deliverable Stages" is more accurate than "Programming Milestones" which implied a phase-gate methodology that may not match all organizations.
+
+### D31: CSV Upload — Client-Side Parsing with 1-by-1 API Upload
+**Decision**: Added a `CSVUploadDrawer` component with a 5-step wizard (Upload → Map Columns → Preview → Uploading → Done). CSV is parsed client-side with a custom parser handling quoted fields. Rows are uploaded via `POST /api/bundles` (new proxy endpoint) with concurrency of 3 simultaneous requests. Column mapping supports auto-detection by header name similarity and default values for unmapped columns.
+**Rationale**: No bulk create endpoint exists in the Domino Governance API, so deliverables must be created individually. Client-side parsing avoids sending raw files to the backend. The 3-concurrent-request pattern balances throughput against API rate limits. Auto-mapping reduces manual work for well-structured CSVs. The wizard pattern matches the Risk Optimizer's setup flow for consistency.
+
+### D32: Chart Drill-Down — Click Any Chart to Filter Detail Table
+**Decision**: Added click handlers to Findings by Severity, Finding Density by QC Plan, and Finding Creator charts in Team Metrics. Clicking a bar sets `metricsFilter` which shows a filtered detail table below. Added `severity`, `density`, and `creator` filter types to `filteredMetricsBundles` and `metricsFilterLabel`.
+**Rationale**: Charts are more useful when they're interactive. The existing drill-down pattern (workload, policy breakdown, findings resolution charts already had click handlers) was extended to the remaining charts. The detail table provides the actual deliverable records behind any data point.
+
+### D33: Flags Column Tooltip — Explain What Indicators Mean
+**Decision**: Added a `Tooltip` to the "Flags" column header with a dashed underline (`cursor: help`). The tooltip explains all three indicators: ⚠ = open findings count, ∅ = no assignee on current stage, ✓ = all approvals approved.
+**Rationale**: The Flags column uses symbol shorthand that isn't self-explanatory. A hover tooltip on the header provides the explanation without consuming screen space. The dashed underline signals interactivity.
+
+### D34: Attachment Column Icon — Ant Design PaperClipOutlined
+**Decision**: Replaced the 📎 emoji in the attachment column header with an Ant Design `PaperClipOutlined` icon wrapped in a Tooltip.
+**Rationale**: Emojis render inconsistently across browsers and operating systems. The Ant Design icon matches the rest of the UI's icon system (all sidebar icons use `@ant-design/icons`). The Tooltip provides the "Attachments" label on hover.
+
+### D35: Mock Data Explorer URL in Dummy Mode
+**Decision**: In `loadMockData()`, set `dataExplorerUrl` to `'__mock_data_explorer__'` so attachment links for data-explorer-compatible files (`.csv`, `.parquet`, etc.) render visually in dummy mode. In live mode, the URL is discovered from the Domino Beta Apps API as before.
+**Rationale**: With `dataExplorerUrl` null, no data explorer links appeared in dummy mode, making the feature invisible during demos. The mock URL produces non-functional links (they navigate to a 404), but the links are visible and demonstrate the feature exists.
