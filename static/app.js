@@ -328,15 +328,15 @@ function TopNav(props) {
 
 // ── Sidebar ─────────────────────────────────────────────────────
 var NAV_ITEMS = [
-  { key: 'tracker', icon: '\u25C9', label: 'QC Tracker' },
-  { key: 'milestones', icon: '\u2630', label: 'Milestones' },
-  { key: 'approvals', icon: '\u2713', label: 'Approvals' },
-  { key: 'findings', icon: '\u26A0', label: 'Findings & QC' },
-  { key: 'metrics', icon: '\u2637', label: 'Team Metrics' },
-  { key: 'stages', icon: '\u229A', label: 'Stage Assignments' },
-  { key: 'rules', icon: '\u2699', label: 'Assignment Rules' },
-  { key: 'automation', icon: '\u26A1', label: 'Automation' },
-  { key: 'risk', icon: '\u2696', label: 'Risk Optimizer' },
+  { key: 'tracker', iconName: 'TableOutlined', label: 'QC Tracker' },
+  { key: 'milestones', iconName: 'FlagOutlined', label: 'Milestones' },
+  { key: 'approvals', iconName: 'CheckCircleOutlined', label: 'Approvals' },
+  { key: 'findings', iconName: 'FileSearchOutlined', label: 'Findings & QC' },
+  { key: 'metrics', iconName: 'BarChartOutlined', label: 'Team Metrics' },
+  { key: 'stages', iconName: 'ApartmentOutlined', label: 'Stage Assignments' },
+  { key: 'rules', iconName: 'SettingOutlined', label: 'Assignment Rules' },
+  { key: 'automation', iconName: 'ThunderboltOutlined', label: 'Automation' },
+  { key: 'risk', iconName: 'SlidersOutlined', label: 'Risk Optimizer' },
 ];
 
 function Sidebar(props) {
@@ -344,12 +344,15 @@ function Sidebar(props) {
   var onNav = props.onNav;
   return h('div', { className: 'sidebar' },
     NAV_ITEMS.map(function(item) {
+      var IconComp = icons && icons[item.iconName] ? icons[item.iconName] : null;
       return h('div', {
         key: item.key,
         className: 'sidebar-item' + (active === item.key ? ' active' : ''),
         onClick: function() { onNav(item.key); },
       },
-        h('span', { className: 'sidebar-icon' }, item.icon),
+        h('span', { className: 'sidebar-icon' },
+          IconComp ? h(IconComp, null) : null
+        ),
         h('span', null, item.label)
       );
     })
