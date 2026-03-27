@@ -106,7 +106,7 @@ var API_GAPS = {
   },
   applyRules: {
     label: 'Apply Bulk Assignment Rules',
-    message: 'This action is coming soon — the Domino write API for applying rules is in development.',
+    message: 'This action is coming soon. The Domino write API for applying rules is in development.',
     ready: false,
   },
   automationRun: {
@@ -612,18 +612,18 @@ function DashboardPage(props) {
     },
     {
       title: 'Project', dataIndex: 'projectName', key: 'project',
-      render: function(text) { return h('span', { style: { color: '#65657B', fontSize: 12 } }, text || '\u2014'); },
+      render: function(text) { return h('span', { style: { color: '#65657B', fontSize: 12 } }, text || '\u2013'); },
     },
     {
       title: P, dataIndex: 'policyName', key: 'policy',
-      render: function(text) { return h(Tag, null, text || '\u2014'); },
+      render: function(text) { return h(Tag, null, text || '\u2013'); },
     },
     {
       title: 'Stage', key: 'stage',
       render: function(_, record) {
         var pct = getBundleProgress(record);
         return h(Space, { direction: 'vertical', size: 2 },
-          h('span', { style: { fontSize: 12, fontWeight: 500 } }, record.stage || '\u2014'),
+          h('span', { style: { fontSize: 12, fontWeight: 500 } }, record.stage || '\u2013'),
           h(Progress, { percent: pct, size: 'small', showInfo: false, strokeColor: '#543FDE' })
         );
       },
@@ -634,7 +634,7 @@ function DashboardPage(props) {
     },
     {
       title: 'Updated', dataIndex: 'updatedAt', key: 'updated',
-      render: function(d) { return d ? dayjs(d).fromNow() : '\u2014'; },
+      render: function(d) { return d ? dayjs(d).fromNow() : '\u2013'; },
       sorter: function(a, b) { return new Date(a.updatedAt || 0) - new Date(b.updatedAt || 0); },
     },
   ];
@@ -677,7 +677,7 @@ function DashboardPage(props) {
     // Table
     h('div', { className: 'panel' },
       h('div', { className: 'panel-header' },
-        h('span', { className: 'panel-title' }, filterLabel ? B + 's — ' + filterLabel : 'All ' + B + 's'),
+        h('span', { className: 'panel-title' }, filterLabel ? B + 's: ' + filterLabel : 'All ' + B + 's'),
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
           filterLabel ? h(Tag, { closable: true, onClose: function() { setTableFilter(null); }, color: 'purple' }, filterLabel) : null,
           h('span', { style: { fontSize: 12, color: '#8F8FA3' } }, filteredBundles.length + ' ' + B.toLowerCase() + 's')
@@ -928,12 +928,12 @@ function ApprovalsPage(props) {
     },
     { title: 'Approvers', key: 'approvers',
       render: function(_, record) {
-        if (!record.approvers || record.approvers.length === 0) return '\u2014';
+        if (!record.approvers || record.approvers.length === 0) return '\u2013';
         return record.approvers.map(function(a) { return a.name; }).join(', ');
       },
     },
     { title: 'Updated', dataIndex: 'updatedAt', key: 'updated',
-      render: function(d) { return d ? dayjs(d).fromNow() : '\u2014'; },
+      render: function(d) { return d ? dayjs(d).fromNow() : '\u2013'; },
     },
   ];
 
@@ -961,7 +961,7 @@ function ApprovalsPage(props) {
 
     h('div', { className: 'panel' },
       h('div', { className: 'panel-header' },
-        h('span', { className: 'panel-title' }, approvalFilterLabel ? 'Approvals — ' + approvalFilterLabel : 'All Approvals'),
+        h('span', { className: 'panel-title' }, approvalFilterLabel ? 'Approvals: ' + approvalFilterLabel : 'All Approvals'),
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
           approvalFilterLabel ? h(Tag, { closable: true, onClose: function() { setApprovalFilter(null); }, color: 'purple' }, approvalFilterLabel) : null,
           h('span', { style: { fontSize: 12, color: '#8F8FA3' } }, filteredApprovals.length + ' total')
@@ -1149,11 +1149,11 @@ function FindingsPage(props) {
       sorter: function(a, b) { return (a.assignee && a.assignee.name || '').localeCompare(b.assignee && b.assignee.name || ''); },
       filters: findingAssigneeOptions, filterSearch: true,
       onFilter: function(v, r) { return r.assignee && r.assignee.name === v; },
-      render: function(assignee) { return assignee ? assignee.name : '\u2014'; } },
+      render: function(assignee) { return assignee ? assignee.name : '\u2013'; } },
     { title: 'Due', dataIndex: 'dueDate', key: 'due', width: 150,
       sorter: function(a, b) { return (a.dueDate || '').localeCompare(b.dueDate || ''); },
       render: function(d) {
-        if (!d) return '\u2014';
+        if (!d) return '\u2013';
         var due = dayjs(d);
         var overdue = due.isBefore(dayjs());
         return h('span', { style: { color: overdue ? '#C20A29' : '#2E2E38', fontWeight: overdue ? 600 : 400 } },
@@ -1196,7 +1196,7 @@ function FindingsPage(props) {
 
     h('div', { className: 'panel' },
       h('div', { className: 'panel-header' },
-        h('span', { className: 'panel-title' }, findingFilterLabel ? 'Findings — ' + findingFilterLabel : 'All Findings'),
+        h('span', { className: 'panel-title' }, findingFilterLabel ? 'Findings: ' + findingFilterLabel : 'All Findings'),
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
           findingFilterLabel ? h(Tag, { closable: true, onClose: function() { setFindingFilter(null); }, color: 'purple' }, findingFilterLabel) : null,
           h('span', { style: { fontSize: 12, color: '#8F8FA3' } }, filteredFindings.length + ' total')
@@ -1738,7 +1738,7 @@ function MetricsPage(props) {
         h('div', { className: 'panel-body' },
           Object.keys(metrics.cycleByPolicy).length > 0
             ? h('div', null,
-                metrics.cycleTimeSampleData ? h(Tag, { color: 'orange', style: { marginBottom: 8, fontSize: 10 } }, 'Sample data \u2014 no completed ' + B.toLowerCase() + 's yet') : null,
+                metrics.cycleTimeSampleData ? h(Tag, { color: 'orange', style: { marginBottom: 8, fontSize: 10 } }, 'Sample data: no completed ' + B.toLowerCase() + 's yet') : null,
                 h('div', { id: 'chart-cycle-by-policy', className: 'chart-container' })
               )
             : h(EmptyState, { text: 'No completed ' + B.toLowerCase() + 's yet' })
@@ -1819,7 +1819,7 @@ function MetricsPage(props) {
     // ── Detail table (shown when a filter is active) ──
     metricsFilter ? h('div', { className: 'panel', style: { marginTop: 20 } },
       h('div', { className: 'panel-header' },
-        h('span', { className: 'panel-title' }, B + 's — ' + metricsFilterLabel),
+        h('span', { className: 'panel-title' }, B + 's: ' + metricsFilterLabel),
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
           h(Tag, { closable: true, onClose: function() { setMetricsFilter(null); }, color: 'purple' }, metricsFilterLabel),
           h('span', { style: { fontSize: 12, color: '#8F8FA3' } }, filteredMetricsBundles.length + ' ' + B.toLowerCase() + 's')
@@ -1830,11 +1830,11 @@ function MetricsPage(props) {
           dataSource: filteredMetricsBundles,
           columns: [
             { title: B, dataIndex: 'name', key: 'name', render: function(t) { return h('span', { style: { fontWeight: 500 } }, t); } },
-            { title: 'Project', dataIndex: 'projectName', key: 'project', render: function(t) { return h('span', { style: { color: '#65657B', fontSize: 12 } }, t || '\u2014'); } },
-            { title: P, dataIndex: 'policyName', key: 'policy', render: function(t) { return h(Tag, null, t || '\u2014'); } },
-            { title: 'Stage', dataIndex: 'stage', key: 'stage', render: function(t) { return h('span', { style: { fontSize: 12 } }, t || '\u2014'); } },
+            { title: 'Project', dataIndex: 'projectName', key: 'project', render: function(t) { return h('span', { style: { color: '#65657B', fontSize: 12 } }, t || '\u2013'); } },
+            { title: P, dataIndex: 'policyName', key: 'policy', render: function(t) { return h(Tag, null, t || '\u2013'); } },
+            { title: 'Stage', dataIndex: 'stage', key: 'stage', render: function(t) { return h('span', { style: { fontSize: 12 } }, t || '\u2013'); } },
             { title: 'Findings', key: 'findings', render: function(_, r) { return (r._findings ? r._findings.length : 0); } },
-            { title: 'Assignee', key: 'assignee', render: function(_, r) { return (r.stageAssignee && r.stageAssignee.name) || '\u2014'; } },
+            { title: 'Assignee', key: 'assignee', render: function(_, r) { return (r.stageAssignee && r.stageAssignee.name) || '\u2013'; } },
             { title: 'State', dataIndex: 'state', key: 'state', render: function(s) { return h(Tag, { color: stateColor(s) }, s); } },
           ],
           rowKey: 'id',
@@ -1915,7 +1915,7 @@ function StagePopoverContent(props) {
       })(),
       h('div', { className: 'stage-popover-card' },
         h('div', { className: 'stage-popover-card-value', style: { color: totalApprovals > 0 ? (approvedCount === totalApprovals ? '#28A464' : '#0070CC') : '#8F8FA3' } },
-          totalApprovals > 0 ? approvedCount + '/' + totalApprovals : '\u2014'
+          totalApprovals > 0 ? approvedCount + '/' + totalApprovals : '\u2013'
         ),
         h('div', { className: 'stage-popover-card-label' },
           totalApprovals > 0 ? 'Approved' : 'No Approvals'
@@ -1923,7 +1923,7 @@ function StagePopoverContent(props) {
       ),
       h('div', { className: 'stage-popover-card' },
         h('div', { className: 'stage-popover-card-value', style: { color: totalGates > 0 ? (openGates === totalGates ? '#28A464' : '#C20A29') : '#8F8FA3' } },
-          totalGates > 0 ? openGates + '/' + totalGates : '\u2014'
+          totalGates > 0 ? openGates + '/' + totalGates : '\u2013'
         ),
         h('div', { className: 'stage-popover-card-label' },
           totalGates > 0 ? 'Gates Open' : 'No Gates'
@@ -2047,7 +2047,7 @@ function StatusFlags(props) {
   }
 
   if (flags.length === 0) {
-    return h('span', { style: { color: '#D1D1DB', fontSize: 12 } }, '\u2014');
+    return h('span', { style: { color: '#D1D1DB', fontSize: 12 } }, '\u2013');
   }
 
   return h('div', { className: 'status-flags-row' }, flags);
@@ -2303,12 +2303,12 @@ function QCTrackerExpandedRow(props) {
                 { title: 'Added by', key: 'addedBy', width: 130,
                   render: function(_, r) {
                     var name = r.createdBy && (r.createdBy.name || r.createdBy.userName);
-                    return h('span', { style: { fontSize: 10 } }, name || '\u2014');
+                    return h('span', { style: { fontSize: 10 } }, name || '\u2013');
                   }
                 },
                 { title: 'Added', key: 'addedAt', width: 100,
                   render: function(_, r) {
-                    return r.createdAt ? h('span', { style: { fontSize: 10, color: '#8F8FA3' } }, dayjs(r.createdAt).format('MMM D, YYYY')) : '\u2014';
+                    return r.createdAt ? h('span', { style: { fontSize: 10, color: '#8F8FA3' } }, dayjs(r.createdAt).format('MMM D, YYYY')) : '\u2013';
                   }
                 },
               ],
@@ -2388,7 +2388,7 @@ function BulkActionBar(props) {
     }
     var missingStageIds = targets.filter(function(t) { return !t.stageId; });
     if (missingStageIds.length > 0) {
-      antd.message.warning(missingStageIds.length + ' ' + B.toLowerCase() + '(s) have no stage ID — skipping those');
+      antd.message.warning(missingStageIds.length + ' ' + B.toLowerCase() + '(s) have no stage ID, skipping those');
     }
     var validTargets = targets.filter(function(t) { return t.stageId; });
     if (validTargets.length === 0) return;
@@ -2465,20 +2465,20 @@ function FindingsDrawer(props) {
     { title: 'Severity', dataIndex: 'severity', key: 'severity', width: 80,
       sorter: function(a, b) { return (a.severity || '').localeCompare(b.severity || ''); },
       render: function(sev) {
-        return h(Tag, { color: severityColor(sev), style: { color: '#fff', border: 'none', minWidth: 28, textAlign: 'center', fontSize: 11 } }, sev || '\u2014');
+        return h(Tag, { color: severityColor(sev), style: { color: '#fff', border: 'none', minWidth: 28, textAlign: 'center', fontSize: 11 } }, sev || '\u2013');
       }
     },
     { title: 'Name', dataIndex: 'name', key: 'name', width: 180, ellipsis: true,
       render: function(t, r) {
         var findingUrl = bundle && r.id ? getDominoBundleUrl(bundle, { findingId: r.id }) : null;
-        if (!findingUrl) return h('span', { style: { fontWeight: 500, fontSize: 12 } }, t || '\u2014');
+        if (!findingUrl) return h('span', { style: { fontWeight: 500, fontSize: 12 } }, t || '\u2013');
         return h('a', {
           href: findingUrl,
           target: '_blank',
           rel: 'noopener noreferrer',
           style: { fontWeight: 500, fontSize: 12, color: '#543FDE' },
           title: 'View finding in Domino',
-        }, t || '\u2014');
+        }, t || '\u2013');
       }
     },
     { title: 'Status', dataIndex: 'status', key: 'status', width: 110,
@@ -2487,23 +2487,23 @@ function FindingsDrawer(props) {
     { title: 'Assignee', key: 'assignee', width: 120,
       render: function(_, r) {
         var name = r.assignee ? (r.assignee.name || r.assignee.userName) : null;
-        return h('span', { style: { fontSize: 12 } }, name || '\u2014');
+        return h('span', { style: { fontSize: 12 } }, name || '\u2013');
       }
     },
     { title: 'Due Date', key: 'dueDate', width: 100,
       render: function(_, r) {
-        return r.dueDate ? h('span', { style: { fontSize: 12 } }, dayjs(r.dueDate).format('MMM D, YYYY')) : h('span', { style: { color: '#8F8FA3', fontSize: 12 } }, '\u2014');
+        return r.dueDate ? h('span', { style: { fontSize: 12 } }, dayjs(r.dueDate).format('MMM D, YYYY')) : h('span', { style: { color: '#8F8FA3', fontSize: 12 } }, '\u2013');
       }
     },
     { title: 'Description', key: 'description', ellipsis: true,
       render: function(_, r) {
-        return h('span', { style: { fontSize: 11, color: '#65657B' } }, r.description || '\u2014');
+        return h('span', { style: { fontSize: 11, color: '#65657B' } }, r.description || '\u2013');
       }
     },
   ];
 
   return h(Drawer, {
-    title: bundle ? 'Findings \u2014 ' + bundle.name : 'Findings',
+    title: bundle ? 'Findings: ' + bundle.name : 'Findings',
     open: visible,
     onClose: onClose,
     width: 720,
@@ -2547,7 +2547,7 @@ function AttachmentsDrawer(props) {
     { title: 'Identifier', key: 'identifier', width: 200, ellipsis: true,
       render: function(_, r) {
         var id = r.identifier || {};
-        var fname = id.filename || id.name || '\u2014';
+        var fname = id.filename || id.name || '\u2013';
         var explorerLink = deUrl && isDataExplorerFile(fname) ? buildDataExplorerUrl(deUrl, r) : null;
         if (explorerLink) {
           return h('span', { style: { display: 'flex', alignItems: 'center', gap: 4 } },
@@ -2575,19 +2575,19 @@ function AttachmentsDrawer(props) {
     },
     { title: 'Created', key: 'createdAt', width: 120,
       render: function(_, r) {
-        return r.createdAt ? h('span', { style: { fontSize: 12 } }, dayjs(r.createdAt).format('MMM D, YYYY')) : '\u2014';
+        return r.createdAt ? h('span', { style: { fontSize: 12 } }, dayjs(r.createdAt).format('MMM D, YYYY')) : '\u2013';
       }
     },
     { title: 'Created By', key: 'createdBy', width: 130,
       render: function(_, r) {
         var name = r.createdBy ? (r.createdBy.name || r.createdBy.userName) : null;
-        return h('span', { style: { fontSize: 12 } }, name || '\u2014');
+        return h('span', { style: { fontSize: 12 } }, name || '\u2013');
       }
     },
   ];
 
   return h(Drawer, {
-    title: bundle ? 'Attachments \u2014 ' + bundle.name : 'Attachments',
+    title: bundle ? 'Attachments: ' + bundle.name : 'Attachments',
     open: visible,
     onClose: onClose,
     width: 640,
@@ -2616,6 +2616,7 @@ function CSVUploadDrawer(props) {
   var onClose = props.onClose;
   var policies = props.policies || [];
   var projects = props.projects || [];
+  var bundles = props.bundles || [];
   var connected = props.connected;
   var onComplete = props.onComplete;
   var terms = props.terms || DEFAULT_TERMS;
@@ -2632,8 +2633,8 @@ function CSVUploadDrawer(props) {
 
   var REQUIRED_FIELDS = [
     { key: 'name', label: B + ' Name', description: 'Unique name for each ' + B.toLowerCase(), required: true },
-    { key: 'policyId', label: 'QC Plan ID', description: 'Policy/QC Plan ID (or use default below)', required: false },
-    { key: 'projectId', label: 'Project ID', description: 'Domino project ID (or use default below)', required: false },
+    { key: 'policyName', label: capFirst(terms.policy) + ' Name', description: capFirst(terms.policy) + ' name (or use default below)', required: false },
+    { key: 'projectName', label: 'Project Name', description: 'Domino project name (or use default below)', required: false },
   ];
 
   function reset() {
@@ -2669,8 +2670,8 @@ function CSVUploadDrawer(props) {
     headers.forEach(function(h) {
       var lower = h.toLowerCase().replace(/[_\s-]/g, '');
       if (lower === 'name' || lower === 'deliverablename' || lower === 'bundlename' || lower === 'evidencename') autoMap.name = h;
-      else if (lower === 'policyid' || lower === 'qcplanid' || lower === 'policyname') autoMap.policyId = h;
-      else if (lower === 'projectid' || lower === 'projectname') autoMap.projectId = h;
+      else if (lower === 'policyname' || lower === 'qcplanname' || lower === 'qcplan' || lower === 'policy' || lower === 'policyid' || lower === 'qcplanid') autoMap.policyName = h;
+      else if (lower === 'projectname' || lower === 'project' || lower === 'projectid') autoMap.projectName = h;
     });
     setMapping(autoMap);
     setStep(1);
@@ -2703,38 +2704,134 @@ function CSVUploadDrawer(props) {
     reader.readAsText(file.originFileObj || file);
   }
 
-  // Validation
+  // Helper: resolve a name to a policy/project ID
+  function resolvePolicy(name) {
+    if (!name) return null;
+    var trimmed = name.trim().toLowerCase();
+    // Exact match first
+    var exact = policies.find(function(p) { return (p.name || '').toLowerCase() === trimmed; });
+    if (exact) return { id: exact.id, name: exact.name, match: 'exact' };
+    // Check if the input looks like an ID (contains dashes/hex pattern)
+    var asId = policies.find(function(p) { return p.id === name.trim(); });
+    if (asId) return { id: asId.id, name: asId.name, match: 'id' };
+    // Partial/fuzzy match
+    var partials = policies.filter(function(p) { return (p.name || '').toLowerCase().indexOf(trimmed) >= 0 || trimmed.indexOf((p.name || '').toLowerCase()) >= 0; });
+    if (partials.length === 1) return { id: partials[0].id, name: partials[0].name, match: 'partial' };
+    if (partials.length > 1) return { id: null, name: name, match: 'ambiguous', candidates: partials };
+    return { id: null, name: name, match: 'none' };
+  }
+
+  function resolveProject(name) {
+    if (!name) return null;
+    var trimmed = name.trim().toLowerCase();
+    var exact = projects.find(function(p) { return (p.name || '').toLowerCase() === trimmed; });
+    if (exact) return { id: exact.id, name: exact.name, match: 'exact' };
+    var asId = projects.find(function(p) { return p.id === name.trim(); });
+    if (asId) return { id: asId.id, name: asId.name, match: 'id' };
+    var partials = projects.filter(function(p) { return (p.name || '').toLowerCase().indexOf(trimmed) >= 0 || trimmed.indexOf((p.name || '').toLowerCase()) >= 0; });
+    if (partials.length === 1) return { id: partials[0].id, name: partials[0].name, match: 'partial' };
+    if (partials.length > 1) return { id: null, name: name, match: 'ambiguous', candidates: partials };
+    return { id: null, name: name, match: 'none' };
+  }
+
+  // Existing bundle names for duplicate detection
+  var existingBundleNames = useMemo(function() {
+    var names = {};
+    (bundles || []).forEach(function(b) { if (b.name) names[b.name.trim().toLowerCase()] = true; });
+    return names;
+  }, [bundles]);
+
+  // Preview data with name resolution
+  var previewRows = useMemo(function() {
+    return csvRows.map(function(r) {
+      var name = mapping.name ? (r[mapping.name] || '').trim() : '';
+      var policyInput = mapping.policyName ? (r[mapping.policyName] || '').trim() : '';
+      var projectInput = mapping.projectName ? (r[mapping.projectName] || '').trim() : '';
+
+      // Resolve policy: from CSV column, or from default (which is already an ID)
+      var policyResult = null;
+      var resolvedPolicyId = null;
+      var policyDisplay = '';
+      if (policyInput) {
+        policyResult = resolvePolicy(policyInput);
+        resolvedPolicyId = policyResult ? policyResult.id : null;
+        policyDisplay = policyResult ? (policyResult.match === 'exact' || policyResult.match === 'id' || policyResult.match === 'partial' ? policyResult.name : policyInput) : policyInput;
+      } else if (defaultPolicy) {
+        resolvedPolicyId = defaultPolicy;
+        var dp = policies.find(function(p) { return p.id === defaultPolicy; });
+        policyDisplay = dp ? dp.name : defaultPolicy;
+        policyResult = { match: 'default' };
+      }
+
+      // Resolve project
+      var projectResult = null;
+      var resolvedProjectId = null;
+      var projectDisplay = '';
+      if (projectInput) {
+        projectResult = resolveProject(projectInput);
+        resolvedProjectId = projectResult ? projectResult.id : null;
+        projectDisplay = projectResult ? (projectResult.match === 'exact' || projectResult.match === 'id' || projectResult.match === 'partial' ? projectResult.name : projectInput) : projectInput;
+      } else if (defaultProject) {
+        resolvedProjectId = defaultProject;
+        var dpr = projects.find(function(p) { return p.id === defaultProject; });
+        projectDisplay = dpr ? dpr.name : defaultProject;
+        projectResult = { match: 'default' };
+      }
+
+      // Duplicate check
+      var isDuplicate = name && existingBundleNames[name.toLowerCase()];
+
+      // Determine status
+      var status = 'valid';
+      var statusMsg = '';
+      if (!name) { status = 'error'; statusMsg = 'Missing name'; }
+      else if (isDuplicate) { status = 'duplicate'; statusMsg = 'Already exists, will be skipped'; }
+      else if (!resolvedPolicyId && !policyInput && !defaultPolicy) { status = 'error'; statusMsg = 'No ' + terms.policy + ' specified'; }
+      else if (policyResult && policyResult.match === 'none') { status = 'error'; statusMsg = terms.policy + ' "' + policyInput + '" not found'; }
+      else if (policyResult && policyResult.match === 'ambiguous') { status = 'error'; statusMsg = 'Multiple ' + terms.policy + ' matches for "' + policyInput + '"'; }
+      else if (!resolvedProjectId && !projectInput && !defaultProject) { status = 'error'; statusMsg = 'No project specified'; }
+      else if (projectResult && projectResult.match === 'none') { status = 'error'; statusMsg = 'Project "' + projectInput + '" not found'; }
+      else if (projectResult && projectResult.match === 'ambiguous') { status = 'error'; statusMsg = 'Multiple project matches for "' + projectInput + '"'; }
+
+      return {
+        _rowNum: r._rowNum,
+        name: name,
+        policyName: policyDisplay,
+        policyId: resolvedPolicyId,
+        policyMatch: policyResult ? policyResult.match : null,
+        projectName: projectDisplay,
+        projectId: resolvedProjectId,
+        projectMatch: projectResult ? projectResult.match : null,
+        _status: status,
+        _statusMsg: statusMsg,
+        _valid: status === 'valid',
+        _isDuplicate: isDuplicate,
+      };
+    });
+  }, [csvRows, mapping, defaultPolicy, defaultProject, policies, projects, existingBundleNames]);
+
+  // Validation summary
   var validationErrors = useMemo(function() {
     if (step < 2) return [];
     var errors = [];
     if (!mapping.name) { errors.push('Must map a column to "' + B + ' Name".'); }
-    if (!mapping.policyId && !defaultPolicy) { errors.push('Must map a "QC Plan ID" column or select a default QC Plan.'); }
-    if (!mapping.projectId && !defaultProject) { errors.push('Must map a "Project ID" column or select a default Project.'); }
-    // Check for empty names
+    if (!mapping.policyName && !defaultPolicy) { errors.push('Must map a "' + capFirst(terms.policy) + ' Name" column or select a default ' + capFirst(terms.policy) + '.'); }
+    if (!mapping.projectName && !defaultProject) { errors.push('Must map a "Project Name" column or select a default Project.'); }
     if (mapping.name) {
       var emptyNames = csvRows.filter(function(r) { return !r[mapping.name] || !r[mapping.name].trim(); });
-      if (emptyNames.length > 0) errors.push(emptyNames.length + ' row(s) have empty names (rows: ' + emptyNames.slice(0, 5).map(function(r) { return r._rowNum; }).join(', ') + ').');
+      if (emptyNames.length > 0) errors.push(emptyNames.length + ' row(s) have empty names.');
     }
+    var dupes = previewRows.filter(function(r) { return r._isDuplicate; });
+    if (dupes.length > 0) errors.push(dupes.length + ' row(s) are duplicates of existing ' + B.toLowerCase() + 's and will be skipped.');
+    var unresolved = previewRows.filter(function(r) { return r._status === 'error' && !r._isDuplicate && r.name; });
+    if (unresolved.length > 0) errors.push(unresolved.length + ' row(s) have unresolved names. Check the status column below.');
     return errors;
-  }, [step, mapping, defaultPolicy, defaultProject, csvRows]);
-
-  // Preview data
-  var previewRows = useMemo(function() {
-    return csvRows.map(function(r) {
-      return {
-        _rowNum: r._rowNum,
-        name: mapping.name ? r[mapping.name] : '',
-        policyId: mapping.policyId ? r[mapping.policyId] : (defaultPolicy || ''),
-        projectId: mapping.projectId ? r[mapping.projectId] : (defaultProject || ''),
-        _valid: !!(mapping.name && r[mapping.name] && r[mapping.name].trim()) && !!(mapping.policyId ? r[mapping.policyId] : defaultPolicy) && !!(mapping.projectId ? r[mapping.projectId] : defaultProject),
-      };
-    });
-  }, [csvRows, mapping, defaultPolicy, defaultProject]);
+  }, [step, mapping, defaultPolicy, defaultProject, csvRows, previewRows]);
 
   // Upload function — 1-by-1 with concurrency control
   function startUpload() {
     if (!connected) {
-      antd.message.warning('Cannot upload in dummy mode — connect to a Domino instance first.');
+      antd.message.warning('Cannot upload in dummy mode. Connect to a Domino instance first.');
       return;
     }
     var validRows = previewRows.filter(function(r) { return r._valid; });
@@ -2773,7 +2870,7 @@ function CSVUploadDrawer(props) {
 
   var policyOptions = policies.map(function(p) { return { label: p.name || p.id, value: p.id }; });
   var projectOptions = projects.map(function(p) { return { label: p.name || p.id, value: p.id }; });
-  var headerOptions = [{ label: '— Do not map —', value: '' }].concat(csvHeaders.map(function(h) { return { label: h, value: h }; }));
+  var headerOptions = [{ label: '(Do not map)', value: '' }].concat(csvHeaders.map(function(h) { return { label: h, value: h }; }));
 
   var steps = [
     { title: 'Upload' },
@@ -2794,7 +2891,7 @@ function CSVUploadDrawer(props) {
       h(Button, { type: 'primary', onClick: function() { setStep(2); } }, 'Next: Preview')
     ) : step === 2 ? h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: 8 } },
       h(Button, { onClick: function() { setStep(1); } }, 'Back'),
-      h(Button, { type: 'primary', disabled: validationErrors.length > 0, onClick: startUpload },
+      h(Button, { type: 'primary', disabled: previewRows.filter(function(r) { return r._valid; }).length === 0, onClick: startUpload },
         'Upload ' + previewRows.filter(function(r) { return r._valid; }).length + ' ' + B + 's')
     ) : null,
   },
@@ -2824,13 +2921,14 @@ function CSVUploadDrawer(props) {
           children: h('div', null,
             h('p', { style: { fontSize: 12, color: '#65657B' } }, 'Required columns:'),
             h('ul', { style: { fontSize: 12, color: '#65657B', paddingLeft: 20 } },
-              h('li', null, h('strong', null, 'name'), ' — Unique name for each ' + B.toLowerCase()),
-              h('li', null, h('strong', null, 'policyId'), ' — QC Plan ID (or set a default during mapping)'),
-              h('li', null, h('strong', null, 'projectId'), ' — Domino Project ID (or set a default during mapping)')
+              h('li', null, h('strong', null, 'name'), ': Unique name for each ' + B.toLowerCase()),
+              h('li', null, h('strong', null, 'policyName'), ': ' + capFirst(terms.policy) + ' name (or set a default during mapping)'),
+              h('li', null, h('strong', null, 'projectName'), ': Domino project name (or set a default during mapping)')
             ),
+            h('p', { style: { fontSize: 12, color: '#65657B', marginTop: 8 } }, 'Names are matched against existing ' + terms.policy.toLowerCase() + 's and projects. Duplicates of existing ' + B.toLowerCase() + 's are flagged and skipped.'),
             h('p', { style: { fontSize: 12, color: '#8F8FA3', marginTop: 8 } }, 'Example CSV:'),
             h('pre', { style: { fontSize: 11, background: '#F5F5F5', padding: 8, borderRadius: 4 } },
-              'name,policyId,projectId\n"ADAE Q1 2026","abc-123","proj-001"\n"ADSL Q1 2026","abc-123","proj-001"'
+              'name,policyName,projectName\n"ADAE Q1 2026","ADaM QC Plan - High Risk","My Project"\n"ADSL Q1 2026","ADaM QC Plan - High Risk","My Project"'
             )
           )
         }] })
@@ -2869,32 +2967,32 @@ function CSVUploadDrawer(props) {
         );
       }),
       h(antd.Divider, null),
-      h('div', { style: { fontSize: 13, fontWeight: 600, marginBottom: 12, color: '#2E2E38' } }, 'Default values (applied when column is not mapped):'),
+      h('div', { style: { fontSize: 13, fontWeight: 600, marginBottom: 12, color: '#2E2E38' } }, 'Default values (used when column is not mapped or name is empty):'),
       h('div', { style: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 } },
-        h('div', { style: { width: 130, fontSize: 12, fontWeight: 500 } }, 'Default QC Plan'),
+        h('div', { style: { width: 150, fontSize: 12, fontWeight: 500 } }, 'Default ' + capFirst(terms.policy)),
         h(Select, {
-          placeholder: 'Select a QC Plan...',
+          placeholder: 'Search by name...',
           value: defaultPolicy || undefined,
           onChange: setDefaultPolicy,
           options: policyOptions,
           showSearch: true,
           optionFilterProp: 'label',
           allowClear: true,
-          style: { width: 300 },
+          style: { width: 320 },
           size: 'small',
         })
       ),
       h('div', { style: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 } },
-        h('div', { style: { width: 130, fontSize: 12, fontWeight: 500 } }, 'Default Project'),
+        h('div', { style: { width: 150, fontSize: 12, fontWeight: 500 } }, 'Default Project'),
         h(Select, {
-          placeholder: 'Select a project...',
+          placeholder: 'Search by name...',
           value: defaultProject || undefined,
           onChange: setDefaultProject,
           options: projectOptions,
           showSearch: true,
           optionFilterProp: 'label',
           allowClear: true,
-          style: { width: 300 },
+          style: { width: 320 },
           size: 'small',
         })
       ),
@@ -2925,22 +3023,46 @@ function CSVUploadDrawer(props) {
             ),
           })
         : h(antd.Alert, {
-            type: 'success',
+            type: previewRows.some(function(r) { return r._isDuplicate; }) ? 'warning' : 'success',
             showIcon: true,
             style: { marginBottom: 16 },
-            message: previewRows.filter(function(r) { return r._valid; }).length + ' of ' + previewRows.length + ' rows ready to upload',
+            message: previewRows.filter(function(r) { return r._valid; }).length + ' of ' + previewRows.length + ' rows ready to upload' +
+              (previewRows.filter(function(r) { return r._isDuplicate; }).length > 0
+                ? ' (' + previewRows.filter(function(r) { return r._isDuplicate; }).length + ' duplicates will be skipped)'
+                : ''),
           }),
       !connected ? h(antd.Alert, { type: 'warning', showIcon: true, style: { marginBottom: 16 },
-        message: 'Dummy mode — upload is disabled. Connect to a Domino instance to create ' + B.toLowerCase() + 's.' }) : null,
+        message: 'Dummy mode: upload is disabled. Connect to a Domino instance to create ' + B.toLowerCase() + 's.' }) : null,
       h(Table, {
         dataSource: previewRows,
         columns: [
           { title: 'Row', dataIndex: '_rowNum', key: 'row', width: 50 },
-          { title: B + ' Name', dataIndex: 'name', key: 'name', ellipsis: true },
-          { title: 'QC Plan ID', dataIndex: 'policyId', key: 'policy', ellipsis: true, width: 180 },
-          { title: 'Project ID', dataIndex: 'projectId', key: 'project', ellipsis: true, width: 180 },
-          { title: 'Valid', key: 'valid', width: 60, align: 'center',
-            render: function(_, r) { return r._valid ? h(Tag, { color: 'green' }, 'Yes') : h(Tag, { color: 'red' }, 'No'); } },
+          { title: B + ' Name', dataIndex: 'name', key: 'name', ellipsis: true,
+            render: function(t, r) {
+              return r._isDuplicate
+                ? h('span', null, t, ' ', h(Tag, { color: 'orange', style: { fontSize: 10 } }, 'Duplicate'))
+                : t;
+            } },
+          { title: capFirst(terms.policy), dataIndex: 'policyName', key: 'policy', ellipsis: true, width: 200,
+            render: function(t, r) {
+              if (!t) return h('span', { style: { color: '#C20A29' } }, 'Not set');
+              var matchColor = r.policyMatch === 'exact' || r.policyMatch === 'id' ? 'green' : r.policyMatch === 'partial' ? 'blue' : r.policyMatch === 'default' ? 'default' : 'red';
+              var matchLabel = r.policyMatch === 'exact' ? 'Matched' : r.policyMatch === 'id' ? 'ID' : r.policyMatch === 'partial' ? 'Partial' : r.policyMatch === 'default' ? 'Default' : r.policyMatch === 'ambiguous' ? 'Ambiguous' : 'Not found';
+              return h('span', null, t, ' ', h(Tag, { color: matchColor, style: { fontSize: 9 } }, matchLabel));
+            } },
+          { title: 'Project', dataIndex: 'projectName', key: 'project', ellipsis: true, width: 200,
+            render: function(t, r) {
+              if (!t) return h('span', { style: { color: '#C20A29' } }, 'Not set');
+              var matchColor = r.projectMatch === 'exact' || r.projectMatch === 'id' ? 'green' : r.projectMatch === 'partial' ? 'blue' : r.projectMatch === 'default' ? 'default' : 'red';
+              var matchLabel = r.projectMatch === 'exact' ? 'Matched' : r.projectMatch === 'id' ? 'ID' : r.projectMatch === 'partial' ? 'Partial' : r.projectMatch === 'default' ? 'Default' : r.projectMatch === 'ambiguous' ? 'Ambiguous' : 'Not found';
+              return h('span', null, t, ' ', h(Tag, { color: matchColor, style: { fontSize: 9 } }, matchLabel));
+            } },
+          { title: 'Status', key: 'status', width: 120, align: 'center',
+            render: function(_, r) {
+              if (r._isDuplicate) return h(Tooltip, { title: r._statusMsg }, h(Tag, { color: 'orange' }, 'Skip'));
+              if (r._valid) return h(Tag, { color: 'green' }, 'Ready');
+              return h(Tooltip, { title: r._statusMsg }, h(Tag, { color: 'red' }, 'Error'));
+            } },
         ],
         rowKey: '_rowNum',
         size: 'small',
@@ -2973,7 +3095,7 @@ function CSVUploadDrawer(props) {
           ? 'All ' + progress.total + ' ' + B.toLowerCase() + 's created successfully!'
           : (progress.total - progress.errors.length) + ' of ' + progress.total + ' created',
         subTitle: progress.errors.length > 0
-          ? progress.errors.length + ' failed — see details below'
+          ? progress.errors.length + ' failed, see details below'
           : 'You can now find them in the QC Tracker.',
         extra: [
           h(Button, { key: 'close', type: 'primary', onClick: handleClose }, 'Close'),
@@ -3016,6 +3138,9 @@ function QCTrackerPage(props) {
   var policies = props.policies || [];
   var projects = props.projects || [];
   var onRefresh = props.onRefresh;
+
+  // Force re-render counter (used after inline reassignment)
+  var _rerender = useState(0); var setRerenderKey = _rerender[1];
 
   // CSV upload state
   var _csv1 = useState(false); var csvDrawerOpen = _csv1[0]; var setCsvDrawerOpen = _csv1[1];
@@ -3178,12 +3303,12 @@ function QCTrackerPage(props) {
       filterSearch: true,
       onFilter: function(v, r) { return r.projectName === v; },
       sorter: function(a, b) { return (a.projectName || '').localeCompare(b.projectName || ''); },
-      render: function(t) { return h('span', { style: { fontSize: 12 } }, t || '\u2014'); } },
+      render: function(t) { return h('span', { style: { fontSize: 12 } }, t || '\u2013'); } },
     { title: capFirst(P), dataIndex: 'policyName', key: 'policy', width: 150, ellipsis: true,
       filters: policyOptions.map(function(p) { return { text: p, value: p }; }),
       filterSearch: true,
       onFilter: function(v, r) { return r.policyName === v; },
-      render: function(t) { return t ? h(Tag, { style: { fontSize: 10 } }, t) : '\u2014'; } },
+      render: function(t) { return t ? h(Tag, { style: { fontSize: 10 } }, t) : '\u2013'; } },
     { title: 'Progress', key: 'progress', width: 130,
       sorter: function(a, b) { return getBundleProgress(a) - getBundleProgress(b); },
       render: function(_, record) { return h(StagePipeline, { bundle: record, onFindingsClick: function(b) { setFindingsDrawerBundle(b); setFindingsDrawerOpen(true); } }); } },
@@ -3192,8 +3317,8 @@ function QCTrackerPage(props) {
       filterSearch: true,
       onFilter: function(v, r) { return r.stage === v; },
       sorter: function(a, b) { return (a.stage || '').localeCompare(b.stage || ''); },
-      render: function(t) { return h('span', { style: { fontSize: 12 } }, t || '\u2014'); } },
-    { title: 'Assignee', key: 'assignee', width: 100,
+      render: function(t) { return h('span', { style: { fontSize: 12 } }, t || '\u2013'); } },
+    { title: 'Assignee', key: 'assignee', width: 160,
       filters: [{ text: 'Unassigned', value: '__unassigned__' }].concat(
         assigneeOptions.map(function(n) { return { text: n, value: n }; })
       ),
@@ -3208,9 +3333,93 @@ function QCTrackerPage(props) {
         return an.localeCompare(bn);
       },
       render: function(_, record) {
-        var name = record.stageAssignee && record.stageAssignee.name;
-        return name
-          ? h('span', { style: { fontSize: 12 } }, name)
+        var pmc = props.projectMembersCache || {};
+        var members = pmc[record.projectId] || [];
+        // Format member label: "First Last (username)" or just "(username)" if no name
+        function fmtMember(m) {
+          var full = ((m.firstName || '') + ' ' + (m.lastName || '')).trim();
+          return full ? full + ' (' + (m.userName || m.id) + ')' : (m.userName || m.fullName || m.id);
+        }
+        var memberOpts = members.map(function(m) {
+          return { label: fmtMember(m), value: m.id };
+        });
+        // Find the current stage and its stageId + assignee
+        var currentStageId = null;
+        var currentStageAssignee = record.stageAssignee || null;
+        if (record.stages && record.stage) {
+          var match = record.stages.find(function(s) { return s.stage && s.stage.name === record.stage; });
+          if (match) {
+            currentStageId = match.stageId || (match.stage && match.stage.id);
+            if (!currentStageAssignee && match.assignee) currentStageAssignee = match.assignee;
+          }
+        }
+        var gapInfo = API_GAPS.stageReassign;
+        var assigneeId = currentStageAssignee ? currentStageAssignee.id : undefined;
+        // Resolve assignee display name: look up from members cache first, then fall back to name field
+        var assigneeName = null;
+        if (assigneeId) {
+          var memberMatch = members.find(function(m) { return m.id === assigneeId; });
+          if (memberMatch) assigneeName = fmtMember(memberMatch);
+        }
+        if (!assigneeName && currentStageAssignee) {
+          var sa = currentStageAssignee;
+          var full = ((sa.firstName || '') + ' ' + (sa.lastName || '')).trim();
+          assigneeName = full ? full + ' (' + (sa.name || sa.userName || '') + ')' : (sa.name || sa.userName || null);
+        }
+
+        if (gapInfo.ready && memberOpts.length > 0) {
+          // If assignee ID exists but isn't in the member list, add a placeholder option so the Select shows a name, not an ID
+          if (assigneeId && !memberOpts.some(function(o) { return o.value === assigneeId; })) {
+            memberOpts.unshift({ label: assigneeName || 'Unknown user', value: assigneeId });
+          }
+          return h(Select, {
+            size: 'small',
+            placeholder: 'Assign...',
+            value: assigneeId || undefined,
+            style: { width: '100%', fontSize: 11 },
+            showSearch: true,
+            allowClear: true,
+            options: memberOpts,
+            optionFilterProp: 'label',
+            onClick: function(e) { e.stopPropagation(); },
+            onChange: function(userId) {
+              if (!currentStageId) { antd.message.error('Missing stage ID'); return; }
+              var body = { assignee: userId ? { id: userId } : null };
+              apiPatch('api/bundles/' + record.id + '/stages/' + currentStageId, body)
+                .then(function(resp) {
+                  antd.message.success('Assignee updated');
+                  // Update local state with full assignee info
+                  var newAssignee = null;
+                  if (userId) {
+                    var m = members.find(function(mm) { return mm.id === userId; });
+                    if (m) {
+                      newAssignee = { id: m.id, name: m.userName, firstName: m.firstName, lastName: m.lastName };
+                    } else if (resp && resp.assignee) {
+                      newAssignee = resp.assignee;
+                    } else {
+                      newAssignee = { id: userId };
+                    }
+                  }
+                  record.stageAssignee = newAssignee;
+                  // Also update the stage in the stages array
+                  if (record.stages) {
+                    record.stages.forEach(function(s) {
+                      if ((s.stageId || (s.stage && s.stage.id)) === currentStageId) {
+                        s.assignee = newAssignee;
+                      }
+                    });
+                  }
+                  // Force table re-render
+                  setRerenderKey(function(k) { return k + 1; });
+                })
+                .catch(function(err) {
+                  antd.message.error('Reassignment failed: ' + (err.message || err));
+                });
+            },
+          });
+        }
+        return assigneeName
+          ? h('span', { style: { fontSize: 12 } }, assigneeName)
           : h('span', { style: { color: '#F59E0B', fontSize: 11, fontWeight: 500 } }, 'Unassigned');
       }
     },
@@ -3226,7 +3435,7 @@ function QCTrackerPage(props) {
       sorter: function(a, b) { return (a._attachments || []).length - (b._attachments || []).length; },
       render: function(_, record) {
         var count = (record._attachments || []).length;
-        if (count === 0) return h('span', { style: { color: '#D1D1DB', fontSize: 11 } }, '\u2014');
+        if (count === 0) return h('span', { style: { color: '#D1D1DB', fontSize: 11 } }, '\u2013');
         return h(Tooltip, { title: 'Click to view ' + count + ' attachment' + (count > 1 ? 's' : '') },
           h('span', {
             style: { color: '#543FDE', fontSize: 12, fontWeight: 600, cursor: 'pointer' },
@@ -3320,6 +3529,7 @@ function QCTrackerPage(props) {
       onClose: function() { setCsvDrawerOpen(false); },
       policies: policies,
       projects: projectObjects,
+      bundles: bundles,
       connected: connected,
       onComplete: onRefresh,
       terms: terms,
@@ -3497,15 +3707,15 @@ function DetailDrawer(props) {
       ),
       h('div', { className: 'detail-field' },
         h('span', { className: 'detail-field-label' }, 'Project'),
-        h('span', { className: 'detail-field-value' }, bundle.projectName || '\u2014')
+        h('span', { className: 'detail-field-value' }, bundle.projectName || '\u2013')
       ),
       h('div', { className: 'detail-field' },
         h('span', { className: 'detail-field-label' }, P),
-        h('span', { className: 'detail-field-value' }, bundle.policyName || '\u2014')
+        h('span', { className: 'detail-field-value' }, bundle.policyName || '\u2013')
       ),
       h('div', { className: 'detail-field' },
         h('span', { className: 'detail-field-label' }, 'Current Stage'),
-        h('span', { className: 'detail-field-value' }, bundle.stage || '\u2014')
+        h('span', { className: 'detail-field-value' }, bundle.stage || '\u2013')
       ),
       h('div', { className: 'detail-field' },
         h('span', { className: 'detail-field-label' }, 'Progress'),
@@ -3521,7 +3731,7 @@ function DetailDrawer(props) {
         : null,
       h('div', { className: 'detail-field' },
         h('span', { className: 'detail-field-label' }, 'Created'),
-        h('span', { className: 'detail-field-value' }, bundle.createdAt ? dayjs(bundle.createdAt).format('MMM D, YYYY') : '\u2014')
+        h('span', { className: 'detail-field-value' }, bundle.createdAt ? dayjs(bundle.createdAt).format('MMM D, YYYY') : '\u2013')
       )
     ),
 
@@ -4367,7 +4577,7 @@ function StageAssignmentsPage(props) {
       h('div', null,
         h('h2', { style: { margin: 0, fontSize: 20, fontWeight: 600, color: '#2D2D3F' } }, 'Stage Manager'),
         h('div', { style: { color: '#8F8FA3', fontSize: 13, marginTop: 4 } },
-          'View all stages across ' + B.toLowerCase() + 's — identify unassigned work, reassign owners, and manage workload.'
+          'View all stages across ' + B.toLowerCase() + 's. Identify unassigned work, reassign owners, and manage workload.'
         )
       ),
       selectedRowKeys.length > 0
@@ -4702,10 +4912,10 @@ function AutomationRulesPage(props) {
     }).catch(function(err) {
       var detail = (err.message || String(err));
       var hint = '';
-      if (detail.indexOf('404') >= 0) hint = ' — The Jobs API may not be enabled on this Domino instance.';
-      else if (detail.indexOf('403') >= 0) hint = ' — Check that your API token has permission to start jobs.';
-      else if (detail.indexOf('401') >= 0) hint = ' — Authentication failed. Verify your Domino API token.';
-      else if (detail.indexOf('503') >= 0) hint = ' — DOMINO_API_HOST may not be configured.';
+      if (detail.indexOf('404') >= 0) hint = '. The Jobs API may not be enabled on this Domino instance.';
+      else if (detail.indexOf('403') >= 0) hint = '. Check that your API token has permission to start jobs.';
+      else if (detail.indexOf('401') >= 0) hint = '. Authentication failed. Verify your Domino API token.';
+      else if (detail.indexOf('503') >= 0) hint = '. DOMINO_API_HOST may not be configured.';
       antd.notification.error({
         message: 'Automation Job Failed to Start',
         description: detail + hint,
@@ -4735,7 +4945,7 @@ function AutomationRulesPage(props) {
         setAutomationHistory(function(prev) {
           return prev.map(function(h) { return h.runId === runId ? Object.assign({}, h, { status: 'Timeout', completedAt: new Date().toISOString() }) : h; });
         });
-        antd.notification.warning({ message: 'Job Polling Timeout', description: 'Job ' + runId + ' did not complete within 10 minutes. It may still be running in Domino — check the project runs page.', duration: 10 });
+        antd.notification.warning({ message: 'Job Polling Timeout', description: 'Job ' + runId + ' did not complete within 10 minutes. It may still be running in Domino. Check the project runs page.', duration: 10 });
         return;
       }
       apiGet('/api/projects/' + projectId + '/runs/' + runId)
@@ -4763,7 +4973,7 @@ function AutomationRulesPage(props) {
             setAutomationHistory(function(prev) {
               return prev.map(function(h) { return h.runId === runId ? Object.assign({}, h, { status: 'Poll Error', completedAt: new Date().toISOString() }) : h; });
             });
-            antd.notification.error({ message: 'Job Status Unavailable', description: 'Could not poll status for job ' + runId + '. The job may still be running — check the Domino project runs page.', duration: 8 });
+            antd.notification.error({ message: 'Job Status Unavailable', description: 'Could not poll status for job ' + runId + '. The job may still be running. Check the Domino project runs page.', duration: 8 });
           }
         });
     }, 5000);
@@ -4807,7 +5017,7 @@ function AutomationRulesPage(props) {
   var historyColumns = [
     { title: 'Date', dataIndex: 'startedAt', key: 'date', width: 150,
       sorter: function(a, b) { return (a.startedAt || '').localeCompare(b.startedAt || ''); },
-      render: function(t) { return t ? dayjs(t).format('MMM D, YYYY h:mm A') : '\u2014'; } },
+      render: function(t) { return t ? dayjs(t).format('MMM D, YYYY h:mm A') : '\u2013'; } },
     { title: P, dataIndex: 'policyName', key: 'policy', width: 160, ellipsis: true },
     { title: 'Stage', dataIndex: 'stageName', key: 'stage', width: 140 },
     { title: 'Script', dataIndex: 'scriptPath', key: 'script', ellipsis: true,
@@ -4820,10 +5030,10 @@ function AutomationRulesPage(props) {
         return h(Tag, { color: color }, s || 'Unknown');
       } },
     { title: 'Run ID', dataIndex: 'runId', key: 'runId', width: 120, ellipsis: true,
-      render: function(t) { return h('span', { style: { fontSize: 11, fontFamily: 'monospace' } }, t || '\u2014'); } },
+      render: function(t) { return h('span', { style: { fontSize: 11, fontFamily: 'monospace' } }, t || '\u2013'); } },
     { title: 'Duration', key: 'duration', width: 100,
       render: function(_, r) {
-        if (!r.startedAt || !r.completedAt) return r.status === 'Running' ? h(Tag, { color: 'blue' }, 'In progress') : '\u2014';
+        if (!r.startedAt || !r.completedAt) return r.status === 'Running' ? h(Tag, { color: 'blue' }, 'In progress') : '\u2013';
         var ms = new Date(r.completedAt).getTime() - new Date(r.startedAt).getTime();
         var secs = Math.round(ms / 1000);
         if (secs < 60) return secs + 's';
@@ -4890,7 +5100,7 @@ function AutomationRulesPage(props) {
               },
                 h('span', { style: { fontSize: 16 } }, '\u2713'),
                 h('span', { style: { fontSize: 13, color: '#135200' } },
-                  readyCount + ' automation' + (readyCount !== 1 ? 's' : '') + ' ready to run — completed stages matched with active rules.')
+                  readyCount + ' automation' + (readyCount !== 1 ? 's' : '') + ' ready to run. Completed stages matched with active rules.')
               )
             : null,
 
@@ -5024,9 +5234,9 @@ function AutomationRulesPage(props) {
             value: formOutputHandling,
             onChange: setFormOutputHandling,
             options: [
-              { label: 'Log only \u2014 view in execution history', value: 'log-only' },
-              { label: 'Attach to bundle \u2014 upload output file', value: 'attach' },
-              { label: 'Create finding \u2014 add as a QC finding', value: 'finding' },
+              { label: 'Log only: view in execution history', value: 'log-only' },
+              { label: 'Attach to bundle: upload output file', value: 'attach' },
+              { label: 'Create finding: add as a QC finding', value: 'finding' },
             ],
             style: { width: '100%' },
             size: 'small',
@@ -5237,7 +5447,7 @@ function RiskOptimizerPage(props) {
 
     var reason = matches.length > 0
       ? 'Matched keywords: ' + matches.join(', ')
-      : 'No keyword matches — defaulting to Medium risk (conservative).';
+      : 'No keyword matches. Defaulting to Medium risk (conservative).';
 
     return { level: level, score: score, source: 'algorithm', reason: reason, matches: matches };
   }
@@ -5507,9 +5717,9 @@ function RiskOptimizerPage(props) {
     { title: 'Recommended', key: 'recommended', width: 200, ellipsis: true,
       render: function(_, r) {
         if (r._calibration === 'well-matched') return h('span', { style: { color: '#28A464', fontSize: 12 } }, '\u2713 Current policy is appropriate');
-        if (!r._currentTier) return h('span', { style: { color: '#8F8FA3', fontSize: 12 } }, 'Tag policies to see recommendations');
+        if (!r._currentTier) return h('span', { style: { color: '#8F8FA3', fontSize: 12 } }, 'Classify policies to see recommendations');
         var recPolicies = r._recommendedPolicies;
-        if (recPolicies.length === 0) return h('span', { style: { color: '#8F8FA3', fontSize: 12 } }, 'No ' + getTierLabel(r._recommendedTier) + ' policy tagged');
+        if (recPolicies.length === 0) return h('span', { style: { color: '#8F8FA3', fontSize: 12 } }, 'No ' + getTierLabel(r._recommendedTier) + ' policy classified');
         return h('span', { style: { fontSize: 12 } }, recPolicies.map(function(p) { return p.name; }).join(', '));
       },
     },
@@ -5537,7 +5747,7 @@ function RiskOptimizerPage(props) {
     { title: 'Date', dataIndex: 'timestamp', key: 'date', width: 160,
       sorter: function(a, b) { return (a.timestamp || '').localeCompare(b.timestamp || ''); },
       defaultSortOrder: 'descend',
-      render: function(t) { return t ? dayjs(t).format('MMM D, YYYY h:mm A') : '\u2014'; },
+      render: function(t) { return t ? dayjs(t).format('MMM D, YYYY h:mm A') : '\u2013'; },
     },
     { title: B, dataIndex: 'bundleName', key: 'bundle', width: 180, ellipsis: true },
     { title: 'Project', dataIndex: 'projectName', key: 'project', width: 150, ellipsis: true },
@@ -5550,15 +5760,15 @@ function RiskOptimizerPage(props) {
     { title: 'From', key: 'from', width: 160, ellipsis: true,
       render: function(_, r) {
         return r.action === 'risk_override'
-          ? h(Tag, null, r.oldRisk || '\u2014')
-          : h('span', null, r.oldPolicy || '\u2014');
+          ? h(Tag, null, r.oldRisk || '\u2013')
+          : h('span', null, r.oldPolicy || '\u2013');
       },
     },
     { title: 'To', key: 'to', width: 160, ellipsis: true,
       render: function(_, r) {
         return r.action === 'risk_override'
-          ? h(Tag, null, r.newRisk || '\u2014')
-          : h('span', null, r.newPolicy || '\u2014');
+          ? h(Tag, null, r.newRisk || '\u2013')
+          : h('span', null, r.newPolicy || '\u2013');
       },
     },
     { title: 'Rationale', dataIndex: 'rationale', key: 'rationale', ellipsis: true,
@@ -5577,7 +5787,7 @@ function RiskOptimizerPage(props) {
     }
     return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
       h('div', { style: { fontSize: 12, color: '#8F8FA3', marginBottom: 4 } },
-        'Tag each policy with its rigor level. This drives the recommendation engine.'
+        'Classify each policy by its rigor level. This drives the recommendation engine.'
       ),
       allPolicies.map(function(policy) {
         var currentTier = policyTiers[policy.id] || null;
@@ -5619,8 +5829,8 @@ function RiskOptimizerPage(props) {
   }
 
   var wizardSteps = [
-    { title: 'Review Keywords', description: 'Review the risk classification keywords' },
-    { title: 'Tag Policies', description: 'Classify each ' + P.toLowerCase() + ' by rigor level' },
+    { title: 'Edit Keywords', description: 'Add or remove risk classification keywords' },
+    { title: 'Classify Policies', description: 'Classify each ' + P.toLowerCase() + ' by rigor level' },
     { title: 'Review Results', description: 'See risk analysis and recommendations' },
   ];
 
@@ -5668,55 +5878,41 @@ function RiskOptimizerPage(props) {
       // Step content
       h('div', { className: 'panel', style: { padding: 20 } },
 
-        // Step 1: Review Keywords
+        // Step 1: Edit Keywords
         wizardStep === 0 ? h('div', null,
           h('div', { className: 'panel-header', style: { marginBottom: 12 } },
-            h('span', { className: 'panel-title' }, 'Step 1: Review Risk Keywords')
+            h('span', { className: 'panel-title' }, 'Step 1: Edit Risk Keywords')
           ),
           h('p', { style: { fontSize: 13, color: '#65657B', marginBottom: 16 } },
             'The risk engine classifies each ' + B.toLowerCase() + ' by matching its name and ' + P.toLowerCase() + ' name against these keyword lists. ' +
-            'Review the defaults and adjust if needed for your therapeutic area.'
+            'Add or remove keywords to tune the classification for your therapeutic area.'
           ),
-          ['highRisk', 'mediumRisk', 'lowRisk'].map(function(tier) {
-            var cfg = riskConfig[tier];
-            var colors = { highRisk: '#C20A29', mediumRisk: '#F59E0B', lowRisk: '#28A464' };
-            var labels = { highRisk: 'High Risk', mediumRisk: 'Medium Risk', lowRisk: 'Low Risk' };
-            return h('div', { key: tier, style: { marginBottom: 16 } },
-              h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 } },
-                h('div', { style: { width: 10, height: 10, borderRadius: '50%', background: colors[tier] } }),
-                h('span', { style: { fontSize: 13, fontWeight: 600 } }, labels[tier]),
-                h('span', { style: { fontSize: 11, color: '#8F8FA3', marginLeft: 4 } }, '\u2014 ' + cfg.description)
-              ),
-              h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 4 } },
-                cfg.keywords.map(function(kw, j) {
-                  return h(Tag, { key: j, style: { fontSize: 10 } }, kw);
-                })
-              )
-            );
-          }),
-          h('div', { style: { marginTop: 8, fontSize: 12, color: '#8F8FA3' } },
-            'You can edit these keywords later via the Config tab.'
+          h(KeywordEditor, { keywords: riskConfig.highRisk.keywords, color: '#C20A29', label: 'High Risk', description: riskConfig.highRisk.description, onUpdate: function(kws) { updateKeywords('highRisk', kws); } }),
+          h(KeywordEditor, { keywords: riskConfig.mediumRisk.keywords, color: '#F59E0B', label: 'Medium Risk', description: riskConfig.mediumRisk.description, onUpdate: function(kws) { updateKeywords('mediumRisk', kws); } }),
+          h(KeywordEditor, { keywords: riskConfig.lowRisk.keywords, color: '#28A464', label: 'Low Risk', description: riskConfig.lowRisk.description, onUpdate: function(kws) { updateKeywords('lowRisk', kws); } }),
+          h('div', { style: { marginTop: 8 } },
+            h(Button, { size: 'small', type: 'link', danger: true, onClick: handleResetConfig }, 'Reset to Defaults')
           )
         ) : null,
 
         // Step 2: Tag Policies
         wizardStep === 1 ? h('div', null,
           h('div', { className: 'panel-header', style: { marginBottom: 12 } },
-            h('span', { className: 'panel-title' }, 'Step 2: Tag Your ' + P + 's')
+            h('span', { className: 'panel-title' }, 'Step 2: Classify Your ' + P + 's')
           ),
           h('p', { style: { fontSize: 13, color: '#65657B', marginBottom: 16 } },
             'Classify each ' + P.toLowerCase() + ' by how rigorous its QC process is. ' +
             'This tells the optimizer what level of scrutiny each policy provides, so it can detect mismatches.'
           ),
           h('div', { style: { display: 'flex', gap: 16, marginBottom: 16 } },
-            h(Tag, { color: '#C20A29' }, '\uD83D\uDD34 Most Rigorous — e.g. double programming, independent replication'),
-            h(Tag, { color: '#F59E0B' }, '\uD83D\uDFE1 Moderate — e.g. code review + spot checks'),
-            h(Tag, { color: '#28A464' }, '\uD83D\uDFE2 Lightweight — e.g. output crosscheck, automated validation')
+            h(Tag, { color: '#C20A29' }, '\uD83D\uDD34 Most Rigorous: e.g. double programming, independent replication'),
+            h(Tag, { color: '#F59E0B' }, '\uD83D\uDFE1 Moderate: e.g. code review + spot checks'),
+            h(Tag, { color: '#28A464' }, '\uD83D\uDFE2 Lightweight: e.g. output crosscheck, automated validation')
           ),
           taggedPolicyCount > 0
             ? h(Alert, { type: 'success', showIcon: true, style: { marginBottom: 12, borderRadius: 8 },
-                message: taggedPolicyCount + ' of ' + allPolicies.length + ' policies tagged',
-                description: taggedPolicyCount === allPolicies.length ? 'All policies tagged! Click Next to see your results.' : 'Keep going \u2014 tag the remaining policies for best results.'
+                message: taggedPolicyCount + ' of ' + allPolicies.length + ' policies classified',
+                description: taggedPolicyCount === allPolicies.length ? 'All policies classified! Click Next to see your results.' : 'Keep going! Classify the remaining policies for best results.'
               })
             : null,
           renderPolicyTiers()
@@ -5729,12 +5925,12 @@ function RiskOptimizerPage(props) {
           ),
           taggedPolicyCount === 0
             ? h(Alert, { type: 'warning', showIcon: true, style: { marginBottom: 16, borderRadius: 8 },
-                message: 'No policies tagged yet',
-                description: 'Go back to Step 2 to tag at least one policy. Without tags, calibration results will all show as "Untagged".',
+                message: 'No policies classified yet',
+                description: 'Go back to Step 2 to classify at least one policy. Without classifications, calibration results will all show as "Untagged".',
                 action: h(Button, { size: 'small', onClick: function() { setWizardStep(1); } }, 'Go Back'),
               })
             : h('p', { style: { fontSize: 13, color: '#65657B', marginBottom: 16 } },
-                'Here\'s how your ' + B.toLowerCase() + 's are classified based on the keywords and policy tier tags you set.'
+                'Here\'s how your ' + B.toLowerCase() + 's are classified based on the keywords and policy tiers you set.'
               ),
           h('div', { className: 'stats-row', style: { marginBottom: 16 } },
             h(StatCard, { label: 'High Risk', value: summary.high, color: 'danger', sub: 'Need most rigorous QC' }),
@@ -5795,9 +5991,9 @@ function RiskOptimizerPage(props) {
           showIcon: true,
           banner: true,
           style: { marginBottom: 16, borderRadius: 8 },
-          message: untaggedPolicyCount + ' of ' + allPolicies.length + ' policies are not tagged with a rigor tier.',
-          description: 'Tag each policy as Most Rigorous, Moderate, or Lightweight in the "' + P + ' Tiers" tab. This powers the recommendation engine.',
-          action: h(Button, { size: 'small', type: 'primary', onClick: function() { setActiveTab('policies'); } }, 'Tag Policies'),
+          message: untaggedPolicyCount + ' of ' + allPolicies.length + ' policies are not classified with a rigor tier.',
+          description: 'Classify each policy as Most Rigorous, Moderate, or Lightweight in the "' + P + ' Tiers" tab. This powers the recommendation engine.',
+          action: h(Button, { size: 'small', type: 'primary', onClick: function() { setActiveTab('policies'); } }, 'Classify Policies'),
         })
       : null,
 
@@ -5819,7 +6015,7 @@ function RiskOptimizerPage(props) {
         h(StatCard, { label: 'Over-QC\'d', value: summary.overQc, color: 'warning',
           sub: summary.overQc > 0 ? 'More rigorous QC than needed' : 'None detected' }),
         h(StatCard, { label: 'Well-Matched', value: summary.wellMatched, color: 'success',
-          sub: summary.wellMatched > 0 ? 'Policy aligns with risk level' : taggedPolicyCount === 0 ? 'Tag policies to see results' : 'None detected' }),
+          sub: summary.wellMatched > 0 ? 'Policy aligns with risk level' : taggedPolicyCount === 0 ? 'Classify policies to see results' : 'None detected' }),
         h(StatCard, { label: 'Under-QC\'d', value: summary.underQc, color: 'danger',
           sub: summary.underQc > 0 ? 'Less rigorous QC than recommended' : 'None detected' }),
         h(StatCard, { label: 'Manual Overrides', value: summary.manual, color: 'info',
@@ -5885,7 +6081,7 @@ function RiskOptimizerPage(props) {
         h('div', { className: 'panel-header', style: { marginBottom: 12 } },
           h('span', { className: 'panel-title' }, P + ' Rigor Tiers'),
           h('span', { style: { marginLeft: 8, fontSize: 12, color: '#8F8FA3' } },
-            taggedPolicyCount + ' of ' + allPolicies.length + ' tagged'
+            taggedPolicyCount + ' of ' + allPolicies.length + ' classified'
           )
         ),
         renderPolicyTiers()
@@ -5993,9 +6189,9 @@ function RiskOptimizerPage(props) {
             value: overrideLevel || undefined,
             onChange: setOverrideLevel,
             options: [
-              { value: 'High', label: '\u{1F534} High Risk — most rigorous QC' },
-              { value: 'Medium', label: '\u{1F7E1} Medium Risk — code review + spot check' },
-              { value: 'Low', label: '\u{1F7E2} Low Risk — output crosscheck' },
+              { value: 'High', label: '\u{1F534} High Risk: most rigorous QC' },
+              { value: 'Medium', label: '\u{1F7E1} Medium Risk: code review + spot check' },
+              { value: 'Low', label: '\u{1F7E2} Low Risk: output crosscheck' },
             ],
           })
         ),
@@ -6084,7 +6280,7 @@ function KeywordEditor(props) {
     h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 } },
       h('div', { style: { width: 10, height: 10, borderRadius: '50%', background: color } }),
       h('span', { style: { fontSize: 14, fontWeight: 600, color: '#2E2E38' } }, label),
-      h('span', { style: { fontSize: 11, color: '#8F8FA3', marginLeft: 4 } }, '\u2014 ' + description)
+      h('span', { style: { fontSize: 11, color: '#8F8FA3', marginLeft: 4 } }, description)
     ),
     h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 } },
       keywords.map(function(kw) {
@@ -6345,6 +6541,16 @@ function App() {
     }
     if (typeof MOCK_TERMINOLOGY !== 'undefined') {
       setTerms(MOCK_TERMINOLOGY);
+    }
+    // Populate project members cache so inline assignee dropdowns work in dummy mode
+    if (typeof MOCK_PROJECT_MEMBERS !== 'undefined' && typeof MOCK_BUNDLES !== 'undefined') {
+      var mockMembersCache = {};
+      MOCK_BUNDLES.forEach(function(b) {
+        if (b.projectId && !mockMembersCache[b.projectId]) {
+          mockMembersCache[b.projectId] = MOCK_PROJECT_MEMBERS;
+        }
+      });
+      setProjectMembersCache(mockMembersCache);
     }
     // Set a mock Data Explorer URL so attachment links render in dummy mode
     setDataExplorerUrl('__mock_data_explorer__');

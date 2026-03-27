@@ -493,7 +493,7 @@ var MOCK_FINDINGS = {
     {
       id: 'f-007', name: 'OMOP CDM vocabulary version mismatch across sites',
       bundleId: '8813c744-6a8a-436d-aa20-68e072d3f829', severity: 'S1', status: 'ToDo',
-      description: 'Site A uses OMOP v5.3 while Site B uses v5.4 — condition concept mappings may diverge',
+      description: 'Site A uses OMOP v5.3 while Site B uses v5.4. Condition concept mappings may diverge',
       assignee: { id: MOCK_USERS.agnes.id, name: 'agnes_domino' },
       approver: { id: MOCK_USERS.agnes.id, name: 'agnes_domino' },
       dueDate: '2026-04-01T00:00:00Z',
