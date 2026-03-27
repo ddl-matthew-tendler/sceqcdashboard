@@ -1738,7 +1738,7 @@ function MetricsPage(props) {
         h('div', { className: 'panel-body' },
           Object.keys(metrics.cycleByPolicy).length > 0
             ? h('div', null,
-                metrics.cycleTimeSampleData ? h(Tag, { color: 'orange', style: { marginBottom: 8, fontSize: 10 } }, 'Sample data: no completed ' + B.toLowerCase() + 's yet') : null,
+                metrics.cycleTimeSampleData ? h(Alert, { type: 'warning', showIcon: true, banner: true, message: 'Sample data shown below. No completed ' + B.toLowerCase() + 's are available yet.', style: { marginBottom: 8, fontSize: 12 } }) : null,
                 h('div', { id: 'chart-cycle-by-policy', className: 'chart-container' })
               )
             : h(EmptyState, { text: 'No completed ' + B.toLowerCase() + 's yet' })
@@ -3638,7 +3638,7 @@ function QCTrackerPage(props) {
             rowKey: function(r) { return r.id || r.name; },
             loading: loading,
             size: 'small',
-            scroll: { x: 1000 },
+            scroll: { x: 1400 },
             pagination: { defaultPageSize: 20, size: 'small', showSizeChanger: true, pageSizeOptions: ['20', '50', '100', String(filtered.length > 100 ? filtered.length : 200)], showTotal: function(total) { return total + ' ' + capFirst(B).toLowerCase() + 's'; } },
             rowSelection: {
               selectedRowKeys: selectedRowKeys,
@@ -4151,7 +4151,7 @@ function AssignmentRulesPage(props) {
                   disabled: projectRules.length === 0,
                 }, 'Apply Rules')
               ),
-              !API_GAPS.applyRules.ready ? h(Tag, { color: 'orange', style: { fontSize: 10, lineHeight: '22px' } }, 'API Pending') : null
+              !API_GAPS.applyRules.ready ? h(Tooltip, { title: 'This feature requires a Domino write API endpoint that is not yet available. Rules are saved locally and will sync when the API is ready.' }, h(Tag, { color: 'orange', style: { fontSize: 10, lineHeight: '22px', cursor: 'help' } }, 'API Pending')) : null
             ),
             h('span', { style: { color: '#65657B', fontSize: 13 } },
               projectBundles.length + ' ' + B.toLowerCase() + (projectBundles.length !== 1 ? 's' : '') + ' in project'
@@ -4597,7 +4597,7 @@ function StageAssignmentsPage(props) {
               }, 'Reassign Selected')
             ),
             !API_GAPS.stageReassign.ready
-              ? h(Tag, { color: 'orange', style: { fontSize: 10 } }, 'API Pending')
+              ? h(Tooltip, { title: 'Stage reassignment requires the Domino governance write API. This feature will activate automatically when the API becomes available.' }, h(Tag, { color: 'orange', style: { fontSize: 10, cursor: 'help' } }, 'API Pending'))
               : null,
             h(Button, { size: 'small', onClick: function() { setSelectedRowKeys([]); } }, 'Clear')
           )
@@ -6786,22 +6786,30 @@ function App() {
               options: scopeTagOptions,
             }),
             h('span', { className: 'global-filter-divider' }),
-            h('span', { className: 'global-filter-label' }, 'Assigned to Me:'),
-            h(Checkbox, {
-              checked: filterMyCurrentStage,
-              onChange: function(e) { setFilterMyCurrentStage(e.target.checked); },
-              style: { fontSize: 12 },
-            }, 'Current stage'),
-            h(Checkbox, {
-              checked: filterMyFutureStage,
-              onChange: function(e) { setFilterMyFutureStage(e.target.checked); },
-              style: { fontSize: 12 },
-            }, 'Future stage'),
-            h(Checkbox, {
-              checked: filterMyPriorStage,
-              onChange: function(e) { setFilterMyPriorStage(e.target.checked); },
-              style: { fontSize: 12 },
-            }, 'Prior stage'),
+            h(Tooltip, { title: 'Filter deliverables where you are assigned to a stage' },
+              h('span', { className: 'global-filter-label', style: { borderBottom: '1px dashed #8F8FA3', cursor: 'help' } }, 'Assigned to Me:')
+            ),
+            h(Tooltip, { title: 'Show deliverables where you are assigned to the currently active stage' },
+              h(Checkbox, {
+                checked: filterMyCurrentStage,
+                onChange: function(e) { setFilterMyCurrentStage(e.target.checked); },
+                style: { fontSize: 12 },
+              }, 'Current stage')
+            ),
+            h(Tooltip, { title: 'Show deliverables where you are assigned to an upcoming stage' },
+              h(Checkbox, {
+                checked: filterMyFutureStage,
+                onChange: function(e) { setFilterMyFutureStage(e.target.checked); },
+                style: { fontSize: 12 },
+              }, 'Future stage')
+            ),
+            h(Tooltip, { title: 'Show deliverables where you were assigned to a completed stage' },
+              h(Checkbox, {
+                checked: filterMyPriorStage,
+                onChange: function(e) { setFilterMyPriorStage(e.target.checked); },
+                style: { fontSize: 12 },
+              }, 'Prior stage')
+            ),
             hasScopeFilters
               ? h('span', { style: { marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 } },
                   h(Tag, { color: 'purple' }, scopedBundles.length + ' of ' + bundles.length + ' ' + terms.bundle.toLowerCase() + 's'),
