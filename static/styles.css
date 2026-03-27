@@ -972,7 +972,7 @@ body {
 }
 
 .stage-pip-dot.completed { background: #28A464; }
-.stage-pip-dot.active { background: #F59E0B; box-shadow: 0 0 0 3px rgba(245,158,11,0.25); }
+.stage-pip-dot.active { background: #F59E0B; }
 .stage-pip-dot.active:hover { box-shadow: 0 0 0 4px rgba(245,158,11,0.35); }
 .stage-pip-dot.blocked { background: #C20A29; box-shadow: 0 0 0 3px rgba(194,10,41,0.2); }
 .stage-pip-dot.blocked:hover { box-shadow: 0 0 0 4px rgba(194,10,41,0.3); }

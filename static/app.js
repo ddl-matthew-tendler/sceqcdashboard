@@ -6,7 +6,7 @@
 const { ConfigProvider, Button, Table, Tag, Space, Spin, Drawer, Badge,
         Tooltip, Progress, Select, Input, Empty, Tabs, Statistic, Switch,
         Modal, Alert, Radio, Checkbox, Popover } = antd;
-const { createElement: h, useState, useEffect, useCallback, useMemo } = React;
+const { createElement: h, useState, useEffect, useCallback, useMemo, useRef } = React;
 
 dayjs.extend(dayjs_plugin_relativeTime);
 
@@ -48,6 +48,49 @@ var DEFAULT_TERMS = { bundle: 'Bundle', policy: 'Policy' };
 
 // Ensure terminology is capitalized for display (API may return lowercase)
 function capFirst(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+
+// ── Data Explorer Integration ────────────────────────────────────
+// File extensions that Data Explorer can open
+var DATA_EXPLORER_EXTENSIONS = ['.csv', '.parquet', '.xpt', '.sas7bdat'];
+
+function isDataExplorerFile(filename) {
+  if (!filename) return false;
+  var lower = filename.toLowerCase();
+  return DATA_EXPLORER_EXTENSIONS.some(function(ext) { return lower.endsWith(ext); });
+}
+
+function buildDataExplorerPath(attachment) {
+  var id = attachment.identifier || {};
+  var filename = id.filename || '';
+  if (!filename) return null;
+
+  if (attachment.type === 'DatasetSnapshotFile') {
+    // Path: /domino/datasets/local/snapshots/{datasetName}/{snapshotVersion}/{filename}
+    var dsName = id.datasetName;
+    var snapVer = id.snapshotVersion;
+    if (dsName && snapVer != null) {
+      return '/domino/datasets/local/snapshots/' + dsName + '/' + snapVer + '/' + filename;
+    }
+    // Fallback: live dataset path
+    if (dsName) return '/domino/datasets/local/' + dsName + '/' + filename;
+  }
+
+  if (attachment.type === 'NetAppVolumeSnapshotFile') {
+    // Path: /domino/netapp-volumes/{volumeName}/{filename}
+    var volName = id.volumeName;
+    if (volName) return '/domino/netapp-volumes/' + volName + '/' + filename;
+  }
+
+  return null;
+}
+
+function buildDataExplorerUrl(baseUrl, attachment) {
+  if (!baseUrl) return null;
+  var path = buildDataExplorerPath(attachment);
+  if (!path) return null;
+  var url = baseUrl.replace(/\/$/, '') + '/?dataset=' + encodeURIComponent(path);
+  return url;
+}
 
 // ── API_GAPS: Write actions pending Domino API availability ────────
 var API_GAPS = {
@@ -898,9 +941,10 @@ function ApprovalsPage(props) {
     ),
 
     h('div', { className: 'stats-row' },
-      h(StatCard, { label: 'Pending', value: approvalStats.pending + approvalStats.review, color: 'warning', active: approvalFilter === 'pendingAll', onClick: function() { setApprovalFilter(approvalFilter === 'pendingAll' ? null : 'pendingAll'); } }),
-      h(StatCard, { label: 'Approved', value: approvalStats.approved, color: 'success', active: approvalFilter === 'approved', onClick: function() { setApprovalFilter(approvalFilter === 'approved' ? null : 'approved'); } }),
-      h(StatCard, { label: 'Conditional', value: approvalStats.conditional, color: 'info', active: approvalFilter === 'conditional', onClick: function() { setApprovalFilter(approvalFilter === 'conditional' ? null : 'conditional'); } })
+      h(StatCard, { label: 'Pending Submission', value: approvalStats.pending, color: 'warning', active: approvalFilter === 'pending', onClick: function() { setApprovalFilter(approvalFilter === 'pending' ? null : 'pending'); } }),
+      h(StatCard, { label: 'Pending Review', value: approvalStats.review, color: 'info', active: approvalFilter === 'review', onClick: function() { setApprovalFilter(approvalFilter === 'review' ? null : 'review'); } }),
+      h(StatCard, { label: 'Conditionally Approved', value: approvalStats.conditional, color: 'warning', active: approvalFilter === 'conditional', onClick: function() { setApprovalFilter(approvalFilter === 'conditional' ? null : 'conditional'); } }),
+      h(StatCard, { label: 'Approved', value: approvalStats.approved, color: 'success', active: approvalFilter === 'approved', onClick: function() { setApprovalFilter(approvalFilter === 'approved' ? null : 'approved'); } })
     ),
 
     h('div', { className: 'panel' },
@@ -1226,8 +1270,8 @@ function FindingsPage(props) {
 function MetricsPage(props) {
   var bundles = props.bundles;
   var terms = props.terms || DEFAULT_TERMS;
-  var B = terms.bundle;
-  var P = terms.policy;
+  var B = capFirst(terms.bundle);
+  var P = capFirst(terms.policy);
 
   var _mf = useState(null);
   var metricsFilter = _mf[0];
@@ -1356,6 +1400,31 @@ function MetricsPage(props) {
       assignees[name]++;
     });
 
+    // Finding creator workload: findings per creator, open vs resolved
+    var findingCreators = {};
+    bundles.forEach(function(b) {
+      (b._findings || []).forEach(function(f) {
+        var creator = (f.createdBy && (f.createdBy.name || f.createdBy.userName)) || 'Unknown';
+        if (!findingCreators[creator]) findingCreators[creator] = { open: 0, resolved: 0 };
+        if (f.status === 'Done' || f.status === 'WontDo') findingCreators[creator].resolved++;
+        else findingCreators[creator].open++;
+      });
+    });
+
+    // Sample cycle time data when no completed bundles exist (for demo/dummy mode)
+    var cycleByPolicyDisplay = cycleByPolicy;
+    var cycleTimeSampleData = false;
+    if (Object.keys(cycleByPolicy).length === 0 && bundles.length > 0) {
+      cycleTimeSampleData = true;
+      cycleByPolicyDisplay = {};
+      // Build sample data from actual policy names
+      var seenPolicies = {};
+      bundles.forEach(function(b) { if (b.policyName && !seenPolicies[b.policyName]) { seenPolicies[b.policyName] = true; } });
+      var policyNames = Object.keys(seenPolicies).slice(0, 6);
+      var sampleDays = [18, 24, 8, 32, 15, 12];
+      policyNames.forEach(function(p, i) { cycleByPolicyDisplay[p] = [sampleDays[i % sampleDays.length]]; });
+    }
+
     return {
       active: activeBundles.length,
       complete: completeBundles.length,
@@ -1366,12 +1435,12 @@ function MetricsPage(props) {
       totalComments: totalComments, findingsTrend: findingsTrend, findingsByAssignee: findingsByAssignee,
       // Cycle time
       avgCycleTime: avgCycleTime, medianCycleTime: medianCycleTime, cycleTimes: cycleTimes,
-      cycleByPolicy: cycleByPolicy, ageBuckets: ageBuckets,
+      cycleByPolicy: cycleByPolicyDisplay, cycleTimeSampleData: cycleTimeSampleData, ageBuckets: ageBuckets,
       // Rework
       avgFindingDensity: avgFindingDensity, reworkBundles: reworkBundles,
       bundlesWithFindings: bundlesWithFindings.length, densityByPolicy: densityByPolicy,
       // Workload
-      policyGroups: policyGroups, assignees: assignees,
+      policyGroups: policyGroups, assignees: assignees, findingCreators: findingCreators,
     };
   }, [bundles]);
 
@@ -1544,6 +1613,28 @@ function MetricsPage(props) {
     });
   }, [metrics]);
 
+  // Finding creator workload chart
+  useEffect(function() {
+    var fc = metrics.findingCreators;
+    var names = Object.keys(fc);
+    if (names.length === 0) return;
+    var el = document.getElementById('chart-finding-creators');
+    if (!el) return;
+    names.sort(function(a, b) { return (fc[b].open + fc[b].resolved) - (fc[a].open + fc[a].resolved); });
+    Highcharts.chart('chart-finding-creators', {
+      chart: { type: 'bar', height: Math.max(240, names.length * 35), backgroundColor: 'transparent' },
+      title: { text: null },
+      xAxis: { categories: names, labels: { style: { fontSize: '11px' } } },
+      yAxis: { title: { text: 'Findings' }, allowDecimals: false, stackLabels: { enabled: true } },
+      plotOptions: { series: { stacking: 'normal', borderRadius: 2 } },
+      series: [
+        { name: 'Open', data: names.map(function(n) { return fc[n].open; }), color: '#FF6543' },
+        { name: 'Resolved', data: names.map(function(n) { return fc[n].resolved; }), color: '#28A464' },
+      ],
+      credits: { enabled: false },
+    });
+  }, [metrics]);
+
   // Policy breakdown chart
   useEffect(function() {
     var groups = metrics.policyGroups;
@@ -1624,7 +1715,10 @@ function MetricsPage(props) {
         chartTitle('Avg Cycle Time by ' + P, 'Average number of days from creation to completion for each ' + P.toLowerCase() + '. Calculated as (last updated date \u2212 created date) for completed ' + B.toLowerCase() + 's only. Higher values may indicate bottlenecks.'),
         h('div', { className: 'panel-body' },
           Object.keys(metrics.cycleByPolicy).length > 0
-            ? h('div', { id: 'chart-cycle-by-policy', className: 'chart-container' })
+            ? h('div', null,
+                metrics.cycleTimeSampleData ? h(Tag, { color: 'orange', style: { marginBottom: 8, fontSize: 10 } }, 'Sample data \u2014 no completed ' + B.toLowerCase() + 's yet') : null,
+                h('div', { id: 'chart-cycle-by-policy', className: 'chart-container' })
+              )
             : h(EmptyState, { text: 'No completed ' + B.toLowerCase() + 's yet' })
         )
       ),
@@ -1689,6 +1783,14 @@ function MetricsPage(props) {
             ? h('div', { id: 'chart-findings-resolution', className: 'chart-container' })
             : h(EmptyState, { text: 'No findings data' })
         )
+      )
+    ),
+    h('div', { className: 'panel', style: { marginTop: 12 } },
+      chartTitle('Finding Creator Count', 'Number of findings created by each user, split by open vs resolved. Shows who is raising the most QC issues and how many remain unresolved.'),
+      h('div', { className: 'panel-body' },
+        Object.keys(metrics.findingCreators).length > 0
+          ? h('div', { id: 'chart-finding-creators', className: 'chart-container' })
+          : h(EmptyState, { text: 'No findings data' })
       )
     ),
 
@@ -1938,6 +2040,7 @@ function QCTrackerExpandedRow(props) {
   var terms = props.terms || DEFAULT_TERMS;
   var B = terms.bundle;
   var P = terms.policy;
+  var dataExplorerUrl = props.dataExplorerUrl || null;
   var stageNames = getBundleStageNames(bundle);
   var currentIdx = deriveBundleStageIndex(bundle);
   var isComplete = bundle.state === 'Complete';
@@ -2144,6 +2247,21 @@ function QCTrackerExpandedRow(props) {
                     var fname = r.identifier && r.identifier.filename;
                     var name = r.identifier && r.identifier.name;
                     var label = fname || name || 'Unknown';
+                    var deUrl = dataExplorerUrl && isDataExplorerFile(fname || name) ? buildDataExplorerUrl(dataExplorerUrl, r) : null;
+                    if (deUrl) {
+                      return h('span', { style: { display: 'flex', alignItems: 'center', gap: 4 } },
+                        h('a', {
+                          href: deUrl,
+                          target: '_blank',
+                          rel: 'noopener noreferrer',
+                          style: { fontWeight: 500, fontSize: 11, color: '#0070CC' },
+                          title: 'Open in Data Explorer',
+                        }, label),
+                        h(Tooltip, { title: 'Open in Data Explorer' },
+                          h('span', { style: { fontSize: 12, cursor: 'pointer' } }, '\uD83D\uDCCA')
+                        )
+                      );
+                    }
                     if (!dominoUrl) return h('span', { style: { fontWeight: 500, fontSize: 11 } }, label);
                     return h('a', {
                       href: dominoUrl,
@@ -2330,6 +2448,7 @@ function AttachmentsDrawer(props) {
   var visible = props.visible;
   var onClose = props.onClose;
   var bundle = props.bundle;
+  var deUrl = props.dataExplorerUrl || null;
   var attachments = bundle ? (bundle._attachments || []) : [];
   var dominoUrl = bundle ? getDominoBundleUrl(bundle) : null;
 
@@ -2344,6 +2463,21 @@ function AttachmentsDrawer(props) {
       render: function(_, r) {
         var id = r.identifier || {};
         var fname = id.filename || id.name || '\u2014';
+        var explorerLink = deUrl && isDataExplorerFile(fname) ? buildDataExplorerUrl(deUrl, r) : null;
+        if (explorerLink) {
+          return h('span', { style: { display: 'flex', alignItems: 'center', gap: 4 } },
+            h('a', {
+              href: explorerLink,
+              target: '_blank',
+              rel: 'noopener noreferrer',
+              style: { fontWeight: 500, fontSize: 12, color: '#0070CC' },
+              title: 'Open in Data Explorer',
+            }, fname),
+            h(Tooltip, { title: 'Open in Data Explorer' },
+              h('span', { style: { fontSize: 13, cursor: 'pointer' } }, '\uD83D\uDCCA')
+            )
+          );
+        }
         if (!dominoUrl) return h('span', { style: { fontWeight: 500, fontSize: 12 } }, fname);
         return h('a', {
           href: dominoUrl,
@@ -2399,6 +2533,7 @@ function QCTrackerPage(props) {
   var onSelectBundle = props.onSelectBundle;
   var B = terms.bundle;
   var P = terms.policy;
+  var dataExplorerUrl = props.dataExplorerUrl || null;
 
   // Filter state
   var _fs1 = useState(''); var searchText = _fs1[0]; var setSearchText = _fs1[1];
@@ -2788,7 +2923,7 @@ function QCTrackerPage(props) {
               expandedRowKeys: expandedRowKeys,
               onExpandedRowsChange: function(keys) { setExpandedRowKeys(keys); },
               expandedRowRender: function(record) {
-                return h(QCTrackerExpandedRow, { bundle: record, terms: terms, projectMembersCache: props.projectMembersCache });
+                return h(QCTrackerExpandedRow, { bundle: record, terms: terms, projectMembersCache: props.projectMembersCache, dataExplorerUrl: dataExplorerUrl });
               },
             },
           });
@@ -2803,6 +2938,7 @@ function QCTrackerPage(props) {
         visible: attachDrawerOpen,
         onClose: function() { setAttachDrawerOpen(false); },
         bundle: attachDrawerBundle,
+        dataExplorerUrl: dataExplorerUrl,
       })
     )
   );
@@ -4965,7 +5101,7 @@ function RiskOptimizerPage(props) {
     // Header
     h('div', { className: 'panel-header', style: { marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
       h('div', null,
-        h('span', { className: 'panel-title', style: { fontSize: 18 } }, '\u2696 Risk Optimizer'),
+        h('span', { className: 'panel-title', style: { fontSize: 18 } }, 'Risk Optimizer'),
         h('span', { style: { fontSize: 12, color: '#8F8FA3', marginLeft: 12 } },
           'Identify over-QC\'d and under-QC\'d deliverables. Recommend right-sized policies.'
         )
@@ -4995,30 +5131,26 @@ function RiskOptimizerPage(props) {
     // ── Overview Tab ──
     activeTab === 'overview' ? h('div', null,
       // Summary cards row
-      h('div', { style: { display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' } },
-        summaryCard('Total ' + B + 's', scoredBundles.length, '#E0E0EC'),
-        summaryCard('High Risk', summary.high, riskConfig.highRisk.color, 'Need most rigorous QC'),
-        summaryCard('Medium Risk', summary.medium, riskConfig.mediumRisk.color, 'Code review + spot check'),
-        summaryCard('Low Risk', summary.low, riskConfig.lowRisk.color, 'Output crosscheck sufficient')
+      h('div', { className: 'stats-row' },
+        h(StatCard, { label: 'Total ' + B + 's', value: scoredBundles.length, color: 'primary' }),
+        h(StatCard, { label: 'High Risk', value: summary.high, color: 'danger', sub: 'Need most rigorous QC' }),
+        h(StatCard, { label: 'Medium Risk', value: summary.medium, color: 'warning', sub: 'Code review + spot check' }),
+        h(StatCard, { label: 'Low Risk', value: summary.low, color: 'success', sub: 'Output crosscheck sufficient' })
       ),
 
       // Calibration cards
       h('div', { className: 'panel-header', style: { marginBottom: 12 } },
         h('span', { className: 'panel-title' }, 'QC Calibration Summary')
       ),
-      h('div', { style: { display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' } },
-        summaryCard('Over-QC\'d', summary.overQc, '#F59E0B',
-          summary.overQc > 0 ? 'Using more rigorous QC than needed — potential resource savings' : 'None detected'
-        ),
-        summaryCard('Well-Matched', summary.wellMatched, '#28A464',
-          summary.wellMatched > 0 ? 'Current policy aligns with risk level' : taggedPolicyCount === 0 ? 'Tag policies to see results' : 'None detected'
-        ),
-        summaryCard('Under-QC\'d', summary.underQc, '#C20A29',
-          summary.underQc > 0 ? 'Using less rigorous QC than recommended — potential risk' : 'None detected'
-        ),
-        summaryCard('Manual Overrides', summary.manual, '#5B8FF9',
-          summary.manual > 0 ? 'Human judgment applied' : 'No overrides set'
-        )
+      h('div', { className: 'stats-row' },
+        h(StatCard, { label: 'Over-QC\'d', value: summary.overQc, color: 'warning',
+          sub: summary.overQc > 0 ? 'More rigorous QC than needed' : 'None detected' }),
+        h(StatCard, { label: 'Well-Matched', value: summary.wellMatched, color: 'success',
+          sub: summary.wellMatched > 0 ? 'Policy aligns with risk level' : taggedPolicyCount === 0 ? 'Tag policies to see results' : 'None detected' }),
+        h(StatCard, { label: 'Under-QC\'d', value: summary.underQc, color: 'danger',
+          sub: summary.underQc > 0 ? 'Less rigorous QC than recommended' : 'None detected' }),
+        h(StatCard, { label: 'Manual Overrides', value: summary.manual, color: 'info',
+          sub: summary.manual > 0 ? 'Human judgment applied' : 'No overrides set' })
       ),
 
       // Quick insight
@@ -5045,7 +5177,7 @@ function RiskOptimizerPage(props) {
       }) : null,
 
       // Risk distribution Highcharts
-      h('div', { className: 'panel', style: { padding: 16, background: '#1E1E2E', borderRadius: 8, marginTop: 8 } },
+      h('div', { className: 'panel', style: { marginTop: 8 } },
         h('div', { className: 'panel-header' }, h('span', { className: 'panel-title' }, 'Risk Distribution by Project')),
         h(RiskDistributionChart, { scoredBundles: scoredBundles, riskConfig: riskConfig })
       )
@@ -5335,6 +5467,7 @@ function App() {
   var _pm = useState({}); var projectMembersCache = _pm[0]; var setProjectMembersCache = _pm[1];
   var _pt = useState({}); var projectTagsMap = _pt[0]; var setProjectTagsMap = _pt[1];
   var _lp = useState([]); var livePolicies = _lp[0]; var setLivePolicies = _lp[1];
+  var _deu = useState(null); var dataExplorerUrl = _deu[0]; var setDataExplorerUrl = _deu[1];
 
   // ── Universal Scope Filters ──────────────────────────────────
   var _sc1 = useState([]); var scopeProjects = _sc1[0]; var setScopeProjects = _sc1[1];
@@ -5669,6 +5802,13 @@ function App() {
       .catch(function() {});
   }, [connected]);
 
+  // Always try to discover Data Explorer (local backend call, works even in dummy mode)
+  useEffect(function() {
+    apiGet('api/data-explorer-url')
+      .then(function(r) { if (r && r.url) setDataExplorerUrl(r.url); })
+      .catch(function() {});
+  }, []);
+
   function handleSelectBundle(bundle) {
     setSelectedBundle(bundle);
     setDrawerOpen(true);
@@ -5679,7 +5819,7 @@ function App() {
     // All other pages get scopedBundles
     switch (activePage) {
       case 'tracker':
-        return h(QCTrackerPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms, projectMembersCache: projectMembersCache });
+        return h(QCTrackerPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms, projectMembersCache: projectMembersCache, dataExplorerUrl: dataExplorerUrl });
       case 'rules':
         return h(AssignmentRulesPage, { bundles: bundles, setBundles: setBundles, assignmentRules: assignmentRules, setAssignmentRules: setAssignmentRules, terms: terms, projectMembersCache: projectMembersCache, livePolicies: livePolicies });
       case 'milestones':

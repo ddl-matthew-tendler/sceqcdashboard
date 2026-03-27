@@ -466,6 +466,62 @@ def get_project_run(project_id: str, run_id: str):
     raise HTTPException(status_code=status, detail=detail)
 
 
+# ── Data Explorer App URL Discovery ────────────────────────────────
+
+_data_explorer_cache = {"url": None, "probed": False}
+
+
+@app.get("/api/data-explorer-url")
+def get_data_explorer_url():
+    """Discover the Data Explorer app URL via the Beta Apps API.
+    Supports DATA_EXPLORER_URL env var override."""
+    # Check env var override first
+    override = os.environ.get("DATA_EXPLORER_URL", "").strip()
+    if override:
+        return {"url": override}
+
+    if _data_explorer_cache["probed"]:
+        return {"url": _data_explorer_cache["url"]}
+
+    host = get_domino_host()
+    if not host:
+        _data_explorer_cache["probed"] = True
+        return {"url": None}
+
+    try:
+        headers = get_auth_headers()
+        resp = requests.get(
+            f"{host}/api/apps/beta/apps",
+            headers=headers,
+            params={"limit": 100},
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            apps = resp.json()
+            app_list = apps if isinstance(apps, list) else apps.get("data", apps.get("apps", []))
+            for a in app_list:
+                name = (a.get("name") or "").lower()
+                if "data explorer" in name or "data_explorer" in name or "dataexplorer" in name:
+                    # Try to get the running URL
+                    app_url = a.get("runningAppUrl") or a.get("url") or a.get("vanityUrl")
+                    if not app_url:
+                        # Construct from app ID
+                        app_id = a.get("id") or a.get("_id")
+                        if app_id:
+                            ext_host = (_external_host_cache.get("host") or host).rstrip("/")
+                            app_url = f"{ext_host}/apps/{app_id}/"
+                    if app_url:
+                        _data_explorer_cache["url"] = app_url
+                        _data_explorer_cache["probed"] = True
+                        logger.info(f"Data Explorer URL discovered: {app_url}")
+                        return {"url": app_url}
+    except Exception as e:
+        logger.warning(f"Data Explorer discovery failed: {e}")
+
+    _data_explorer_cache["probed"] = True
+    return {"url": None}
+
+
 # ── Whitelabel terminology ─────────────────────────────────────────
 
 @app.get("/api/terminology")
