@@ -69,17 +69,21 @@ def gov_get(path, params=None):
     if not token:
         raise HTTPException(status_code=503, detail="Cannot acquire auth token")
 
-    # Strategy 2: Bearer token (may work on newer Domino versions)
-    resp = requests.get(url, headers={"Authorization": f"Bearer {token}"}, params=params, timeout=30)
-    if resp.status_code == 200:
-        logger.info("Governance auth: Bearer token worked")
-        return resp.json()
+    logger.info(f"Governance auth for {path}: token length={len(token)}, starts_with={token[:10]}...")
 
-    # Strategy 3: Send sidecar token as X-Domino-Api-Key
-    resp2 = requests.get(url, headers={"X-Domino-Api-Key": token}, params=params, timeout=30)
-    if resp2.status_code == 200:
+    # Strategy 2: Send sidecar token as X-Domino-Api-Key (most likely to work for governance)
+    resp = requests.get(url, headers={"X-Domino-Api-Key": token}, params=params, timeout=30)
+    if resp.status_code == 200:
         logger.info("Governance auth: X-Domino-Api-Key with sidecar token worked")
+        return resp.json()
+    logger.warning(f"Governance strategy X-Domino-Api-Key failed: {resp.status_code} — {resp.text[:200]}")
+
+    # Strategy 3: Bearer token (works for v4, may work on newer Domino for governance)
+    resp2 = requests.get(url, headers={"Authorization": f"Bearer {token}"}, params=params, timeout=30)
+    if resp2.status_code == 200:
+        logger.info("Governance auth: Bearer token worked")
         return resp2.json()
+    logger.warning(f"Governance strategy Bearer failed: {resp2.status_code} — {resp2.text[:200]}")
 
     # Strategy 4: Send both headers simultaneously
     resp3 = requests.get(url, headers={
@@ -89,9 +93,10 @@ def gov_get(path, params=None):
     if resp3.status_code == 200:
         logger.info("Governance auth: dual headers worked")
         return resp3.json()
+    logger.warning(f"Governance strategy dual failed: {resp3.status_code} — {resp3.text[:200]}")
 
     # All strategies failed — return the most informative error
-    logger.error(f"Governance auth failed for {path}. Bearer: {resp.status_code}, ApiKey: {resp2.status_code}, Dual: {resp3.status_code}")
+    logger.error(f"Governance auth FAILED for {path}. ApiKey: {resp.status_code}, Bearer: {resp2.status_code}, Dual: {resp3.status_code}")
     raise HTTPException(status_code=resp.status_code, detail=resp.text)
 
 
@@ -113,10 +118,10 @@ def gov_post(path, json_body=None):
     if not token:
         raise HTTPException(status_code=503, detail="Cannot acquire auth token")
 
-    # Try Bearer first, then API key, then both
+    # Try X-Domino-Api-Key first (governance rejects Bearer), then Bearer, then both
     for headers in [
-        {"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         {"X-Domino-Api-Key": token, "Content-Type": "application/json"},
+        {"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         {"Authorization": f"Bearer {token}", "X-Domino-Api-Key": token, "Content-Type": "application/json"},
     ]:
         resp = requests.post(url, headers=headers, json=json_body, timeout=30)
@@ -266,19 +271,52 @@ def get_terminology():
 
 @app.get("/api/debug/auth")
 def debug_auth():
-    """Show which auth method is available (no secrets exposed)."""
+    """Show which auth method is available and test governance connectivity."""
     has_override = bool(os.environ.get("API_KEY_OVERRIDE"))
     has_user_key = bool(os.environ.get("DOMINO_USER_API_KEY"))
     has_host = bool(os.environ.get("DOMINO_API_HOST"))
     sidecar_token = None
+    sidecar_raw = None
     try:
         resp = requests.get("http://localhost:8899/access-token", timeout=3)
-        sidecar_token = resp.text.strip()[:20] + "..." if resp.text.strip() else None
-    except Exception:
-        pass
+        sidecar_raw = resp.text.strip()[:30] + "..." if resp.text.strip() else None
+        token = resp.text.strip()
+        if token.startswith("Bearer "):
+            token = token[len("Bearer "):]
+        sidecar_token = token[:20] + "..." if token else None
+    except Exception as e:
+        sidecar_raw = f"ERROR: {e}"
 
     # List all DOMINO_* env vars (names only, not values)
     domino_vars = sorted([k for k in os.environ if k.startswith("DOMINO")])
+
+    # Test governance API connectivity
+    gov_test = {}
+    host = get_domino_host()
+    if host and sidecar_token:
+        test_url = f"{host}/api/governance/v1/bundles?limit=1"
+        token_val = sidecar_token.replace("...", "")  # Don't use truncated token
+        # Re-fetch full token for testing
+        try:
+            full_resp = requests.get("http://localhost:8899/access-token", timeout=3)
+            full_token = full_resp.text.strip()
+            if full_token.startswith("Bearer "):
+                full_token = full_token[len("Bearer "):]
+
+            # Test X-Domino-Api-Key
+            r1 = requests.get(test_url, headers={"X-Domino-Api-Key": full_token}, timeout=10)
+            gov_test["X-Domino-Api-Key"] = {"status": r1.status_code, "body_preview": r1.text[:200]}
+
+            # Test Bearer
+            r2 = requests.get(test_url, headers={"Authorization": f"Bearer {full_token}"}, timeout=10)
+            gov_test["Bearer"] = {"status": r2.status_code, "body_preview": r2.text[:200]}
+
+            # Test v4 (should work with Bearer)
+            v4_url = f"{host}/v4/users/self"
+            r3 = requests.get(v4_url, headers={"Authorization": f"Bearer {full_token}"}, timeout=10)
+            gov_test["v4_Bearer"] = {"status": r3.status_code, "body_preview": r3.text[:200]}
+        except Exception as e:
+            gov_test["error"] = str(e)
 
     return {
         "has_API_KEY_OVERRIDE": has_override,
@@ -286,7 +324,9 @@ def debug_auth():
         "has_DOMINO_API_HOST": has_host,
         "domino_host": get_domino_host() or "(not set)",
         "sidecar_token_preview": sidecar_token,
+        "sidecar_raw_preview": sidecar_raw,
         "domino_env_vars": domino_vars,
+        "governance_test": gov_test,
     }
 
 

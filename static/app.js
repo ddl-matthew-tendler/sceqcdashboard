@@ -233,6 +233,7 @@ var NAV_ITEMS = [
   { key: 'findings', icon: '\u26A0', label: 'Findings & QC' },
   { key: 'metrics', icon: '\u2261', label: 'Team Metrics' },
   { key: 'rules', icon: '\u2699', label: 'Assignment Rules' },
+  { key: 'stages', icon: '\u229A', label: 'Stage Assignments' },
 ];
 
 function Sidebar(props) {
@@ -2612,6 +2613,403 @@ function AssignmentRulesPage(props) {
 
 
 // ═══════════════════════════════════════════════════════════════
+//  STAGE ASSIGNMENTS PAGE
+// ═══════════════════════════════════════════════════════════════
+function StageAssignmentsPage(props) {
+  var bundles = props.bundles;
+  var terms = props.terms;
+  var projectMembersCache = props.projectMembersCache || {};
+  var B = capFirst(terms.bundle || 'Bundle');
+  var P = capFirst(terms.policy || 'Policy');
+
+  var _fs1 = useState([]); var filterStatus = _fs1[0]; var setFilterStatus = _fs1[1];
+  var _fs2 = useState(null); var filterAssignee = _fs2[0]; var setFilterAssignee = _fs2[1];
+  var _fs3 = useState([]); var filterProjects = _fs3[0]; var setFilterProjects = _fs3[1];
+  var _fs4 = useState([]); var filterPolicies = _fs4[0]; var setFilterPolicies = _fs4[1];
+  var _fs5 = useState(''); var searchText = _fs5[0]; var setSearchText = _fs5[1];
+  var _fs6 = useState([]); var selectedRowKeys = _fs6[0]; var setSelectedRowKeys = _fs6[1];
+  var _fs7 = useState(false); var reassignModalOpen = _fs7[0]; var setReassignModalOpen = _fs7[1];
+  var _fs8 = useState(undefined); var reassignTarget = _fs8[0]; var setReassignTarget = _fs8[1];
+
+  // Flatten all stages across all bundles into rows
+  var allStages = useMemo(function() {
+    var rows = [];
+    bundles.forEach(function(bundle) {
+      if (!bundle.stages || bundle.stages.length === 0) return;
+      var stageNames = getBundleStageNames(bundle);
+      var currentIdx = deriveBundleStageIndex(bundle);
+      var isComplete = bundle.state === 'Complete';
+
+      bundle.stages.forEach(function(stageObj, idx) {
+        var stageName = stageObj.stage ? stageObj.stage.name : '';
+        if (!stageName) return;
+
+        var status;
+        if (isComplete || idx < currentIdx) status = 'Completed';
+        else if (idx === currentIdx) status = 'Current';
+        else status = 'Future';
+
+        var assigneeName = stageObj.assignee && stageObj.assignee.name ? stageObj.assignee.name : null;
+
+        rows.push({
+          key: bundle.id + '-' + idx,
+          bundleId: bundle.id,
+          bundleName: bundle.name,
+          projectId: bundle.projectId,
+          projectName: bundle.projectName,
+          policyName: bundle.policyName,
+          stageName: stageName,
+          stageIdx: idx,
+          status: status,
+          assigneeName: assigneeName,
+          bundleState: bundle.state,
+        });
+      });
+    });
+    return rows;
+  }, [bundles]);
+
+  // Filter options
+  var projectOptions = useMemo(function() {
+    var seen = {};
+    return allStages.reduce(function(acc, r) {
+      if (!seen[r.projectId]) {
+        seen[r.projectId] = true;
+        acc.push({ label: r.projectName, value: r.projectId });
+      }
+      return acc;
+    }, []);
+  }, [allStages]);
+
+  var policyOptions = useMemo(function() {
+    var seen = {};
+    return allStages.reduce(function(acc, r) {
+      if (!seen[r.policyName]) {
+        seen[r.policyName] = true;
+        acc.push({ label: r.policyName, value: r.policyName });
+      }
+      return acc;
+    }, []);
+  }, [allStages]);
+
+  var assigneeOptions = useMemo(function() {
+    var seen = {};
+    var opts = [{ label: 'Unassigned', value: '__unassigned__' }];
+    allStages.forEach(function(r) {
+      if (r.assigneeName && !seen[r.assigneeName]) {
+        seen[r.assigneeName] = true;
+        opts.push({ label: r.assigneeName, value: r.assigneeName });
+      }
+    });
+    return opts;
+  }, [allStages]);
+
+  // All unique project members for reassignment target
+  var allMemberOptions = useMemo(function() {
+    var seen = {};
+    var opts = [];
+    Object.keys(projectMembersCache).forEach(function(pid) {
+      (projectMembersCache[pid] || []).forEach(function(m) {
+        if (!seen[m.userName]) {
+          seen[m.userName] = true;
+          opts.push({ label: (m.firstName || '') + ' ' + (m.lastName || '') + ' (' + m.userName + ')', value: m.userName });
+        }
+      });
+    });
+    return opts;
+  }, [projectMembersCache]);
+
+  // Filtered rows
+  var filtered = useMemo(function() {
+    return allStages.filter(function(r) {
+      if (searchText) {
+        var q = searchText.toLowerCase();
+        var match = r.bundleName.toLowerCase().indexOf(q) >= 0
+          || r.stageName.toLowerCase().indexOf(q) >= 0
+          || r.projectName.toLowerCase().indexOf(q) >= 0
+          || (r.assigneeName && r.assigneeName.toLowerCase().indexOf(q) >= 0);
+        if (!match) return false;
+      }
+      if (filterStatus.length > 0 && filterStatus.indexOf(r.status) < 0) return false;
+      if (filterAssignee) {
+        if (filterAssignee === '__unassigned__') { if (r.assigneeName) return false; }
+        else { if (r.assigneeName !== filterAssignee) return false; }
+      }
+      if (filterProjects.length > 0 && filterProjects.indexOf(r.projectId) < 0) return false;
+      if (filterPolicies.length > 0 && filterPolicies.indexOf(r.policyName) < 0) return false;
+      return true;
+    });
+  }, [allStages, searchText, filterStatus, filterAssignee, filterProjects, filterPolicies]);
+
+  // Stats
+  var totalUnassigned = allStages.filter(function(r) { return !r.assigneeName; }).length;
+  var futureUnassigned = allStages.filter(function(r) { return r.status === 'Future' && !r.assigneeName; }).length;
+  var currentUnassigned = allStages.filter(function(r) { return r.status === 'Current' && !r.assigneeName; }).length;
+
+  function clearFilters() {
+    setSearchText(''); setFilterStatus([]); setFilterAssignee(null); setFilterProjects([]); setFilterPolicies([]);
+  }
+
+  var hasActiveFilters = searchText || filterStatus.length > 0 || filterAssignee || filterProjects.length > 0 || filterPolicies.length > 0;
+
+  function handleBulkReassign() {
+    var gap = API_GAPS.stageReassign;
+    if (!gap.ready) {
+      antd.message.warning(gap.message);
+      return;
+    }
+    // When API is ready, perform reassignment here
+    setReassignModalOpen(false);
+    setSelectedRowKeys([]);
+    setReassignTarget(undefined);
+  }
+
+  var statusColorMap = { Current: 'gold', Future: 'blue', Completed: 'green' };
+
+  var columns = [
+    {
+      title: B,
+      dataIndex: 'bundleName',
+      key: 'bundleName',
+      sorter: function(a, b) { return a.bundleName.localeCompare(b.bundleName); },
+      width: 180,
+      ellipsis: true,
+    },
+    {
+      title: 'Project',
+      dataIndex: 'projectName',
+      key: 'projectName',
+      sorter: function(a, b) { return a.projectName.localeCompare(b.projectName); },
+      width: 160,
+      ellipsis: true,
+    },
+    {
+      title: P,
+      dataIndex: 'policyName',
+      key: 'policyName',
+      sorter: function(a, b) { return a.policyName.localeCompare(b.policyName); },
+      width: 160,
+      ellipsis: true,
+    },
+    {
+      title: 'Stage',
+      dataIndex: 'stageName',
+      key: 'stageName',
+      sorter: function(a, b) { return a.stageName.localeCompare(b.stageName); },
+      width: 150,
+    },
+    {
+      title: 'Status',
+      dataIndex: 'status',
+      key: 'status',
+      width: 100,
+      sorter: function(a, b) {
+        var order = { Current: 0, Future: 1, Completed: 2 };
+        return (order[a.status] || 0) - (order[b.status] || 0);
+      },
+      render: function(status) {
+        return h(Tag, { color: statusColorMap[status] || 'default' }, status);
+      },
+    },
+    {
+      title: 'Assignee',
+      dataIndex: 'assigneeName',
+      key: 'assigneeName',
+      width: 160,
+      sorter: function(a, b) {
+        var aa = a.assigneeName || '';
+        var bb = b.assigneeName || '';
+        return aa.localeCompare(bb);
+      },
+      render: function(name) {
+        if (!name) return h(Tag, { color: 'red', style: { fontSize: 11 } }, 'Unassigned');
+        return h('span', null, name);
+      },
+    },
+  ];
+
+  var rowSelection = {
+    selectedRowKeys: selectedRowKeys,
+    onChange: function(keys) { setSelectedRowKeys(keys); },
+  };
+
+  return h('div', { className: 'page-container' },
+    // Header
+    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 } },
+      h('div', null,
+        h('h2', { style: { margin: 0, fontSize: 20, fontWeight: 600, color: '#2D2D3F' } }, 'Stage Assignments'),
+        h('div', { style: { color: '#8F8FA3', fontSize: 13, marginTop: 4 } },
+          'All stages across all ' + B.toLowerCase() + 's — find unassigned work and manage assignments in bulk.'
+        )
+      ),
+      selectedRowKeys.length > 0
+        ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+            h(Tag, { color: 'blue', style: { fontSize: 12 } }, selectedRowKeys.length + ' selected'),
+            h(Tooltip, { title: API_GAPS.stageReassign.ready ? 'Reassign selected stages' : API_GAPS.stageReassign.message },
+              h(Button, {
+                type: 'primary',
+                size: 'small',
+                onClick: function() {
+                  if (!API_GAPS.stageReassign.ready) {
+                    antd.message.warning(API_GAPS.stageReassign.message);
+                    return;
+                  }
+                  setReassignModalOpen(true);
+                },
+              }, 'Reassign Selected')
+            ),
+            !API_GAPS.stageReassign.ready
+              ? h(Tag, { color: 'orange', style: { fontSize: 10 } }, 'API Pending')
+              : null,
+            h(Button, { size: 'small', onClick: function() { setSelectedRowKeys([]); } }, 'Clear')
+          )
+        : null
+    ),
+
+    // Summary cards
+    h('div', { style: { display: 'flex', gap: 12, marginBottom: 16 } },
+      h(StatCard, {
+        label: 'Total Stages',
+        value: allStages.length,
+      }),
+      h(StatCard, {
+        label: 'Unassigned',
+        value: totalUnassigned,
+        onClick: totalUnassigned > 0 ? function() {
+          setFilterAssignee('__unassigned__');
+          setFilterStatus([]);
+        } : null,
+        active: filterAssignee === '__unassigned__' && filterStatus.length === 0,
+      }),
+      h(StatCard, {
+        label: 'Future Unassigned',
+        value: futureUnassigned,
+        onClick: futureUnassigned > 0 ? function() {
+          setFilterAssignee('__unassigned__');
+          setFilterStatus(['Future']);
+        } : null,
+        active: filterAssignee === '__unassigned__' && filterStatus.length === 1 && filterStatus[0] === 'Future',
+      }),
+      h(StatCard, {
+        label: 'Current Unassigned',
+        value: currentUnassigned,
+        onClick: currentUnassigned > 0 ? function() {
+          setFilterAssignee('__unassigned__');
+          setFilterStatus(['Current']);
+        } : null,
+        active: filterAssignee === '__unassigned__' && filterStatus.length === 1 && filterStatus[0] === 'Current',
+      })
+    ),
+
+    // Filters
+    h('div', { style: { display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' } },
+      h(Input.Search, {
+        placeholder: 'Search ' + B.toLowerCase() + 's, stages, assignees...',
+        value: searchText,
+        onChange: function(e) { setSearchText(e.target.value); },
+        allowClear: true,
+        style: { width: 260 },
+        size: 'small',
+      }),
+      h(Select, {
+        mode: 'multiple',
+        placeholder: 'Stage Status',
+        value: filterStatus,
+        onChange: setFilterStatus,
+        allowClear: true,
+        style: { minWidth: 160 },
+        size: 'small',
+        options: [
+          { label: 'Current', value: 'Current' },
+          { label: 'Future', value: 'Future' },
+          { label: 'Completed', value: 'Completed' },
+        ],
+      }),
+      h(Select, {
+        placeholder: 'Assignee',
+        value: filterAssignee,
+        onChange: setFilterAssignee,
+        allowClear: true,
+        showSearch: true,
+        optionFilterProp: 'label',
+        style: { minWidth: 180 },
+        size: 'small',
+        options: assigneeOptions,
+      }),
+      h(Select, {
+        mode: 'multiple',
+        placeholder: 'Projects',
+        value: filterProjects,
+        onChange: setFilterProjects,
+        allowClear: true,
+        maxTagCount: 1,
+        style: { minWidth: 180 },
+        size: 'small',
+        options: projectOptions,
+      }),
+      h(Select, {
+        mode: 'multiple',
+        placeholder: P,
+        value: filterPolicies,
+        onChange: setFilterPolicies,
+        allowClear: true,
+        maxTagCount: 1,
+        style: { minWidth: 160 },
+        size: 'small',
+        options: policyOptions,
+      }),
+      hasActiveFilters
+        ? h(Button, { size: 'small', type: 'link', onClick: clearFilters }, 'Clear filters')
+        : null
+    ),
+
+    // Results count
+    h('div', { style: { fontSize: 12, color: '#8F8FA3', marginBottom: 8 } },
+      filtered.length + ' of ' + allStages.length + ' stages'
+      + (hasActiveFilters ? ' (filtered)' : '')
+    ),
+
+    // Table
+    h(Table, {
+      dataSource: filtered,
+      columns: columns,
+      rowKey: 'key',
+      size: 'small',
+      rowSelection: rowSelection,
+      pagination: filtered.length > 50 ? { pageSize: 50, showSizeChanger: true, pageSizeOptions: ['25', '50', '100'] } : false,
+      scroll: { y: 'calc(100vh - 380px)' },
+    }),
+
+    // Reassign Modal
+    h(Modal, {
+      title: 'Reassign ' + selectedRowKeys.length + ' Stage' + (selectedRowKeys.length !== 1 ? 's' : ''),
+      open: reassignModalOpen,
+      onOk: handleBulkReassign,
+      onCancel: function() { setReassignModalOpen(false); },
+      okText: 'Reassign',
+      okButtonProps: { disabled: !reassignTarget },
+    },
+      h('div', { style: { marginBottom: 16 } },
+        h('div', { style: { marginBottom: 4, fontWeight: 500, fontSize: 12, color: '#65657B' } }, 'New Assignee'),
+        h(Select, {
+          placeholder: 'Select a team member...',
+          value: reassignTarget,
+          onChange: setReassignTarget,
+          options: allMemberOptions,
+          showSearch: true,
+          optionFilterProp: 'label',
+          style: { width: '100%' },
+        })
+      ),
+      h('div', { style: { fontSize: 12, color: '#8F8FA3' } },
+        'This will reassign ' + selectedRowKeys.length + ' stage' + (selectedRowKeys.length !== 1 ? 's' : '') + ' to the selected team member.'
+      )
+    )
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════
 //  ROOT APP
 // ═══════════════════════════════════════════════════════════════
 function App() {
@@ -2968,6 +3366,8 @@ function App() {
         return h(FindingsPage, { bundles: scopedBundles, loading: loading, terms: terms });
       case 'metrics':
         return h(MetricsPage, { bundles: scopedBundles, terms: terms });
+      case 'stages':
+        return h(StageAssignmentsPage, { bundles: bundles, terms: terms, projectMembersCache: projectMembersCache });
       default:
         return h(DashboardPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms });
     }
