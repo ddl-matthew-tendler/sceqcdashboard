@@ -2184,140 +2184,123 @@ function QCTrackerExpandedRow(props) {
           : null
       )
     ),
-    // Right column: findings + approvals + gates + attachments
+    // Right column: tabbed content for findings, approvals, gates, attachments
     h('div', { className: 'tracker-expanded-right' },
-      // #4/#7: Findings section with divider and actionable empty state
-      h('div', { className: 'tracker-expanded-section' },
-        bundle._findings && bundle._findings.length > 0
-          ? h('div', null,
-              h('div', { className: 'tracker-section-title' }, 'Findings (' + bundle._findings.length + ')'),
-              bundle._findings.slice(0, 5).map(function(f, i) {
-                var findingUrl = f.id ? getDominoBundleUrl(bundle, { findingId: f.id }) : dominoUrl;
-                return h('div', { key: i, className: 'tracker-finding-row' },
-                  h(Tag, { color: severityColor(f.severity), style: { color: '#fff', border: 'none', minWidth: 28, textAlign: 'center', fontSize: 11 } }, f.severity),
-                  findingUrl
-                    ? h('a', { href: findingUrl, target: '_blank', rel: 'noopener noreferrer', className: 'tracker-finding-name', style: { color: '#543FDE' }, title: 'View finding in Domino: ' + f.name }, f.name)
-                    : h('span', { className: 'tracker-finding-name', title: f.name }, f.name),
-                  findingStatusTag(f.status)
-                );
-              }),
-              bundle._findings.length > 5
-                ? h('div', { style: { fontSize: 12, color: '#8F8FA3', padding: '4px 0' } }, '+ ' + (bundle._findings.length - 5) + ' more')
-                : null
-            )
-          : h('div', null,
-              h('div', { className: 'tracker-section-title' }, 'Findings'),
-              h('div', { className: 'tracker-empty-state' }, 'No findings recorded. Findings are created in Domino when QC issues are identified.')
-            )
-      ),
-
-      // Approvals section
-      h('div', { className: 'tracker-expanded-section' },
-        bundle._approvals && bundle._approvals.length > 0
-          ? h('div', null,
-              h('div', { className: 'tracker-section-title' }, 'Approvals (' + bundle._approvals.length + ')'),
-              bundle._approvals.map(function(a, i) {
-                return h('div', { key: i, className: 'tracker-approval-row' },
-                  h('span', { className: 'tracker-approval-dot', style: { background: approvalStatusColor(a.status) } }),
-                  h('span', { className: 'tracker-approval-name' }, a.name),
-                  a.approvers && a.approvers.length > 0
-                    ? h('span', { className: 'tracker-approval-actors' }, a.approvers.map(function(ap) { return ap.name; }).join(', '))
-                    : null,
-                  a.updatedAt
-                    ? h('span', { className: 'tracker-approval-time' }, fmtTimeAgo(a.updatedAt))
+      h(antd.Tabs, {
+        size: 'small',
+        defaultActiveKey: 'findings',
+        items: [
+          { key: 'findings', label: 'Findings' + (bundle._findings && bundle._findings.length > 0 ? ' (' + bundle._findings.length + ')' : ''),
+            children: bundle._findings && bundle._findings.length > 0
+              ? h('div', null,
+                  bundle._findings.slice(0, 8).map(function(f, i) {
+                    var findingUrl = f.id ? getDominoBundleUrl(bundle, { findingId: f.id }) : dominoUrl;
+                    return h('div', { key: i, className: 'tracker-finding-row' },
+                      h(Tag, { color: severityColor(f.severity), style: { color: '#fff', border: 'none', minWidth: 28, textAlign: 'center', fontSize: 11 } }, f.severity),
+                      findingUrl
+                        ? h('a', { href: findingUrl, target: '_blank', rel: 'noopener noreferrer', className: 'tracker-finding-name', style: { color: '#543FDE' }, title: 'View finding in Domino: ' + f.name }, f.name)
+                        : h('span', { className: 'tracker-finding-name', title: f.name }, f.name),
+                      findingStatusTag(f.status)
+                    );
+                  }),
+                  bundle._findings.length > 8
+                    ? h('div', { style: { fontSize: 12, color: '#8F8FA3', padding: '4px 0' } }, '+ ' + (bundle._findings.length - 8) + ' more')
                     : null
-                );
-              })
-            )
-          : h('div', null,
-              h('div', { className: 'tracker-section-title' }, 'Approvals'),
-              h('div', { className: 'tracker-empty-state' }, 'No approvals configured for this stage.')
-            )
-      ),
-
-      // Gates section
-      h('div', { className: 'tracker-expanded-section' },
-        bundle._gates && bundle._gates.length > 0
-          ? h('div', null,
-              h('div', { className: 'tracker-section-title' }, 'Gates (' + bundle._gates.length + ')'),
-              bundle._gates.map(function(g, i) {
-                return h('div', { key: i, className: 'tracker-approval-row' },
-                  h(Tag, { color: g.isOpen ? 'success' : 'error', style: { fontSize: 11 } }, g.isOpen ? 'Open' : 'Closed'),
-                  h('span', { className: 'tracker-approval-name' }, g.name)
-                );
-              })
-            )
-          : h('div', null,
-              h('div', { className: 'tracker-section-title' }, 'Gates'),
-              h('div', { className: 'tracker-empty-state' }, 'No quality gates defined.')
-            )
-      ),
-
-      // #3/#4/#10: Attachments section — wider columns, no Source column, with divider
-      bundle._attachments && bundle._attachments.length > 0
-        ? h('div', { className: 'tracker-expanded-section' },
-            h('div', { className: 'tracker-section-title' }, 'Attachments (' + bundle._attachments.length + ')'),
-            h(Table, {
-              dataSource: bundle._attachments,
-              rowKey: 'id',
-              size: 'small',
-              pagination: false,
-              style: { fontSize: 11 },
-              columns: [
-                { title: 'File', key: 'filename', ellipsis: true,
-                  render: function(_, r) {
-                    var fname = r.identifier && r.identifier.filename;
-                    var name = r.identifier && r.identifier.name;
-                    var label = fname || name || 'Unknown';
-                    var deUrl = dataExplorerUrl && isDataExplorerFile(fname || name) ? buildDataExplorerUrl(dataExplorerUrl, r) : null;
-                    if (deUrl) {
-                      return h('span', { style: { display: 'flex', alignItems: 'center', gap: 4 } },
-                        h('a', {
-                          href: deUrl,
+                )
+              : h('div', { className: 'tracker-empty-state' }, 'No findings recorded. Findings are created in Domino when QC issues are identified.')
+          },
+          { key: 'approvals', label: 'Approvals' + (bundle._approvals && bundle._approvals.length > 0 ? ' (' + bundle._approvals.length + ')' : ''),
+            children: bundle._approvals && bundle._approvals.length > 0
+              ? h('div', null,
+                  bundle._approvals.map(function(a, i) {
+                    return h('div', { key: i, className: 'tracker-approval-row' },
+                      h('span', { className: 'tracker-approval-dot', style: { background: approvalStatusColor(a.status) } }),
+                      h('span', { className: 'tracker-approval-name' }, a.name),
+                      a.approvers && a.approvers.length > 0
+                        ? h('span', { className: 'tracker-approval-actors' }, a.approvers.map(function(ap) { return ap.name; }).join(', '))
+                        : null,
+                      a.updatedAt
+                        ? h('span', { className: 'tracker-approval-time' }, fmtTimeAgo(a.updatedAt))
+                        : null
+                    );
+                  })
+                )
+              : h('div', { className: 'tracker-empty-state' }, 'No approvals configured for this stage.')
+          },
+          { key: 'gates', label: 'Gates' + (bundle._gates && bundle._gates.length > 0 ? ' (' + bundle._gates.length + ')' : ''),
+            children: bundle._gates && bundle._gates.length > 0
+              ? h('div', null,
+                  bundle._gates.map(function(g, i) {
+                    return h('div', { key: i, className: 'tracker-approval-row' },
+                      h(Tag, { color: g.isOpen ? 'success' : 'error', style: { fontSize: 11 } }, g.isOpen ? 'Open' : 'Closed'),
+                      h('span', { className: 'tracker-approval-name' }, g.name)
+                    );
+                  })
+                )
+              : h('div', { className: 'tracker-empty-state' }, 'No quality gates defined.')
+          },
+          { key: 'attachments', label: 'Attachments' + (bundle._attachments && bundle._attachments.length > 0 ? ' (' + bundle._attachments.length + ')' : ''),
+            children: bundle._attachments && bundle._attachments.length > 0
+              ? h(Table, {
+                  dataSource: bundle._attachments,
+                  rowKey: 'id',
+                  size: 'small',
+                  pagination: false,
+                  style: { fontSize: 11 },
+                  columns: [
+                    { title: 'File', key: 'filename', ellipsis: true,
+                      render: function(_, r) {
+                        var fname = r.identifier && r.identifier.filename;
+                        var name = r.identifier && r.identifier.name;
+                        var label = fname || name || 'Unknown';
+                        var deUrl = dataExplorerUrl && isDataExplorerFile(fname || name) ? buildDataExplorerUrl(dataExplorerUrl, r) : null;
+                        if (deUrl) {
+                          return h('span', { style: { display: 'flex', alignItems: 'center', gap: 4 } },
+                            h('a', {
+                              href: deUrl,
+                              target: '_blank',
+                              rel: 'noopener noreferrer',
+                              style: { fontWeight: 500, fontSize: 11, color: '#0070CC' },
+                              title: 'Open in Data Explorer',
+                            }, label),
+                            h(Tooltip, { title: 'Open in Data Explorer' },
+                              h('span', { style: { fontSize: 12, cursor: 'pointer' } }, '\uD83D\uDCCA')
+                            )
+                          );
+                        }
+                        if (!dominoUrl) return h('span', { style: { fontWeight: 500, fontSize: 11 } }, label);
+                        return h('a', {
+                          href: dominoUrl,
                           target: '_blank',
                           rel: 'noopener noreferrer',
-                          style: { fontWeight: 500, fontSize: 11, color: '#0070CC' },
-                          title: 'Open in Data Explorer',
-                        }, label),
-                        h(Tooltip, { title: 'Open in Data Explorer' },
-                          h('span', { style: { fontSize: 12, cursor: 'pointer' } }, '\uD83D\uDCCA')
-                        )
-                      );
-                    }
-                    if (!dominoUrl) return h('span', { style: { fontWeight: 500, fontSize: 11 } }, label);
-                    return h('a', {
-                      href: dominoUrl,
-                      target: '_blank',
-                      rel: 'noopener noreferrer',
-                      style: { fontWeight: 500, fontSize: 11, color: '#543FDE' },
-                      title: 'View in Domino',
-                    }, label);
-                  }
-                },
-                { title: 'Type', dataIndex: 'type', key: 'type', width: 140,
-                  render: function(t) {
-                    var colors = { DatasetSnapshotFile: 'blue', Report: 'green', ModelVersion: 'purple', Endpoint: 'orange', FlowArtifact: 'cyan', NetAppVolumeSnapshotFile: 'default' };
-                    return h(Tag, { color: colors[t] || 'default', style: { fontSize: 10 } }, (t || '').replace(/([A-Z])/g, ' $1').trim());
-                  }
-                },
-                { title: 'Added by', key: 'addedBy', width: 130,
-                  render: function(_, r) {
-                    var name = r.createdBy && (r.createdBy.name || r.createdBy.userName);
-                    return h('span', { style: { fontSize: 10 } }, name || '\u2013');
-                  }
-                },
-                { title: 'Added', key: 'addedAt', width: 100,
-                  render: function(_, r) {
-                    return r.createdAt ? h('span', { style: { fontSize: 10, color: '#8F8FA3' } }, dayjs(r.createdAt).format('MMM D, YYYY')) : '\u2013';
-                  }
-                },
-              ],
-            })
-          )
-        : h('div', { className: 'tracker-expanded-section' },
-            h('div', { className: 'tracker-section-title' }, 'Attachments'),
-            h('div', { className: 'tracker-empty-state' }, 'No attachments linked to this ' + B.toLowerCase() + '.')
-          )
+                          style: { fontWeight: 500, fontSize: 11, color: '#543FDE' },
+                          title: 'View in Domino',
+                        }, label);
+                      }
+                    },
+                    { title: 'Type', dataIndex: 'type', key: 'type', width: 140,
+                      render: function(t) {
+                        var colors = { DatasetSnapshotFile: 'blue', Report: 'green', ModelVersion: 'purple', Endpoint: 'orange', FlowArtifact: 'cyan', NetAppVolumeSnapshotFile: 'default' };
+                        return h(Tag, { color: colors[t] || 'default', style: { fontSize: 10 } }, (t || '').replace(/([A-Z])/g, ' $1').trim());
+                      }
+                    },
+                    { title: 'Added by', key: 'addedBy', width: 130,
+                      render: function(_, r) {
+                        var name = r.createdBy && (r.createdBy.name || r.createdBy.userName);
+                        return h('span', { style: { fontSize: 10 } }, name || '\u2013');
+                      }
+                    },
+                    { title: 'Added', key: 'addedAt', width: 100,
+                      render: function(_, r) {
+                        return r.createdAt ? h('span', { style: { fontSize: 10, color: '#8F8FA3' } }, dayjs(r.createdAt).format('MMM D, YYYY')) : '\u2013';
+                      }
+                    },
+                  ],
+                })
+              : h('div', { className: 'tracker-empty-state' }, 'No attachments linked to this ' + B.toLowerCase() + '.')
+          },
+        ],
+      })
     )
   );
 }
