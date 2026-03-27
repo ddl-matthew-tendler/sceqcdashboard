@@ -141,12 +141,43 @@ function findingStatusTag(status) {
 }
 
 // Build Domino UI URL for a bundle
-// URL pattern: {DOMINO_API_HOST}/governance/bundles/{bundleId}
-function getDominoBundleUrl(bundle) {
+// Domino governance URL pattern:
+// /u/{owner}/{project}/governance/bundle/{bundleId}/policy/{policyId}/version/{versionId}/evidence/stage/{stage-slug}
+// We build as deep as our data allows, falling back to shallower URLs.
+function getDominoBundleUrl(bundle, stageName) {
   if (!bundle || !bundle.id) return null;
   var host = '';
   try { host = window.location.origin; } catch(e) {}
-  return host + '/governance/bundles/' + bundle.id;
+
+  // Build the full path: /u/{owner}/{project}/governance/bundle/{bundleId}
+  var owner = bundle.projectOwner || '';
+  var project = bundle.projectName || '';
+  if (!owner || !project) {
+    // Fallback: simple governance URL
+    return host + '/governance/bundles/' + bundle.id;
+  }
+
+  var url = host + '/u/' + encodeURIComponent(owner) + '/' + encodeURIComponent(project)
+    + '/governance/bundle/' + bundle.id;
+
+  // Add policy segment if available
+  if (bundle.policyId) {
+    url += '/policy/' + bundle.policyId;
+
+    // Add version if available (from policyVersionId or _policyVersionId)
+    var versionId = bundle.policyVersionId || bundle._policyVersionId;
+    if (versionId) {
+      url += '/version/' + versionId;
+
+      // Add stage evidence path if stage name provided
+      if (stageName) {
+        var stageSlug = stageName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        url += '/evidence/stage/' + stageSlug;
+      }
+    }
+  }
+
+  return url;
 }
 
 // Get the bundle's own stage names (from SCE QC)
@@ -1158,7 +1189,7 @@ function StagePopoverContent(props) {
   var stageData = bundle.stages[stageIdx] || {};
   var assignee = stageData.assignee;
   var assigneeName = assignee ? assignee.name : null;
-  var dominoUrl = getDominoBundleUrl(bundle);
+  var dominoUrl = getDominoBundleUrl(bundle, stageName);
 
   // Governance summary counts
   var openFindings = (bundle._findings || []).filter(function(f) { return f.status !== 'Done' && f.status !== 'WontDo'; }).length;
