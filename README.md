@@ -1,113 +1,98 @@
-# Domino Apps & Prototypes
+# SCE QC Dashboard
 
-This repo contains Cursor rules, boilerplate modules, and reference code for two distinct workflows: **building Domino apps** and **making design prototypes**. Each has its own rule file because the goals, audience, and output are fundamentally different.
+A Domino App for portfolio-level visibility into governance deliverables, QC findings, approvals, and stage assignments across projects.
 
-| | Domino App | Design Prototype |
-|---|---|---|
-| **Who** | Any developer building an app that runs on Domino | Domino design team handing off to engineering |
-| **Goal** | Working application deployed on the platform | Interactive spec showing engineering exactly which `@domino/base-components` to use |
-| **Stack** | FastAPI + Ant Design CDN (direct) | FastAPI + Ant Design CDN behind an alias layer that exposes real Domino component names |
-| **Component names** | Plain antd (`Button`, `Table`, `Modal`) | Real Domino names (`DominoTable`, `Callout`, `Wizard`) with `data-domino-component` attributes |
-| **Extras** | Domino theme, API auth, env vars | Dev mode overlay, comment system, stand-in library |
-| **Rule file** | `how-to-build-domino-apps.mdc` | `domino-real-components-reference.mdc` |
+## Pages
 
-The rules are separate so the agent doesn't conflate the two — app prompts should never trigger the alias layer / dev-tools overhead, and prototype prompts should never skip the component discovery workflow.
+| Page | Purpose |
+|------|---------|
+| **QC Tracker** | Main table of all deliverables with inline stage progress dots, expandable detail rows (approvals, findings, gates, attachments), and column filters |
+| **Portfolio Overview** | Summary charts — deliverables by state, findings by severity, stage distribution |
+| **Milestones** | Timeline view of deliverable progress toward completion |
+| **Approvals** | Cross-deliverable approval status tracking |
+| **Findings & QC** | Aggregated findings view across all deliverables |
+| **Team Metrics** | Workload distribution and assignment metrics |
+| **Assignment Rules** | Per-project rules for bulk-assigning team members to stages |
+| **Stage Assignments** | Flattened view of all stages across all deliverables — find unassigned work and reassign in bulk |
 
-## How to Prompt
+## Architecture
 
-### For apps — say "domino app"
+```
+Browser  ──►  FastAPI (app.py)  ──►  Domino APIs
+              serves static/         /api/governance/v1/*
+              proxies /api/*         /v4/*
+```
 
-> Create a **domino app** that uses our APIs to summarize jobs run activity with a flexible time window selector component that defaults to last 7 days. Use a summary chart and a table below.
+- **Backend**: FastAPI proxy (`app.py`) — handles auth, proxies to Domino governance and v4 APIs
+- **Frontend**: Single-page app (`static/app.js`) — React 18 + Ant Design 5, loaded via CDN (no build step)
+- **Mock data**: `static/mock_data.js` — realistic fallback data for demos and offline development
 
-> Build a **domino app** with a dashboard showing compute environment usage. Include a dropdown to filter by project, a bar chart of resource consumption, and an expandable details section for each environment.
+### Key files
 
-> Create a **domino app** that displays model deployment status across projects. Use a card grid layout with health indicators, and add a search/filter bar at the top.
+| File | Role |
+|------|------|
+| `app.py` | Backend proxy — auth, route definitions, governance host discovery |
+| `static/app.js` | Frontend — React components, state, API calls, all UI logic |
+| `static/mock_data.js` | Mock data globals for offline/demo mode |
+| `static/styles.css` | All custom styles |
+| `static/index.html` | Entry point — CDN imports, script loading order |
+| `app.sh` | Startup script — `uvicorn app:app --host 0.0.0.0 --port 8888` |
 
-### For prototypes — say "domino prototype"
-
-> Create a **domino prototype** for a new Project Settings page with tabs for General, Access, and Hardware. Use the real component names from base-components.
-
-> Build a **domino prototype** of a model registration wizard with three steps: select source, configure metadata, and review. Include dev tools for engineering review.
-
-> Make a **domino prototype** showing a data source browser with a tree view, search bar, and detail panel. Tag every component with its real import path.
-
-The keyword difference ("app" vs "prototype") is what triggers the correct rule. Both workflows are otherwise automatic — the agent handles theme, structure, and component wiring.
-
-## Quick Start
-
-### 1. Download Frontend Code
-
-Download the Domino frontend code manually from:
-
-**https://github.com/cerebrotech/frontend-web-ui-service**
-
-1. Go to the repository URL above
-2. Click the green **Code** button → **Download ZIP**
-3. Extract the ZIP contents into the `example_domino_frontend_code/` folder in this project
-
-Alternatively, using git:
+## Running locally
 
 ```bash
-git clone --depth 1 https://github.com/cerebrotech/frontend-web-ui-service.git example_domino_frontend_code
-rm -rf example_domino_frontend_code/.git
+# 1. Create .env with your Domino credentials
+cp .env.example .env
+# Edit .env: set DOMINO_API_HOST and API_KEY_OVERRIDE
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Start the server
+uvicorn app:app --host 0.0.0.0 --port 8888 --reload
 ```
 
-> **Note:** The contents of `example_domino_frontend_code/` are gitignored and won't be tracked.
+Open `http://localhost:8888`. If `DOMINO_API_HOST` is not set or API calls fail, the app falls back to mock data automatically.
 
-### 2. Copy to Your Cursor Project
+## Environment variables
 
-#### Option A: Using Terminal
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `DOMINO_API_HOST` | Yes (auto-set in Domino) | Base URL for Domino instance |
+| `API_KEY_OVERRIDE` | No | Static API key or PAT for local development |
+| `DOMINO_USER_API_KEY` | No (auto-set in Domino) | API key provided by Domino runtime |
 
-Copy all necessary files to your project:
+## Deploying on Domino
 
-```bash
-cp -r example_domino_frontend_code/* /path/to/your/cursor/project/ && \
-cp -r .cursor /path/to/your/cursor/project/ && \
-cp .gitignore domino-logo.svg swagger.json governance_swagger.json /path/to/your/cursor/project/
-```
+1. Push code to a Domino-linked Git repo
+2. Create a new App in the Domino project
+3. Set the startup script to `app.sh`
+4. The app auto-discovers auth tokens and API hosts at runtime
 
-#### Option B: Using macOS Finder
+### Governance API routing
 
-1. Open this folder in Finder
-2. Press **`Cmd + Shift + .`** to show hidden files (the `.cursor` and `.gitignore` will appear)
-3. Select and copy all the files you need to your project folder
-4. Press **`Cmd + Shift + .`** again to hide hidden files when done
+Inside Domino's Kubernetes cluster, the governance API (`/api/governance/v1/*`) may not be available on the internal `nucleus-frontend` service. The backend automatically probes multiple candidate hosts (including the external ingress hostname captured from browser requests) and caches whichever one works.
 
-> **Tip:** Hidden files appear slightly dimmed in Finder when visible.
+Visit `/api/debug/auth` on the running app for auth and routing diagnostics.
 
+## Dummy data toggle
 
-## Cursor Rules Setup
+When the app can't connect to Domino APIs, it falls back to mock data and shows a "Dummy Data" toggle in the top nav. When connected to live APIs, the toggle is hidden. This enables:
 
-The `.cursor/rules/` folder contains three rule files. The first two are agent-requestable — the agent pulls them in automatically when your prompt matches their description. The third is manual.
+- Demos without a live Domino connection
+- Development of new features before APIs exist
+- QA testing between real and mock data
 
-| Rule | Triggered by | Purpose |
-|------|-------------|---------|
-| `how-to-build-domino-apps.mdc` | Prompts about building a "domino app" | Stack, theme, API auth, env vars, `app.sh` |
-| `domino-real-components-reference.mdc` | Prompts about building a "domino prototype" | Alias layer, stand-ins, dev tools, component discovery workflow |
-| `usability_design_principles.mdc` | Manual `@` mention only | UX principles, layout patterns, component selection guidance |
+## API gaps
 
-### Applying the Usability Design Principles
+Write operations (stage reassignment, bulk assign, apply rules) have no Domino API yet. These actions show an "API Pending" badge and display a message when attempted. See `DOMINO_API_GAPS.md` for proposed endpoint designs.
 
-The `usability_design_principles.mdc` rule is **not auto-applied** and must be manually included when you want Cursor to follow UX/design guidelines. This is useful for both apps and prototypes.
+## Documentation
 
-**To apply it in a conversation:**
-
-1. In Cursor's chat or composer, type `@` to open the mention picker
-2. Select **Files & folders**
-3. Navigate to `.cursor/rules/usability_design_principles.mdc`
-4. The rule will be included in that conversation's context
-
-**Example:**
-
-```
-@.cursor/rules/usability_design_principles.mdc
-
-Build a domino app with a settings page that has a form for user preferences
-```
-
-This tells Cursor to follow Domino's design system (button hierarchy, typography, spacing, error handling, etc.) on top of whichever workflow (app or prototype) you're using.
-
-## API Reference
-
-- **[swagger.json](swagger.json)** - Main API documentation
-- **[governance_swagger.json](governance_swagger.json)** - Governance API documentation
+| File | Contents |
+|------|----------|
+| `DECISIONS.md` | Architectural decision log |
+| `API_MAP.md` | Complete API endpoint reference and fetch sequence |
+| `DOMINO_API_GAPS.md` | Missing write APIs with proposed designs |
+| `LIVE_API_STATUS.md` | Audit of live API connectivity |
+| `DUMMY_DATA_AUDIT.md` | Mock data reference mapping |
