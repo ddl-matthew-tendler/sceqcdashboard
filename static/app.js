@@ -66,6 +66,11 @@ var API_GAPS = {
     message: 'This action is coming soon — the Domino write API for applying rules is in development.',
     ready: false,
   },
+  automationRun: {
+    label: 'Run Automation',
+    message: 'This action requires the Domino Jobs API (v4/jobs). The proxy endpoints are ready — set ready: true once confirmed working on your Domino instance.',
+    ready: false,
+  },
 };
 
 // ── Pharma stage definitions (typical stat programming lifecycle) ──
@@ -287,6 +292,7 @@ var NAV_ITEMS = [
   { key: 'metrics', icon: '\u2637', label: 'Team Metrics' },
   { key: 'stages', icon: '\u229A', label: 'Stage Assignments' },
   { key: 'rules', icon: '\u2699', label: 'Assignment Rules' },
+  { key: 'automation', icon: '\u26A1', label: 'Automation' },
 ];
 
 function Sidebar(props) {
@@ -3833,6 +3839,534 @@ function StageAssignmentsPage(props) {
 
 
 // ═══════════════════════════════════════════════════════════════
+//  PAGE: Automation Rules
+// ═══════════════════════════════════════════════════════════════
+//
+// Allows admins to define rules that trigger Domino Jobs when a
+// governance stage completes. Rules are stored in localStorage.
+// Execution uses Domino v4 Jobs API (POST /v4/jobs/start).
+//
+function AutomationRulesPage(props) {
+  var bundles = props.bundles;
+  var automationRules = props.automationRules;
+  var setAutomationRules = props.setAutomationRules;
+  var automationHistory = props.automationHistory;
+  var setAutomationHistory = props.setAutomationHistory;
+  var terms = props.terms;
+  var projectMembersCache = props.projectMembersCache || {};
+  var B = terms.bundle || 'Bundle';
+  var P = terms.policy || 'Policy';
+
+  // ── State ──
+  var _rp = useState(null); var selectedProject = _rp[0]; var setSelectedProject = _rp[1];
+  var _rm = useState(false); var addModalOpen = _rm[0]; var setAddModalOpen = _rm[1];
+  var _re = useState(null); var editingIdx = _re[0]; var setEditingIdx = _re[1];
+  var _rt = useState('rules'); var activeTab = _rt[0]; var setActiveTab = _rt[1];
+  var _rj = useState({}); var runningJobs = _rj[0]; var setRunningJobs = _rj[1];
+
+  // Form state
+  var _rf1 = useState(undefined); var formPlan = _rf1[0]; var setFormPlan = _rf1[1];
+  var _rf2 = useState(undefined); var formStage = _rf2[0]; var setFormStage = _rf2[1];
+  var _rf3 = useState(''); var formScript = _rf3[0]; var setFormScript = _rf3[1];
+  var _rf4 = useState(''); var formScriptArgs = _rf4[0]; var setFormScriptArgs = _rf4[1];
+  var _rf5 = useState('log-only'); var formOutputHandling = _rf5[0]; var setFormOutputHandling = _rf5[1];
+  var _rf6 = useState(''); var formOutputFilename = _rf6[0]; var setFormOutputFilename = _rf6[1];
+  var _rf7 = useState(true); var formEnabled = _rf7[0]; var setFormEnabled = _rf7[1];
+
+  // ── Derived data ──
+  var projectOptions = useMemo(function() {
+    var seen = {};
+    return bundles.reduce(function(acc, b) {
+      if (!seen[b.projectId]) { seen[b.projectId] = true; acc.push({ label: b.projectName, value: b.projectId }); }
+      return acc;
+    }, []);
+  }, [bundles]);
+
+  useEffect(function() {
+    if (!selectedProject && projectOptions.length === 1) setSelectedProject(projectOptions[0].value);
+  }, [projectOptions]);
+
+  var projectBundles = useMemo(function() {
+    if (!selectedProject) return [];
+    return bundles.filter(function(b) { return b.projectId === selectedProject; });
+  }, [bundles, selectedProject]);
+
+  var projectRules = useMemo(function() {
+    if (!selectedProject) return [];
+    return automationRules.filter(function(r) { return r.projectId === selectedProject; });
+  }, [automationRules, selectedProject]);
+
+  var planOptions = useMemo(function() {
+    var seen = {};
+    return projectBundles.reduce(function(acc, b) {
+      if (!seen[b.policyName]) { seen[b.policyName] = true; acc.push({ label: b.policyName, value: b.policyName }); }
+      return acc;
+    }, []);
+  }, [projectBundles]);
+
+  var stageOptions = useMemo(function() {
+    if (!formPlan) return [];
+    var seen = {};
+    var options = [];
+    projectBundles.forEach(function(b) {
+      if (b.policyName !== formPlan) return;
+      if (b.stages) {
+        b.stages.forEach(function(s) {
+          var name = s.stage ? s.stage.name : '';
+          if (name && !seen[name]) { seen[name] = true; options.push({ label: name, value: name }); }
+        });
+      }
+    });
+    return options;
+  }, [projectBundles, formPlan]);
+
+  // ── Match counting: bundles with completed stages matching each rule ──
+  function getMatchedBundles(rule) {
+    return projectBundles.filter(function(b) {
+      if (b.policyName !== rule.policyName) return false;
+      if (!b.stages) return false;
+      var stageNames = b.stages.map(function(s) { return s.stage ? s.stage.name : ''; });
+      var currentIdx = 0;
+      var isComplete = b.state === 'Complete';
+      if (!isComplete) {
+        for (var i = 0; i < b.stages.length; i++) {
+          if (b.stages[i].stage && b.stages[i].stage.name && b.currentStageName === b.stages[i].stage.name) { currentIdx = i; break; }
+        }
+      }
+      for (var j = 0; j < b.stages.length; j++) {
+        var sName = b.stages[j].stage ? b.stages[j].stage.name : '';
+        if (sName !== rule.stageName) continue;
+        // Stage is completed if its index < currentIdx, or bundle is Complete
+        if (isComplete || j < currentIdx) return true;
+      }
+      return false;
+    });
+  }
+
+  // ── CRUD ──
+  function openAddModal(editIdx) {
+    if (editIdx !== undefined && editIdx !== null) {
+      var rule = projectRules[editIdx];
+      setFormPlan(rule.policyName);
+      setFormStage(rule.stageName);
+      setFormScript(rule.scriptPath || '');
+      setFormScriptArgs(rule.scriptArgs || '');
+      setFormOutputHandling(rule.outputHandling || 'log-only');
+      setFormOutputFilename(rule.outputFilename || '');
+      setFormEnabled(rule.enabled !== false);
+      setEditingIdx(editIdx);
+    } else {
+      setFormPlan(undefined); setFormStage(undefined); setFormScript('');
+      setFormScriptArgs(''); setFormOutputHandling('log-only'); setFormOutputFilename(''); setFormEnabled(true);
+      setEditingIdx(null);
+    }
+    setAddModalOpen(true);
+  }
+
+  function handleSaveRule() {
+    if (!formPlan || !formStage || !formScript) {
+      antd.message.warning('Policy, stage, and script path are required.');
+      return;
+    }
+    var rule = {
+      id: 'auto-' + Date.now(),
+      projectId: selectedProject,
+      policyName: formPlan,
+      stageName: formStage,
+      scriptPath: formScript,
+      scriptArgs: formScriptArgs,
+      outputHandling: formOutputHandling,
+      outputFilename: formOutputFilename,
+      enabled: formEnabled,
+    };
+    if (editingIdx !== null && editingIdx !== undefined) {
+      // Update existing
+      var globalIdx = automationRules.indexOf(projectRules[editingIdx]);
+      if (globalIdx >= 0) {
+        var updated = automationRules.slice();
+        rule.id = updated[globalIdx].id; // preserve id
+        updated[globalIdx] = rule;
+        setAutomationRules(updated);
+      }
+    } else {
+      setAutomationRules(automationRules.concat([rule]));
+    }
+    setAddModalOpen(false);
+    antd.message.success(editingIdx !== null ? 'Rule updated' : 'Rule added');
+  }
+
+  function handleDeleteRule(localIdx) {
+    var globalIdx = automationRules.indexOf(projectRules[localIdx]);
+    if (globalIdx >= 0) {
+      var updated = automationRules.slice();
+      updated.splice(globalIdx, 1);
+      setAutomationRules(updated);
+      antd.message.success('Rule deleted');
+    }
+  }
+
+  function handleToggleEnabled(localIdx) {
+    var globalIdx = automationRules.indexOf(projectRules[localIdx]);
+    if (globalIdx >= 0) {
+      var updated = automationRules.slice();
+      updated[globalIdx] = Object.assign({}, updated[globalIdx], { enabled: !updated[globalIdx].enabled });
+      setAutomationRules(updated);
+    }
+  }
+
+  // ── Run automation ──
+  function handleRunRule(rule) {
+    var gapInfo = API_GAPS.automationRun;
+    if (!gapInfo.ready) {
+      antd.message.warning(gapInfo.message);
+      return;
+    }
+    var command = 'python ' + rule.scriptPath;
+    if (rule.scriptArgs) command += ' ' + rule.scriptArgs;
+
+    apiPost('/api/projects/' + rule.projectId + '/runs', {
+      command: command,
+      title: 'Automation: ' + rule.policyName + ' / ' + rule.stageName,
+    }).then(function(resp) {
+      var runId = resp.id || resp.runId || resp.jobId || 'unknown';
+      setRunningJobs(function(prev) {
+        var next = Object.assign({}, prev);
+        next[rule.id] = { runId: runId, projectId: rule.projectId, status: 'Running' };
+        return next;
+      });
+      setAutomationHistory(function(prev) {
+        return [{
+          id: 'hist-' + Date.now(), ruleId: rule.id, runId: runId,
+          projectId: rule.projectId, policyName: rule.policyName,
+          stageName: rule.stageName, scriptPath: rule.scriptPath,
+          startedAt: new Date().toISOString(), status: 'Running',
+        }].concat(prev);
+      });
+      antd.message.success('Job started: ' + runId);
+      pollJobStatus(rule.id, rule.projectId, runId);
+    }).catch(function(err) {
+      antd.message.error('Failed to start job: ' + (err.message || err));
+    });
+  }
+
+  function pollJobStatus(ruleId, projectId, runId) {
+    var attempts = 0;
+    var maxAttempts = 120; // 10 min max at 5s interval
+    var interval = setInterval(function() {
+      attempts++;
+      if (attempts > maxAttempts) {
+        clearInterval(interval);
+        setRunningJobs(function(prev) { var next = Object.assign({}, prev); delete next[ruleId]; return next; });
+        setAutomationHistory(function(prev) {
+          return prev.map(function(h) { return h.runId === runId ? Object.assign({}, h, { status: 'Timeout', completedAt: new Date().toISOString() }) : h; });
+        });
+        return;
+      }
+      apiGet('/api/projects/' + projectId + '/runs/' + runId)
+        .then(function(resp) {
+          var status = resp.status || resp.state || resp.statuses && resp.statuses.executionStatus || '';
+          var terminal = ['Succeeded', 'Failed', 'Error', 'Stopped', 'Completed'].indexOf(status) >= 0;
+          if (terminal) {
+            clearInterval(interval);
+            setRunningJobs(function(prev) { var next = Object.assign({}, prev); delete next[ruleId]; return next; });
+            setAutomationHistory(function(prev) {
+              return prev.map(function(h) { return h.runId === runId ? Object.assign({}, h, { status: status, completedAt: new Date().toISOString() }) : h; });
+            });
+            if (status === 'Succeeded' || status === 'Completed') antd.message.success('Job completed: ' + runId);
+            else antd.message.error('Job ' + status + ': ' + runId);
+          }
+        })
+        .catch(function() { /* swallow polling errors */ });
+    }, 5000);
+  }
+
+  // ── Columns ──
+  var outputTagColor = { 'attach': 'green', 'log-only': 'blue', 'finding': 'orange' };
+  var outputTagLabel = { 'attach': 'Attach to bundle', 'log-only': 'Log only', 'finding': 'Create finding' };
+
+  var rulesColumns = [
+    { title: P, dataIndex: 'policyName', key: 'policy', width: 180, ellipsis: true,
+      render: function(t) { return h(Tag, { color: 'purple' }, t); } },
+    { title: 'Trigger Stage', dataIndex: 'stageName', key: 'stage', width: 160 },
+    { title: 'Script', dataIndex: 'scriptPath', key: 'script', ellipsis: true,
+      render: function(t) { return h('code', { style: { fontSize: 11, background: '#F5F5FF', padding: '2px 6px', borderRadius: 3 } }, t); } },
+    { title: 'Output', dataIndex: 'outputHandling', key: 'output', width: 130,
+      render: function(t) { return h(Tag, { color: outputTagColor[t] || 'default' }, outputTagLabel[t] || t); } },
+    { title: 'Enabled', key: 'enabled', width: 80,
+      render: function(_, r, idx) {
+        return h(Switch, { checked: r.enabled !== false, size: 'small', onChange: function() { handleToggleEnabled(idx); } });
+      } },
+    { title: 'Matched', key: 'matched', width: 90,
+      render: function(_, r) {
+        var count = getMatchedBundles(r).length;
+        return count > 0 ? h(Tag, { color: 'green' }, count + ' ready') : h('span', { style: { color: '#8F8FA3', fontSize: 12 } }, 'None');
+      } },
+    { title: 'Actions', key: 'actions', width: 200,
+      render: function(_, r, idx) {
+        var isRunning = runningJobs[r.id];
+        return h('div', { style: { display: 'flex', gap: 6 } },
+          h(Button, { size: 'small', type: 'primary', disabled: !r.enabled || isRunning,
+            loading: !!isRunning,
+            onClick: function() { handleRunRule(r); } }, isRunning ? 'Running...' : 'Run'),
+          h(Button, { size: 'small', onClick: function() { openAddModal(idx); } }, 'Edit'),
+          h(Button, { size: 'small', danger: true, onClick: function() { handleDeleteRule(idx); } }, 'Delete')
+        );
+      } },
+  ];
+
+  // History columns
+  var historyColumns = [
+    { title: 'Date', dataIndex: 'startedAt', key: 'date', width: 150,
+      sorter: function(a, b) { return (a.startedAt || '').localeCompare(b.startedAt || ''); },
+      render: function(t) { return t ? dayjs(t).format('MMM D, YYYY h:mm A') : '\u2014'; } },
+    { title: P, dataIndex: 'policyName', key: 'policy', width: 160, ellipsis: true },
+    { title: 'Stage', dataIndex: 'stageName', key: 'stage', width: 140 },
+    { title: 'Script', dataIndex: 'scriptPath', key: 'script', ellipsis: true,
+      render: function(t) { return h('code', { style: { fontSize: 11 } }, t); } },
+    { title: 'Status', dataIndex: 'status', key: 'status', width: 110,
+      filters: [{ text: 'Running', value: 'Running' }, { text: 'Succeeded', value: 'Succeeded' }, { text: 'Failed', value: 'Failed' }, { text: 'Completed', value: 'Completed' }],
+      onFilter: function(v, r) { return r.status === v; },
+      render: function(s) {
+        var color = s === 'Succeeded' || s === 'Completed' ? 'green' : s === 'Failed' || s === 'Error' ? 'red' : s === 'Running' ? 'blue' : 'default';
+        return h(Tag, { color: color }, s || 'Unknown');
+      } },
+    { title: 'Run ID', dataIndex: 'runId', key: 'runId', width: 120, ellipsis: true,
+      render: function(t) { return h('span', { style: { fontSize: 11, fontFamily: 'monospace' } }, t || '\u2014'); } },
+    { title: 'Duration', key: 'duration', width: 100,
+      render: function(_, r) {
+        if (!r.startedAt || !r.completedAt) return r.status === 'Running' ? h(Tag, { color: 'blue' }, 'In progress') : '\u2014';
+        var ms = new Date(r.completedAt).getTime() - new Date(r.startedAt).getTime();
+        var secs = Math.round(ms / 1000);
+        if (secs < 60) return secs + 's';
+        return Math.floor(secs / 60) + 'm ' + (secs % 60) + 's';
+      } },
+  ];
+
+  var projectHistory = useMemo(function() {
+    if (!selectedProject) return [];
+    return automationHistory.filter(function(h) { return h.projectId === selectedProject; });
+  }, [automationHistory, selectedProject]);
+
+  // Count active automations ready to run
+  var readyCount = useMemo(function() {
+    var count = 0;
+    projectRules.forEach(function(r) {
+      if (r.enabled !== false && getMatchedBundles(r).length > 0) count++;
+    });
+    return count;
+  }, [projectRules, projectBundles]);
+
+  // ── Render ──
+  var selectedProjectName = projectOptions.find(function(p) { return p.value === selectedProject; });
+  selectedProjectName = selectedProjectName ? selectedProjectName.label : '';
+
+  return h('div', { className: 'page-container' },
+    h('div', { className: 'page-header' },
+      h('h1', null, 'Automation Rules'),
+      h('p', null, 'Define scripts that run automatically when governance stages complete. Outputs can be attached to ' + B.toLowerCase() + 's.')
+    ),
+
+    // Project selector
+    h('div', { className: 'panel', style: { marginBottom: 16 } },
+      h('div', { className: 'panel-body', style: { padding: '12px 16px' } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 12 } },
+          h('span', { style: { fontWeight: 500, fontSize: 13, color: '#65657B' } }, 'Project:'),
+          h(Select, {
+            placeholder: 'Select a project...',
+            value: selectedProject,
+            onChange: setSelectedProject,
+            options: projectOptions,
+            showSearch: true,
+            optionFilterProp: 'label',
+            style: { width: 320 },
+            size: 'small',
+          }),
+          !API_GAPS.automationRun.ready
+            ? h(Tag, { color: 'orange', style: { marginLeft: 8 } }, 'Jobs API: pending verification')
+            : h(Tag, { color: 'green', style: { marginLeft: 8 } }, 'Jobs API: connected')
+        )
+      )
+    ),
+
+    !selectedProject
+      ? h(Empty, { description: 'Select a project to configure automation rules', style: { padding: 60 } })
+      : h('div', null,
+          // Alert if there are ready-to-run automations
+          readyCount > 0
+            ? h('div', {
+                style: {
+                  background: '#F0FFF4', border: '1px solid #B7EB8F', borderRadius: 6,
+                  padding: '10px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8,
+                }
+              },
+                h('span', { style: { fontSize: 16 } }, '\u2713'),
+                h('span', { style: { fontSize: 13, color: '#135200' } },
+                  readyCount + ' automation' + (readyCount !== 1 ? 's' : '') + ' ready to run — completed stages matched with active rules.')
+              )
+            : null,
+
+          // Toolbar
+          h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 } },
+            h('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
+              h(Button, { type: 'primary', size: 'small', onClick: function() { openAddModal(); } }, '+ Add Rule'),
+              h('span', { style: { fontSize: 12, color: '#8F8FA3' } },
+                projectRules.length + ' rule' + (projectRules.length !== 1 ? 's' : '') + ' for ' + selectedProjectName)
+            ),
+            h('div', { style: { display: 'flex', gap: 8 } },
+              h(Button, { size: 'small', onClick: function() { setActiveTab('rules'); }, type: activeTab === 'rules' ? 'primary' : 'default' }, 'Rules'),
+              h(Button, { size: 'small', onClick: function() { setActiveTab('history'); }, type: activeTab === 'history' ? 'primary' : 'default' },
+                'History' + (projectHistory.length > 0 ? ' (' + projectHistory.length + ')' : ''))
+            )
+          ),
+
+          // Rules tab
+          activeTab === 'rules'
+            ? h('div', { className: 'panel' },
+                h('div', { className: 'panel-header' },
+                  h('span', { className: 'panel-title' }, 'Automation Rules'),
+                  h('span', { style: { fontSize: 12, color: '#8F8FA3' } }, 'When a trigger stage completes, the specified script will run in the project.')
+                ),
+                h('div', { className: 'panel-body-flush' },
+                  projectRules.length > 0
+                    ? h(Table, {
+                        dataSource: projectRules,
+                        columns: rulesColumns,
+                        rowKey: 'id',
+                        size: 'small',
+                        scroll: { x: 1000 },
+                        pagination: { defaultPageSize: 20, size: 'small', showSizeChanger: true },
+                      })
+                    : h(Empty, { description: 'No automation rules yet. Click "+ Add Rule" to create one.', style: { padding: 40 } })
+                )
+              )
+            : null,
+
+          // History tab
+          activeTab === 'history'
+            ? h('div', { className: 'panel' },
+                h('div', { className: 'panel-header' },
+                  h('span', { className: 'panel-title' }, 'Execution History'),
+                  projectHistory.length > 0
+                    ? h(Button, { size: 'small', type: 'text', danger: true, onClick: function() {
+                        setAutomationHistory(function(prev) { return prev.filter(function(h) { return h.projectId !== selectedProject; }); });
+                        antd.message.success('History cleared');
+                      } }, 'Clear history')
+                    : null
+                ),
+                h('div', { className: 'panel-body-flush' },
+                  projectHistory.length > 0
+                    ? h(Table, {
+                        dataSource: projectHistory,
+                        columns: historyColumns,
+                        rowKey: 'id',
+                        size: 'small',
+                        pagination: { defaultPageSize: 20, size: 'small', showSizeChanger: true, showTotal: function(total) { return total + ' runs'; } },
+                      })
+                    : h(Empty, { description: 'No automation runs yet.', style: { padding: 40 } })
+                )
+              )
+            : null
+        ),
+
+    // Add/Edit Rule Modal
+    h(Modal, {
+      title: editingIdx !== null && editingIdx !== undefined ? 'Edit Automation Rule' : 'Add Automation Rule',
+      open: addModalOpen,
+      onOk: handleSaveRule,
+      onCancel: function() { setAddModalOpen(false); },
+      okText: editingIdx !== null && editingIdx !== undefined ? 'Update' : 'Add Rule',
+      width: 520,
+    },
+      h('div', { style: { display: 'flex', flexDirection: 'column', gap: 14 } },
+        // Trigger section
+        h('div', { style: { fontWeight: 600, fontSize: 13, color: '#543FDE', marginBottom: -6 } }, 'Trigger'),
+        h('div', null,
+          h('div', { style: { marginBottom: 4, fontWeight: 500, fontSize: 12, color: '#65657B' } }, P + ' (QC Plan)'),
+          h(Select, {
+            placeholder: 'Select ' + P.toLowerCase() + '...',
+            value: formPlan,
+            onChange: function(v) { setFormPlan(v); setFormStage(undefined); },
+            options: planOptions,
+            style: { width: '100%' },
+            size: 'small',
+          })
+        ),
+        h('div', null,
+          h('div', { style: { marginBottom: 4, fontWeight: 500, fontSize: 12, color: '#65657B' } }, 'When this stage completes:'),
+          h(Select, {
+            placeholder: formPlan ? 'Select stage...' : 'Select a ' + P.toLowerCase() + ' first',
+            value: formStage,
+            onChange: setFormStage,
+            options: stageOptions,
+            disabled: !formPlan,
+            style: { width: '100%' },
+            size: 'small',
+          })
+        ),
+
+        // Action section
+        h('div', { style: { fontWeight: 600, fontSize: 13, color: '#543FDE', marginBottom: -6, marginTop: 8, borderTop: '1px solid #EDECFB', paddingTop: 14 } }, 'Action'),
+        h('div', null,
+          h('div', { style: { marginBottom: 4, fontWeight: 500, fontSize: 12, color: '#65657B' } }, 'Script path (relative to project repo)'),
+          h(Input, {
+            placeholder: 'e.g. scripts/validate.py',
+            value: formScript,
+            onChange: function(e) { setFormScript(e.target.value); },
+            style: { fontFamily: 'monospace', fontSize: 12 },
+            size: 'small',
+          })
+        ),
+        h('div', null,
+          h('div', { style: { marginBottom: 4, fontWeight: 500, fontSize: 12, color: '#65657B' } }, 'Script arguments (optional)'),
+          h(Input, {
+            placeholder: 'e.g. --format json --verbose',
+            value: formScriptArgs,
+            onChange: function(e) { setFormScriptArgs(e.target.value); },
+            style: { fontFamily: 'monospace', fontSize: 12 },
+            size: 'small',
+          })
+        ),
+
+        // Output section
+        h('div', { style: { fontWeight: 600, fontSize: 13, color: '#543FDE', marginBottom: -6, marginTop: 8, borderTop: '1px solid #EDECFB', paddingTop: 14 } }, 'Output'),
+        h('div', null,
+          h('div', { style: { marginBottom: 4, fontWeight: 500, fontSize: 12, color: '#65657B' } }, 'What to do with script output'),
+          h(Select, {
+            value: formOutputHandling,
+            onChange: setFormOutputHandling,
+            options: [
+              { label: 'Log only \u2014 view in execution history', value: 'log-only' },
+              { label: 'Attach to bundle \u2014 upload output file', value: 'attach' },
+              { label: 'Create finding \u2014 add as a QC finding', value: 'finding' },
+            ],
+            style: { width: '100%' },
+            size: 'small',
+          })
+        ),
+        formOutputHandling === 'attach'
+          ? h('div', null,
+              h('div', { style: { marginBottom: 4, fontWeight: 500, fontSize: 12, color: '#65657B' } }, 'Output filename'),
+              h(Input, {
+                placeholder: 'e.g. validation_report.log',
+                value: formOutputFilename,
+                onChange: function(e) { setFormOutputFilename(e.target.value); },
+                size: 'small',
+              })
+            )
+          : null,
+
+        // Enabled toggle
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, borderTop: '1px solid #EDECFB', paddingTop: 14 } },
+          h(Switch, { checked: formEnabled, onChange: setFormEnabled, size: 'small' }),
+          h('span', { style: { fontSize: 12, color: '#65657B' } }, formEnabled ? 'Rule is enabled' : 'Rule is disabled')
+        )
+      )
+    )
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════
 //  ROOT APP
 // ═══════════════════════════════════════════════════════════════
 function App() {
@@ -3846,6 +4380,8 @@ function App() {
   var _s8 = useState(DEFAULT_TERMS); var terms = _s8[0]; var setTerms = _s8[1];
   var _s9 = useState(false); var useDummy = _s9[0]; var setUseDummy = _s9[1];
   var _s10 = useState([]); var assignmentRules = _s10[0]; var setAssignmentRules = _s10[1];
+  var _s11 = useState([]); var automationRules = _s11[0]; var setAutomationRules = _s11[1];
+  var _s12 = useState([]); var automationHistory = _s12[0]; var setAutomationHistory = _s12[1];
 
   // ── Live data state ──────────────────────────────────────────
   var _cu = useState(null); var currentUser = _cu[0]; var setCurrentUser = _cu[1];
@@ -3875,6 +4411,26 @@ function App() {
       localStorage.setItem('sce_assignment_rules', JSON.stringify(assignmentRules));
     } catch(e) { console.warn('Failed to save assignment rules to localStorage:', e); }
   }, [assignmentRules]);
+
+  // Load automation rules + history from localStorage on mount
+  useEffect(function() {
+    try {
+      var saved = localStorage.getItem('sce_automation_rules');
+      if (saved) setAutomationRules(JSON.parse(saved));
+    } catch(e) { console.warn('Failed to load automation rules:', e); }
+    try {
+      var savedH = localStorage.getItem('sce_automation_history');
+      if (savedH) setAutomationHistory(JSON.parse(savedH));
+    } catch(e) { console.warn('Failed to load automation history:', e); }
+  }, []);
+
+  // Persist automation rules + history
+  useEffect(function() {
+    try { localStorage.setItem('sce_automation_rules', JSON.stringify(automationRules)); } catch(e) {}
+  }, [automationRules]);
+  useEffect(function() {
+    try { localStorage.setItem('sce_automation_history', JSON.stringify(automationHistory.slice(0, 200))); } catch(e) {}
+  }, [automationHistory]);
 
   // Set scopeCurrentUser from fetched currentUser
   useEffect(function() {
@@ -4189,6 +4745,8 @@ function App() {
         return h(MetricsPage, { bundles: scopedBundles, terms: terms });
       case 'stages':
         return h(StageAssignmentsPage, { bundles: bundles, terms: terms, projectMembersCache: projectMembersCache });
+      case 'automation':
+        return h(AutomationRulesPage, { bundles: bundles, automationRules: automationRules, setAutomationRules: setAutomationRules, automationHistory: automationHistory, setAutomationHistory: setAutomationHistory, terms: terms, projectMembersCache: projectMembersCache });
       default:
         return h(DashboardPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms });
     }

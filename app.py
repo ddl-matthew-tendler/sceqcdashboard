@@ -380,6 +380,40 @@ def list_project_collaborators(project_id: str):
     return v4_get(f"/projects/{project_id}/collaborators")
 
 
+# ── Jobs / Runs (Automation) ───────────────────────────────────────
+
+def v4_post(path, json_body=None):
+    host = get_domino_host()
+    if not host:
+        raise HTTPException(status_code=503, detail="DOMINO_API_HOST not set")
+    headers = get_auth_headers()
+    headers["Content-Type"] = "application/json"
+    url = f"{host}/v4{path}"
+    resp = requests.post(url, headers=headers, json=json_body, timeout=60)
+    if resp.status_code not in (200, 201):
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    return resp.json()
+
+
+@app.post("/api/projects/{project_id}/runs")
+def start_project_run(project_id: str, body: dict):
+    """Start a Domino job in the given project.
+    Body: {"command": "python scripts/validate.py", "title": "Automation: ..."}
+    """
+    payload = {
+        "projectId": project_id,
+        "commandToRun": body.get("command", ""),
+        "title": body.get("title", "Automation Run"),
+    }
+    return v4_post("/jobs/start", json_body=payload)
+
+
+@app.get("/api/projects/{project_id}/runs/{run_id}")
+def get_project_run(project_id: str, run_id: str):
+    """Get status of a Domino job run."""
+    return v4_get(f"/jobs/{run_id}")
+
+
 # ── Whitelabel terminology ─────────────────────────────────────────
 
 @app.get("/api/terminology")
