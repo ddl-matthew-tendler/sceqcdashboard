@@ -1491,6 +1491,16 @@ function MetricsPage(props) {
     });
   }, [metrics]);
 
+  // Helper: chart title with info tooltip
+  function chartTitle(title, tooltip) {
+    return h('div', { className: 'panel-header' },
+      h('span', { className: 'panel-title' }, title),
+      h(Tooltip, { title: tooltip, placement: 'right', overlayStyle: { maxWidth: 320 } },
+        h('span', { style: { marginLeft: 6, cursor: 'help', color: '#B0B0C0', fontSize: 13 } }, '\u24D8')
+      )
+    );
+  }
+
   // ── Render ──────────────────────────────────────────────────
   return h('div', null,
     h('div', { className: 'page-header' },
@@ -1508,7 +1518,7 @@ function MetricsPage(props) {
     ),
     h('div', { className: 'two-col' },
       h('div', { className: 'panel' },
-        h('div', { className: 'panel-header' }, h('span', { className: 'panel-title' }, 'Findings by Severity')),
+        chartTitle('Findings by Severity', 'Counts all findings across deliverables grouped by severity level: S0 (Critical), S1 (Major), S2 (Minor), S3 (Info). Each finding has a severity assigned in Domino.'),
         h('div', { className: 'panel-body' },
           metrics.totalFindings > 0
             ? h('div', { id: 'chart-findings-severity', className: 'chart-container' })
@@ -1516,7 +1526,7 @@ function MetricsPage(props) {
         )
       ),
       h('div', { className: 'panel' },
-        h('div', { className: 'panel-header' }, h('span', { className: 'panel-title' }, 'Findings Trend (by week created)')),
+        chartTitle('Findings Trend (by week created)', 'Groups all findings by the week they were created (using Monday as week start). Shows the volume of new findings over time to identify spikes in QC activity.'),
         h('div', { className: 'panel-body' },
           Object.keys(metrics.findingsTrend).length > 0
             ? h('div', { id: 'chart-findings-trend', className: 'chart-container' })
@@ -1537,7 +1547,7 @@ function MetricsPage(props) {
     ),
     h('div', { className: 'two-col' },
       h('div', { className: 'panel' },
-        h('div', { className: 'panel-header' }, h('span', { className: 'panel-title' }, 'Avg Cycle Time by ' + P)),
+        chartTitle('Avg Cycle Time by ' + P, 'Average number of days from creation to completion for each ' + P.toLowerCase() + '. Calculated as (last updated date \u2212 created date) for completed ' + B.toLowerCase() + 's only. Higher values may indicate bottlenecks.'),
         h('div', { className: 'panel-body' },
           Object.keys(metrics.cycleByPolicy).length > 0
             ? h('div', { id: 'chart-cycle-by-policy', className: 'chart-container' })
@@ -1545,7 +1555,7 @@ function MetricsPage(props) {
         )
       ),
       h('div', { className: 'panel' },
-        h('div', { className: 'panel-header' }, h('span', { className: 'panel-title' }, 'Active ' + B + ' Age Distribution')),
+        chartTitle('Active ' + B + ' Age Distribution', 'Groups currently active ' + B.toLowerCase() + 's by how long ago they were created: 0\u20137 days, 7\u201314 days, 14\u201330 days, 30\u201360 days, and 60+ days. Highlights aging work that may need attention.'),
         h('div', { className: 'panel-body' },
           metrics.active > 0
             ? h('div', { id: 'chart-age-distribution', className: 'chart-container' })
@@ -1571,7 +1581,7 @@ function MetricsPage(props) {
       h(StatCard, { label: B + 's with Findings', value: metrics.bundlesWithFindings, sub: 'Of ' + bundles.length + ' total' })
     ),
     h('div', { className: 'panel' },
-      h('div', { className: 'panel-header' }, h('span', { className: 'panel-title' }, 'Finding Density by ' + P + ' (findings per ' + B.toLowerCase() + ')')),
+      chartTitle('Finding Density by ' + P, 'Average number of findings per ' + B.toLowerCase() + ' for each ' + P.toLowerCase() + '. Calculated as total findings \u00F7 number of ' + B.toLowerCase() + 's with findings. Higher density suggests more review-fix-review cycles (rework).'),
       h('div', { className: 'panel-body' },
         Object.keys(metrics.densityByPolicy).length > 0
           ? h('div', { id: 'chart-density-by-policy', className: 'chart-container' })
@@ -1582,7 +1592,7 @@ function MetricsPage(props) {
     // ── Section 4: Workload & Capacity ──
     h('div', { className: 'metrics-section-header' }, 'Workload & Capacity'),
     h('div', { className: 'panel' },
-      h('div', { className: 'panel-header' }, h('span', { className: 'panel-title' }, B + 's by ' + P + ' / Therapeutic Area')),
+      chartTitle(B + 's by ' + P + ' / Therapeutic Area', 'Stacked bar showing how many ' + B.toLowerCase() + 's are Active vs Complete for each ' + P.toLowerCase() + '. Click a bar to filter the detail table below.'),
       h('div', { className: 'panel-body' },
         Object.keys(metrics.policyGroups).length > 0
           ? h('div', { id: 'chart-policy-breakdown', className: 'chart-container' })
@@ -1591,7 +1601,7 @@ function MetricsPage(props) {
     ),
     h('div', { className: 'two-col' },
       h('div', { className: 'panel' },
-        h('div', { className: 'panel-header' }, h('span', { className: 'panel-title' }, 'Assignee Workload')),
+        chartTitle('Assignee Workload', 'Number of ' + B.toLowerCase() + 's currently assigned to each team member based on their current stage assignment. Click a bar to filter the detail table. Excludes unassigned ' + B.toLowerCase() + 's.'),
         h('div', { className: 'panel-body' },
           Object.keys(metrics.assignees).length > 1 || (Object.keys(metrics.assignees).length === 1 && !metrics.assignees['Unassigned'])
             ? h('div', { id: 'chart-workload', className: 'chart-container' })
@@ -1599,7 +1609,7 @@ function MetricsPage(props) {
         )
       ),
       h('div', { className: 'panel' },
-        h('div', { className: 'panel-header' }, h('span', { className: 'panel-title' }, 'Findings Resolution by Assignee')),
+        chartTitle('Findings Resolution by Assignee', 'Stacked bar showing open vs resolved findings per assignee. Resolved = status is Done or Won\'t Do. Helps identify who has the most outstanding QC items. Click a bar to filter.'),
         h('div', { className: 'panel-body' },
           Object.keys(metrics.findingsByAssignee).length > 1 || (Object.keys(metrics.findingsByAssignee).length === 1 && !metrics.findingsByAssignee['Unassigned'])
             ? h('div', { id: 'chart-findings-resolution', className: 'chart-container' })
@@ -2322,6 +2332,7 @@ function QCTrackerPage(props) {
   var _fs3 = useState(null); var filterState = _fs3[0]; var setFilterState = _fs3[1];
   var _fs4 = useState(null); var filterAssignee = _fs4[0]; var setFilterAssignee = _fs4[1];
   var _fs5 = useState([]); var filterFlags = _fs5[0]; var setFilterFlags = _fs5[1];
+  var _fs8 = useState(null); var filterStage = _fs8[0]; var setFilterStage = _fs8[1];
   var _fs6 = useState([]); var selectedRowKeys = _fs6[0]; var setSelectedRowKeys = _fs6[1];
   var _fs7 = useState([]); var expandedRowKeys = _fs7[0]; var setExpandedRowKeys = _fs7[1];
   // Findings & attachments drawer state
@@ -2364,9 +2375,19 @@ function QCTrackerPage(props) {
   // Apply local filters (project/tag scope now handled at App level)
   var filtered = useMemo(function() {
     return bundles.filter(function(b) {
-      if (searchText && b.name.toLowerCase().indexOf(searchText.toLowerCase()) < 0) return false;
+      if (searchText) {
+        var q = searchText.toLowerCase();
+        var match = (b.name || '').toLowerCase().indexOf(q) >= 0
+          || (b.projectName || '').toLowerCase().indexOf(q) >= 0
+          || (b.policyName || '').toLowerCase().indexOf(q) >= 0
+          || (b.stage || '').toLowerCase().indexOf(q) >= 0
+          || (b.state || '').toLowerCase().indexOf(q) >= 0
+          || (b.stageAssignee && b.stageAssignee.name || '').toLowerCase().indexOf(q) >= 0;
+        if (!match) return false;
+      }
       if (filterPolicies.length > 0 && filterPolicies.indexOf(b.policyName) < 0) return false;
       if (filterState && b.state !== filterState) return false;
+      if (filterStage && (b.stage || '') !== filterStage) return false;
       if (filterAssignee) {
         var name = b.stageAssignee && b.stageAssignee.name;
         if (filterAssignee === '__unassigned__') { if (name) return false; }
@@ -2381,7 +2402,7 @@ function QCTrackerPage(props) {
       }
       return true;
     });
-  }, [bundles, searchText, filterPolicies, filterState, filterAssignee, filterFlags]);
+  }, [bundles, searchText, filterPolicies, filterState, filterAssignee, filterFlags, filterStage]);
 
   // Stats (computed from all bundles, not filtered — so stat cards show true totals)
   var stats = useMemo(function() {
@@ -2399,13 +2420,13 @@ function QCTrackerPage(props) {
     return { total: bundles.length, openFindings: openFindings, totalFindings: totalFindings, unassigned: unassigned, complete: complete, active: active, archived: archived };
   }, [bundles]);
 
-  var activeFilterCount = (searchText ? 1 : 0) + (filterPolicies.length > 0 ? 1 : 0) + (filterState ? 1 : 0) + (filterAssignee ? 1 : 0) + filterFlags.length;
+  var activeFilterCount = (searchText ? 1 : 0) + (filterPolicies.length > 0 ? 1 : 0) + (filterState ? 1 : 0) + (filterAssignee ? 1 : 0) + filterFlags.length + (filterStage ? 1 : 0);
 
   // Track which stat card is highlighted (for toggle behavior)
   var _sc = useState(null); var activeStatCard = _sc[0]; var setActiveStatCard = _sc[1];
 
   function clearFilters() {
-    setSearchText(''); setFilterPolicies([]); setFilterState(null); setFilterAssignee(null); setFilterFlags([]);
+    setSearchText(''); setFilterPolicies([]); setFilterState(null); setFilterAssignee(null); setFilterFlags([]); setFilterStage(null);
     setActiveStatCard(null);
   }
 
@@ -2417,7 +2438,7 @@ function QCTrackerPage(props) {
       return;
     }
     // Clear other filters, apply this one
-    setSearchText(''); setFilterPolicies([]); setFilterState(null); setFilterAssignee(null); setFilterFlags([]);
+    setSearchText(''); setFilterPolicies([]); setFilterState(null); setFilterAssignee(null); setFilterFlags([]); setFilterStage(null);
     setActiveStatCard(type);
     if (type === 'active') setFilterState('Active');
     else if (type === 'openFindings') setFilterFlags(['open_findings']);
@@ -2567,7 +2588,8 @@ function QCTrackerPage(props) {
       yAxis: { title: { text: null }, allowDecimals: false },
       plotOptions: { bar: { borderRadius: 3, cursor: 'pointer', point: { events: { click: function() {
         var stageName = this.category;
-        setSearchText(stageName); setFilterPolicies([]); setFilterState(null); setFilterAssignee(null); setFilterFlags([]);
+        setSearchText(''); setFilterPolicies([]); setFilterState(null); setFilterAssignee(null); setFilterFlags([]);
+        setFilterStage(function(prev) { return prev === stageName ? null : stageName; });
         setActiveStatCard(null);
       } } } } },
       series: [{ name: capFirst(B) + 's', data: stageCounts, showInLegend: false }],
@@ -2646,6 +2668,11 @@ function QCTrackerPage(props) {
           },
         })
       ),
+
+      // Active stage filter indicator
+      filterStage ? h('div', { style: { padding: '4px 12px' } },
+        h(Tag, { closable: true, color: 'purple', onClose: function() { setFilterStage(null); } }, 'Stage: ' + filterStage)
+      ) : null,
 
       // Table with Excel-like column filters, resizable + hideable columns
       h('div', { className: 'panel-body-flush' },
