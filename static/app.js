@@ -2514,10 +2514,12 @@ function AttachmentsDrawer(props) {
   var dominoUrl = bundle ? getDominoBundleUrl(bundle) : null;
 
   var columns = [
-    { title: 'Type', dataIndex: 'type', key: 'type', width: 140,
+    { title: 'Type', dataIndex: 'type', key: 'type', width: 150,
       render: function(t) {
         var colors = { DatasetSnapshotFile: 'blue', Report: 'green', ModelVersion: 'purple', Endpoint: 'orange', FlowArtifact: 'cyan', NetAppVolumeSnapshotFile: 'default' };
-        return h(Tag, { color: colors[t] || 'default', style: { fontSize: 10 } }, (t || '').replace(/([A-Z])/g, ' $1').trim());
+        var labels = { DatasetSnapshotFile: 'Dataset Snapshot', NetAppVolumeSnapshotFile: 'NetApp Volume', FlowArtifact: 'Flow Artifact', ModelVersion: 'Model Version' };
+        var label = labels[t] || (t || '').replace(/([A-Z])/g, ' $1').trim();
+        return h(Tag, { color: colors[t] || 'default', style: { fontSize: 10, whiteSpace: 'normal', lineHeight: '16px' } }, label);
       }
     },
     { title: 'Identifier', key: 'identifier', width: 200, ellipsis: true,
