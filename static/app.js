@@ -661,7 +661,8 @@ function MilestonesPage(props) {
   return h('div', null,
     h('div', { className: 'page-header' },
       h('h1', null, 'Milestone Tracker'),
-      h('p', null, 'Visual stage progression for active ' + B.toLowerCase() + 's')
+      h('p', null, 'Visual stage progression for active ' + B.toLowerCase() + 's'),
+      h('p', { style: { fontSize: 12, color: '#8F8FA3', marginTop: 4 } }, 'Tip: Use tags (e.g. "Dry Run", "Post DBL") to scope this view to specific milestones.')
     ),
     h('div', { className: 'panel' },
       h('div', { className: 'panel-header' },
@@ -939,6 +940,8 @@ function FindingsPage(props) {
   var _ff = useState(null);
   var findingFilter = _ff[0];
   var setFindingFilter = _ff[1];
+  var _fst = useState(''); var findingsSearchText = _fst[0]; var setFindingsSearchText = _fst[1];
+  var _fhc = useState([]); var findingsHiddenCols = _fhc[0]; var setFindingsHiddenCols = _fhc[1];
 
   var allFindings = useMemo(function() {
     var result = [];
@@ -966,14 +969,26 @@ function FindingsPage(props) {
 
   // Filtered findings for table
   var filteredFindings = useMemo(function() {
-    if (!findingFilter) return allFindings;
-    if (findingFilter.type === 'severity') return allFindings.filter(function(f) { return f.severity === findingFilter.value; });
-    if (findingFilter.type === 'status') return allFindings.filter(function(f) { return f.status === findingFilter.value; });
-    if (findingFilter.type === 'open') return allFindings.filter(function(f) { return f.status !== 'Done' && f.status !== 'WontDo'; });
-    if (findingFilter.type === 'critical') return allFindings.filter(function(f) { return f.severity === 'S0'; });
-    if (findingFilter.type === 'resolved') return allFindings.filter(function(f) { return f.status === 'Done'; });
-    return allFindings;
-  }, [allFindings, findingFilter]);
+    var base = allFindings;
+    if (findingFilter) {
+      if (findingFilter.type === 'severity') base = base.filter(function(f) { return f.severity === findingFilter.value; });
+      else if (findingFilter.type === 'status') base = base.filter(function(f) { return f.status === findingFilter.value; });
+      else if (findingFilter.type === 'open') base = base.filter(function(f) { return f.status !== 'Done' && f.status !== 'WontDo'; });
+      else if (findingFilter.type === 'critical') base = base.filter(function(f) { return f.severity === 'S0'; });
+      else if (findingFilter.type === 'resolved') base = base.filter(function(f) { return f.status === 'Done'; });
+    }
+    if (findingsSearchText) {
+      var q = findingsSearchText.toLowerCase();
+      base = base.filter(function(f) {
+        return (f._bundleName || '').toLowerCase().indexOf(q) >= 0
+          || (f.name || '').toLowerCase().indexOf(q) >= 0
+          || (f.severity || '').toLowerCase().indexOf(q) >= 0
+          || (f.status || '').toLowerCase().indexOf(q) >= 0
+          || (f.assignee && f.assignee.name || '').toLowerCase().indexOf(q) >= 0;
+      });
+    }
+    return base;
+  }, [allFindings, findingFilter, findingsSearchText]);
 
   var findingFilterLabel = findingFilter
     ? (findingFilter.type === 'severity' ? findingFilter.value : findingFilter.type === 'status' ? findingFilter.value : findingFilter.type === 'open' ? 'Open' : findingFilter.type === 'critical' ? 'Critical (S0)' : findingFilter.type === 'resolved' ? 'Resolved' : null)
@@ -1027,8 +1042,25 @@ function FindingsPage(props) {
     });
   }, [allFindings, findingStats]);
 
+  // Build column filter option lists
+  var findingBundleOptions = useMemo(function() {
+    var names = {}; allFindings.forEach(function(f) { if (f._bundleName) names[f._bundleName] = true; });
+    return Object.keys(names).sort().map(function(n) { return { text: n, value: n }; });
+  }, [allFindings]);
+  var findingNameOptions = useMemo(function() {
+    var names = {}; allFindings.forEach(function(f) { if (f.name) names[f.name] = true; });
+    return Object.keys(names).sort().map(function(n) { return { text: n, value: n }; });
+  }, [allFindings]);
+  var findingAssigneeOptions = useMemo(function() {
+    var names = {}; allFindings.forEach(function(f) { var n = f.assignee ? f.assignee.name : null; if (n) names[n] = true; });
+    return Object.keys(names).sort().map(function(n) { return { text: n, value: n }; });
+  }, [allFindings]);
+
   var columns = [
-    { title: B, dataIndex: '_bundleName', key: 'study', width: 160,
+    { title: 'Deliverable', dataIndex: '_bundleName', key: 'study', width: 160,
+      sorter: function(a, b) { return (a._bundleName || '').localeCompare(b._bundleName || ''); },
+      filters: findingBundleOptions, filterSearch: true,
+      onFilter: function(v, r) { return r._bundleName === v; },
       render: function(t, r) {
         var url = r._bundle ? getDominoBundleUrl(r._bundle, { findingsPage: true }) : null;
         return url
@@ -1036,24 +1068,36 @@ function FindingsPage(props) {
           : h('span', { style: { fontWeight: 500 } }, t);
       } },
     { title: 'Finding', dataIndex: 'name', key: 'name',
+      sorter: function(a, b) { return (a.name || '').localeCompare(b.name || ''); },
+      filters: findingNameOptions, filterSearch: true,
+      onFilter: function(v, r) { return r.name === v; },
       render: function(t, r) {
         var url = r._bundle && r.id ? getDominoBundleUrl(r._bundle, { findingId: r.id }) : null;
         return url
           ? h('a', { href: url, target: '_blank' }, t)
           : h('span', null, t);
       } },
-    { title: 'Severity', dataIndex: 'severity', key: 'severity',
+    { title: 'Severity', dataIndex: 'severity', key: 'severity', width: 100,
+      sorter: function(a, b) { return (a.severity || '').localeCompare(b.severity || ''); },
       render: function(sev) { return h(Tag, { color: severityColor(sev), style: { color: '#fff', border: 'none' } }, sev); },
       filters: ['S0', 'S1', 'S2', 'S3'].map(function(s) { return { text: s, value: s }; }),
+      filterSearch: true,
       onFilter: function(v, r) { return r.severity === v; },
     },
-    { title: 'Status', dataIndex: 'status', key: 'status', render: findingStatusTag,
+    { title: 'Status', dataIndex: 'status', key: 'status', width: 100,
+      sorter: function(a, b) { return (a.status || '').localeCompare(b.status || ''); },
+      render: findingStatusTag,
       filters: ['ToDo', 'InProgress', 'InReview', 'Done', 'WontDo'].map(function(s) { return { text: s, value: s }; }),
+      filterSearch: true,
       onFilter: function(v, r) { return r.status === v; },
     },
-    { title: 'Assignee', key: 'assignee',
-      render: function(_, r) { return r.assignee ? r.assignee.name : '\u2014'; } },
-    { title: 'Due', dataIndex: 'dueDate', key: 'due',
+    { title: 'Assignee', dataIndex: 'assignee', key: 'assignee', width: 160,
+      sorter: function(a, b) { return (a.assignee && a.assignee.name || '').localeCompare(b.assignee && b.assignee.name || ''); },
+      filters: findingAssigneeOptions, filterSearch: true,
+      onFilter: function(v, r) { return r.assignee && r.assignee.name === v; },
+      render: function(assignee) { return assignee ? assignee.name : '\u2014'; } },
+    { title: 'Due', dataIndex: 'dueDate', key: 'due', width: 150,
+      sorter: function(a, b) { return (a.dueDate || '').localeCompare(b.dueDate || ''); },
       render: function(d) {
         if (!d) return '\u2014';
         var due = dayjs(d);
@@ -1104,15 +1148,38 @@ function FindingsPage(props) {
           h('span', { style: { fontSize: 12, color: '#8F8FA3' } }, filteredFindings.length + ' total')
         )
       ),
-      h('div', { className: 'panel-body-flush' },
-        h(Table, {
-          dataSource: filteredFindings,
-          columns: columns,
-          rowKey: function(r) { return r.id || (r._bundleName + '-' + r.name); },
-          loading: loading,
-          pagination: { pageSize: 10, size: 'small' },
-          size: 'small',
+      // Search + Column visibility
+      h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px' } },
+        h(Input, {
+          placeholder: 'Search findings...',
+          value: findingsSearchText,
+          onChange: function(e) { setFindingsSearchText(e.target.value); },
+          allowClear: true,
+          style: { width: 260, fontSize: 12 },
+          prefix: h('span', { style: { color: '#8F8FA3' } }, '\u2315'),
+        }),
+        h(ColumnVisibilityDropdown, {
+          columns: columns.map(function(c) { return { key: c.key, title: typeof c.title === 'string' ? c.title : c.key }; }),
+          hiddenKeys: findingsHiddenCols,
+          onToggle: function(key) {
+            setFindingsHiddenCols(function(prev) {
+              return prev.indexOf(key) >= 0 ? prev.filter(function(k) { return k !== key; }) : prev.concat([key]);
+            });
+          },
         })
+      ),
+      h('div', { className: 'panel-body-flush' },
+        (function() {
+          var visibleCols = columns.filter(function(c) { return findingsHiddenCols.indexOf(c.key) < 0; });
+          return h(Table, {
+            dataSource: filteredFindings,
+            columns: visibleCols,
+            rowKey: function(r) { return r.id || (r._bundleName + '-' + r.name); },
+            loading: loading,
+            pagination: { defaultPageSize: 20, size: 'small', showSizeChanger: true, pageSizeOptions: ['20', '50', '100'], showTotal: function(total) { return total + ' findings'; } },
+            size: 'small',
+          });
+        })()
       )
     )
   );
@@ -3704,7 +3771,7 @@ function StageAssignmentsPage(props) {
       })
     ),
 
-    // Filters
+    // Search + clear filters
     h('div', { style: { display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' } },
       h(Input.Search, {
         placeholder: 'Search ' + B.toLowerCase() + 's, stages, assignees...',
@@ -3713,53 +3780,6 @@ function StageAssignmentsPage(props) {
         allowClear: true,
         style: { width: 260 },
         size: 'small',
-      }),
-      h(Select, {
-        mode: 'multiple',
-        placeholder: 'Stage Status',
-        value: filterStatus,
-        onChange: setFilterStatus,
-        allowClear: true,
-        style: { minWidth: 160 },
-        size: 'small',
-        options: [
-          { label: 'Current', value: 'Current' },
-          { label: 'Future', value: 'Future' },
-          { label: 'Completed', value: 'Completed' },
-        ],
-      }),
-      h(Select, {
-        placeholder: 'Assignee',
-        value: filterAssignee,
-        onChange: setFilterAssignee,
-        allowClear: true,
-        showSearch: true,
-        optionFilterProp: 'label',
-        style: { minWidth: 180 },
-        size: 'small',
-        options: assigneeOptions,
-      }),
-      h(Select, {
-        mode: 'multiple',
-        placeholder: 'Projects',
-        value: filterProjects,
-        onChange: setFilterProjects,
-        allowClear: true,
-        maxTagCount: 1,
-        style: { minWidth: 180 },
-        size: 'small',
-        options: projectOptions,
-      }),
-      h(Select, {
-        mode: 'multiple',
-        placeholder: P,
-        value: filterPolicies,
-        onChange: setFilterPolicies,
-        allowClear: true,
-        maxTagCount: 1,
-        style: { minWidth: 160 },
-        size: 'small',
-        options: policyOptions,
       }),
       hasActiveFilters
         ? h(Button, { size: 'small', type: 'link', onClick: clearFilters }, 'Clear filters')
