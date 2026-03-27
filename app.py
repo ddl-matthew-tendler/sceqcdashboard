@@ -1,4 +1,5 @@
 import os
+import logging
 import requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -8,6 +9,8 @@ from fastapi.responses import FileResponse
 load_dotenv()
 
 app = FastAPI()
+logger = logging.getLogger("app")
+logging.basicConfig(level=logging.INFO)
 
 
 def get_domino_host():
@@ -15,62 +18,112 @@ def get_domino_host():
     return host.rstrip("/")
 
 
-def _get_token():
-    """Return (api_key, token) — exactly one will be set."""
-    api_key = os.environ.get("API_KEY_OVERRIDE")
-    if api_key:
-        return api_key, None
+def _get_api_key():
+    """Return an API key if one is available (local dev or Domino env)."""
+    return (
+        os.environ.get("API_KEY_OVERRIDE")
+        or os.environ.get("DOMINO_USER_API_KEY")
+    )
+
+
+def _get_sidecar_token():
+    """Get token from Domino sidecar (inside Domino apps)."""
     try:
-        response = requests.get("http://localhost:8899/access-token")
+        response = requests.get("http://localhost:8899/access-token", timeout=5)
         token = response.text.strip()
         if token.startswith("Bearer "):
             token = token[len("Bearer "):]
-        return None, token
+        return token
     except Exception:
-        raise HTTPException(status_code=503, detail="Cannot acquire auth token")
+        return None
 
 
 def get_auth_headers():
-    """Auth headers for v4 endpoints (Bearer token works)."""
-    api_key, token = _get_token()
+    """Auth headers for v4 endpoints — API key or Bearer token."""
+    api_key = _get_api_key()
     if api_key:
         return {"X-Domino-Api-Key": api_key}
-    return {"Authorization": f"Bearer {token}"}
-
-
-def get_gov_auth_headers():
-    """Auth headers for governance endpoints (require X-Domino-Api-Key)."""
-    api_key, token = _get_token()
-    if api_key:
-        return {"X-Domino-Api-Key": api_key}
-    # Governance API rejects Bearer tokens with "endpoint not found".
-    # Send the sidecar token as an API key instead.
-    return {"X-Domino-Api-Key": token}
+    token = _get_sidecar_token()
+    if token:
+        return {"Authorization": f"Bearer {token}"}
+    raise HTTPException(status_code=503, detail="Cannot acquire auth token")
 
 
 def gov_get(path, params=None):
+    """GET governance endpoint, trying API key first, then Bearer, then API key with sidecar token."""
     host = get_domino_host()
     if not host:
         raise HTTPException(status_code=503, detail="DOMINO_API_HOST not set")
-    headers = get_gov_auth_headers()
     url = f"{host}/api/governance/v1{path}"
-    resp = requests.get(url, headers=headers, params=params, timeout=30)
-    if resp.status_code != 200:
+
+    # Strategy 1: API key (works for local dev and if DOMINO_USER_API_KEY is set)
+    api_key = _get_api_key()
+    if api_key:
+        resp = requests.get(url, headers={"X-Domino-Api-Key": api_key}, params=params, timeout=30)
+        if resp.status_code == 200:
+            return resp.json()
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
-    return resp.json()
+
+    # No API key — get sidecar token and try multiple auth strategies
+    token = _get_sidecar_token()
+    if not token:
+        raise HTTPException(status_code=503, detail="Cannot acquire auth token")
+
+    # Strategy 2: Bearer token (may work on newer Domino versions)
+    resp = requests.get(url, headers={"Authorization": f"Bearer {token}"}, params=params, timeout=30)
+    if resp.status_code == 200:
+        logger.info("Governance auth: Bearer token worked")
+        return resp.json()
+
+    # Strategy 3: Send sidecar token as X-Domino-Api-Key
+    resp2 = requests.get(url, headers={"X-Domino-Api-Key": token}, params=params, timeout=30)
+    if resp2.status_code == 200:
+        logger.info("Governance auth: X-Domino-Api-Key with sidecar token worked")
+        return resp2.json()
+
+    # Strategy 4: Send both headers simultaneously
+    resp3 = requests.get(url, headers={
+        "Authorization": f"Bearer {token}",
+        "X-Domino-Api-Key": token,
+    }, params=params, timeout=30)
+    if resp3.status_code == 200:
+        logger.info("Governance auth: dual headers worked")
+        return resp3.json()
+
+    # All strategies failed — return the most informative error
+    logger.error(f"Governance auth failed for {path}. Bearer: {resp.status_code}, ApiKey: {resp2.status_code}, Dual: {resp3.status_code}")
+    raise HTTPException(status_code=resp.status_code, detail=resp.text)
 
 
 def gov_post(path, json_body=None):
     host = get_domino_host()
     if not host:
         raise HTTPException(status_code=503, detail="DOMINO_API_HOST not set")
-    headers = get_gov_auth_headers()
-    headers["Content-Type"] = "application/json"
     url = f"{host}/api/governance/v1{path}"
-    resp = requests.post(url, headers=headers, json=json_body, timeout=30)
-    if resp.status_code not in (200, 201):
+
+    api_key = _get_api_key()
+    if api_key:
+        headers = {"X-Domino-Api-Key": api_key, "Content-Type": "application/json"}
+        resp = requests.post(url, headers=headers, json=json_body, timeout=30)
+        if resp.status_code in (200, 201):
+            return resp.json()
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
-    return resp.json()
+
+    token = _get_sidecar_token()
+    if not token:
+        raise HTTPException(status_code=503, detail="Cannot acquire auth token")
+
+    # Try Bearer first, then API key, then both
+    for headers in [
+        {"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        {"X-Domino-Api-Key": token, "Content-Type": "application/json"},
+        {"Authorization": f"Bearer {token}", "X-Domino-Api-Key": token, "Content-Type": "application/json"},
+    ]:
+        resp = requests.post(url, headers=headers, json=json_body, timeout=30)
+        if resp.status_code in (200, 201):
+            return resp.json()
+
+    raise HTTPException(status_code=resp.status_code, detail=resp.text)
 
 
 def v4_get(path, params=None):
@@ -207,6 +260,34 @@ def get_terminology():
     except Exception:
         pass
     return defaults
+
+
+# ── Debug ─────────────────────────────────────────────────────────
+
+@app.get("/api/debug/auth")
+def debug_auth():
+    """Show which auth method is available (no secrets exposed)."""
+    has_override = bool(os.environ.get("API_KEY_OVERRIDE"))
+    has_user_key = bool(os.environ.get("DOMINO_USER_API_KEY"))
+    has_host = bool(os.environ.get("DOMINO_API_HOST"))
+    sidecar_token = None
+    try:
+        resp = requests.get("http://localhost:8899/access-token", timeout=3)
+        sidecar_token = resp.text.strip()[:20] + "..." if resp.text.strip() else None
+    except Exception:
+        pass
+
+    # List all DOMINO_* env vars (names only, not values)
+    domino_vars = sorted([k for k in os.environ if k.startswith("DOMINO")])
+
+    return {
+        "has_API_KEY_OVERRIDE": has_override,
+        "has_DOMINO_USER_API_KEY": has_user_key,
+        "has_DOMINO_API_HOST": has_host,
+        "domino_host": get_domino_host() or "(not set)",
+        "sidecar_token_preview": sidecar_token,
+        "domino_env_vars": domino_vars,
+    }
 
 
 # ── Static files & SPA ────────────────────────────────────────────

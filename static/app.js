@@ -5,7 +5,7 @@
 
 const { ConfigProvider, Button, Table, Tag, Space, Spin, Drawer, Badge,
         Tooltip, Progress, Select, Input, Empty, Tabs, Statistic, Switch,
-        Modal, Alert, Radio, Checkbox } = antd;
+        Modal, Alert, Radio, Checkbox, Popover } = antd;
 const { createElement: h, useState, useEffect, useCallback, useMemo } = React;
 
 dayjs.extend(dayjs_plugin_relativeTime);
@@ -45,6 +45,9 @@ Highcharts.setOptions({
 
 // ── Default terminology (overridden by whitelabel config) ──────────
 var DEFAULT_TERMS = { bundle: 'Bundle', policy: 'Policy' };
+
+// Ensure terminology is capitalized for display (API may return lowercase)
+function capFirst(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 
 // ── API_GAPS: Write actions pending Domino API availability ────────
 var API_GAPS = {
@@ -193,7 +196,7 @@ function TopNav(props) {
   // Only show whitelabel badge if terms differ from defaults
   var isWhitelabeled = terms.bundle !== DEFAULT_TERMS.bundle || terms.policy !== DEFAULT_TERMS.policy;
   return h('div', { className: 'top-nav' },
-    h('img', { src: '/static/domino-logo.svg', className: 'top-nav-logo', alt: 'Domino' }),
+    h('img', { src: 'static/domino-logo.svg', className: 'top-nav-logo', alt: 'Domino' }),
     h('div', { className: 'top-nav-divider' }),
     h('span', { className: 'top-nav-title' }, 'SCE QC Tracker'),
     h('div', { className: 'top-nav-right' },
@@ -1139,6 +1142,91 @@ function MetricsPage(props) {
 
 
 // ═══════════════════════════════════════════════════════════════
+//  COMPONENT: Stage Popover Content (shown when clicking a stage dot)
+// ═══════════════════════════════════════════════════════════════
+function StagePopoverContent(props) {
+  var bundle = props.bundle;
+  var stageIdx = props.stageIdx;
+  var stageName = props.stageName;
+  var dotState = props.dotState;
+  var onFindingsClick = props.onFindingsClick;
+  var onClose = props.onClose;
+
+  var stageData = bundle.stages[stageIdx] || {};
+  var assignee = stageData.assignee;
+  var assigneeName = assignee ? assignee.name : null;
+  var dominoUrl = getDominoBundleUrl(bundle);
+
+  // Governance summary counts
+  var openFindings = (bundle._findings || []).filter(function(f) { return f.status !== 'Done' && f.status !== 'WontDo'; }).length;
+  var totalFindings = (bundle._findings || []).length;
+  var totalApprovals = (bundle._approvals || []).length;
+  var approvedCount = (bundle._approvals || []).filter(function(a) { return a.status === 'Approved'; }).length;
+  var totalGates = (bundle._gates || []).length;
+  var openGates = (bundle._gates || []).filter(function(g) { return g.isOpen; }).length;
+
+  var statusLabel = dotState === 'completed' ? 'Completed' : dotState === 'active' ? 'In Progress' : dotState === 'blocked' ? 'Blocked' : 'Pending';
+  var statusColor = dotState === 'completed' ? '#28A464' : dotState === 'active' ? '#F59E0B' : dotState === 'blocked' ? '#C20A29' : '#8F8FA3';
+
+  return h('div', { className: 'stage-popover', onClick: function(e) { e.stopPropagation(); } },
+    // Header
+    h('div', { className: 'stage-popover-header' },
+      h('div', { className: 'stage-popover-dot', style: { background: statusColor } }),
+      h('div', null,
+        h('div', { className: 'stage-popover-name' }, stageName),
+        h('div', { className: 'stage-popover-status' },
+          h('span', { style: { color: statusColor, fontWeight: 600 } }, statusLabel),
+          assigneeName
+            ? h('span', null, ' \u00B7 ', assigneeName)
+            : h('span', { style: { color: '#F59E0B' } }, ' \u00B7 Unassigned')
+        )
+      )
+    ),
+
+    // Evidence summary cards
+    h('div', { className: 'stage-popover-evidence' },
+      h('div', {
+        className: 'stage-popover-card' + (totalFindings > 0 && onFindingsClick ? ' clickable' : ''),
+        onClick: totalFindings > 0 && onFindingsClick ? function() { onClose(); onFindingsClick(bundle); } : undefined,
+      },
+        h('div', { className: 'stage-popover-card-value', style: { color: openFindings > 0 ? '#C20A29' : '#28A464' } },
+          openFindings > 0 ? openFindings : '\u2713'
+        ),
+        h('div', { className: 'stage-popover-card-label' },
+          openFindings > 0 ? 'Open Finding' + (openFindings > 1 ? 's' : '') : totalFindings > 0 ? 'All Resolved' : 'No Findings'
+        )
+      ),
+      h('div', { className: 'stage-popover-card' },
+        h('div', { className: 'stage-popover-card-value', style: { color: totalApprovals > 0 ? (approvedCount === totalApprovals ? '#28A464' : '#0070CC') : '#8F8FA3' } },
+          totalApprovals > 0 ? approvedCount + '/' + totalApprovals : '\u2014'
+        ),
+        h('div', { className: 'stage-popover-card-label' },
+          totalApprovals > 0 ? 'Approved' : 'No Approvals'
+        )
+      ),
+      h('div', { className: 'stage-popover-card' },
+        h('div', { className: 'stage-popover-card-value', style: { color: totalGates > 0 ? (openGates === totalGates ? '#28A464' : '#C20A29') : '#8F8FA3' } },
+          totalGates > 0 ? openGates + '/' + totalGates : '\u2014'
+        ),
+        h('div', { className: 'stage-popover-card-label' },
+          totalGates > 0 ? 'Gates Open' : 'No Gates'
+        )
+      )
+    ),
+
+    // Footer actions
+    dominoUrl
+      ? h('div', { className: 'stage-popover-footer' },
+          h('a', {
+            href: dominoUrl, target: '_blank', rel: 'noopener noreferrer',
+            className: 'stage-popover-link',
+          }, '\u2197 View in Domino')
+        )
+      : null
+  );
+}
+
+
 //  COMPONENT: Stage Pipeline (inline SVG dots)
 // ═══════════════════════════════════════════════════════════════
 function StagePipeline(props) {
@@ -1152,6 +1240,8 @@ function StagePipeline(props) {
     return f.status !== 'Done' && f.status !== 'WontDo';
   });
 
+  var _pop = useState(null); var popoverStage = _pop[0]; var setPopoverStage = _pop[1];
+
   var dotR = 6;
   var gap = 8;
   var step = dotR * 2 + gap;
@@ -1164,8 +1254,6 @@ function StagePipeline(props) {
   for (var i = 0; i < stageNames.length - 1; i++) {
     var x1 = dotR + i * step + dotR;
     var x2 = x1 + gap;
-    var isBeforeCurrent = i < currentIdx || isComplete;
-    var isAtCurrent = i === currentIdx - 1;
     var lineColor = (isComplete || i < currentIdx) ? '#28A464' : '#D1D1DB';
     var dashArray = (isComplete || i < currentIdx) ? 'none' : '3,2';
     elements.push(h('line', {
@@ -1190,20 +1278,34 @@ function StagePipeline(props) {
     else if (dotState === 'blocked') { fill = '#C20A29'; stroke = 'none'; strokeW = 0; className = 'stage-dot-pulse'; }
     else { fill = 'transparent'; stroke = '#D1D1DB'; strokeW = 2; className = ''; }
 
-    var assignee = bundle.stages[j] && bundle.stages[j].assignee;
-    var assigneeName = assignee ? assignee.name : 'Unassigned';
-    var statusText = dotState === 'completed' ? 'Completed' : dotState === 'active' ? 'In Progress' : dotState === 'blocked' ? 'Open Finding' : 'Pending';
-    var tipText = stageNames[j] + '\n' + assigneeName + ' \u2022 ' + statusText;
+    // Create popover content for this dot
+    var popContent = (function(idx, name, state) {
+      return h(StagePopoverContent, {
+        bundle: bundle, stageIdx: idx, stageName: name, dotState: state,
+        onFindingsClick: onFindingsClick,
+        onClose: function() { setPopoverStage(null); },
+      });
+    })(j, stageNames[j], dotState);
 
-    var dotClickable = dotState === 'blocked' && onFindingsClick;
     elements.push(
-      h(Tooltip, { key: 'dot-' + j, title: dotClickable ? tipText + '\nClick to view findings' : tipText },
+      h(Popover, {
+        key: 'dot-' + j,
+        content: popContent,
+        trigger: 'click',
+        open: popoverStage === j,
+        onOpenChange: (function(idx) {
+          return function(visible) { setPopoverStage(visible ? idx : null); };
+        })(j),
+        placement: 'bottom',
+        overlayClassName: 'stage-popover-overlay',
+        arrow: { pointAtCenter: true },
+      },
         h('circle', {
           cx: cx, cy: cy, r: dotR - (strokeW ? 1 : 0),
           fill: fill, stroke: stroke, strokeWidth: strokeW,
-          className: className,
+          className: className + ' stage-dot-interactive',
           style: { cursor: 'pointer' },
-          onClick: dotClickable ? function(e) { e.stopPropagation(); onFindingsClick(bundle); } : undefined,
+          onClick: function(e) { e.stopPropagation(); },
         })
       )
     );
@@ -1212,7 +1314,7 @@ function StagePipeline(props) {
   return h('svg', {
     width: svgW, height: svgH,
     className: 'stage-pipeline',
-    style: { verticalAlign: 'middle' }
+    style: { verticalAlign: 'middle', overflow: 'visible' }
   }, elements);
 }
 
