@@ -284,9 +284,9 @@ var NAV_ITEMS = [
   { key: 'milestones', icon: '\u2630', label: 'Milestones' },
   { key: 'approvals', icon: '\u2713', label: 'Approvals' },
   { key: 'findings', icon: '\u26A0', label: 'Findings & QC' },
-  { key: 'metrics', icon: '\u2261', label: 'Team Metrics' },
-  { key: 'rules', icon: '\u2699', label: 'Assignment Rules' },
+  { key: 'metrics', icon: '\u2637', label: 'Team Metrics' },
   { key: 'stages', icon: '\u229A', label: 'Stage Assignments' },
+  { key: 'rules', icon: '\u2699', label: 'Assignment Rules' },
 ];
 
 function Sidebar(props) {
@@ -890,8 +890,7 @@ function ApprovalsPage(props) {
     ),
 
     h('div', { className: 'stats-row' },
-      h(StatCard, { label: 'Total Approvals', value: approvalStats.total, color: 'primary', active: !approvalFilter, onClick: function() { setApprovalFilter(null); } }),
-      h(StatCard, { label: 'Pending', value: approvalStats.pending + approvalStats.review, color: 'warning', sub: 'Awaiting action', active: approvalFilter === 'pendingAll', onClick: function() { setApprovalFilter(approvalFilter === 'pendingAll' ? null : 'pendingAll'); } }),
+      h(StatCard, { label: 'Pending', value: approvalStats.pending + approvalStats.review, color: 'warning', active: approvalFilter === 'pendingAll', onClick: function() { setApprovalFilter(approvalFilter === 'pendingAll' ? null : 'pendingAll'); } }),
       h(StatCard, { label: 'Approved', value: approvalStats.approved, color: 'success', active: approvalFilter === 'approved', onClick: function() { setApprovalFilter(approvalFilter === 'approved' ? null : 'approved'); } }),
       h(StatCard, { label: 'Conditional', value: approvalStats.conditional, color: 'info', active: approvalFilter === 'conditional', onClick: function() { setApprovalFilter(approvalFilter === 'conditional' ? null : 'conditional'); } })
     ),
@@ -946,7 +945,7 @@ function FindingsPage(props) {
     bundles.forEach(function(b) {
       if (b._findings) {
         b._findings.forEach(function(f) {
-          result.push(Object.assign({}, f, { _bundleName: b.name }));
+          result.push(Object.assign({}, f, { _bundleName: b.name, _bundle: b }));
         });
       }
     });
@@ -1030,8 +1029,19 @@ function FindingsPage(props) {
 
   var columns = [
     { title: B, dataIndex: '_bundleName', key: 'study', width: 160,
-      render: function(t) { return h('span', { style: { fontWeight: 500 } }, t); } },
-    { title: 'Finding', dataIndex: 'name', key: 'name' },
+      render: function(t, r) {
+        var url = r._bundle ? getDominoBundleUrl(r._bundle, { findingsPage: true }) : null;
+        return url
+          ? h('a', { href: url, target: '_blank', style: { fontWeight: 500 } }, t)
+          : h('span', { style: { fontWeight: 500 } }, t);
+      } },
+    { title: 'Finding', dataIndex: 'name', key: 'name',
+      render: function(t, r) {
+        var url = r._bundle && r.id ? getDominoBundleUrl(r._bundle, { findingId: r.id }) : null;
+        return url
+          ? h('a', { href: url, target: '_blank' }, t)
+          : h('span', null, t);
+      } },
     { title: 'Severity', dataIndex: 'severity', key: 'severity',
       render: function(sev) { return h(Tag, { color: severityColor(sev), style: { color: '#fff', border: 'none' } }, sev); },
       filters: ['S0', 'S1', 'S2', 'S3'].map(function(s) { return { text: s, value: s }; }),
@@ -1112,6 +1122,33 @@ function FindingsPage(props) {
 // ═══════════════════════════════════════════════════════════════
 //  PAGE: Team Metrics
 // ═══════════════════════════════════════════════════════════════
+//
+// Metrics logic reference:
+//
+// FINDINGS & COMMENTS
+//   Total Findings = sum of bundle._findings.length across all bundles
+//   Open = findings where status !== 'Done' && status !== 'WontDo'
+//   Resolved = findings where status === 'Done' || status === 'WontDo'
+//   Resolution Rate = resolved / total * 100
+//   By Severity = group by finding.severity (S0=Critical, S1=Major, S2=Minor, S3=Info)
+//   Comments = bundle.commentsCount (aggregate only, no per-comment API)
+//
+// TIME-TO-QC COMPLETION
+//   Cycle Time = (bundle.updatedAt - bundle.createdAt) in days, for Complete bundles only
+//   Rationale: updatedAt of a Complete bundle is the best approximation of completion date
+//   since the last update on a completed bundle is typically the state transition itself.
+//   Avg/Median computed across all Complete bundles, broken down by policy for comparison.
+//   Active Bundle Age = (now - bundle.createdAt) in days, to show bottleneck/aging work.
+//
+// REWORK INDICATORS
+//   True rework detection (stage regression: Complete→Active) requires audit trail APIs
+//   that don't exist yet. Instead, we use FINDING DENSITY as a defensible proxy:
+//     Finding Density = findings per deliverable (higher = more review-fix-review cycles)
+//     Bundles with In-Progress Rework = bundles that have BOTH resolved AND open findings
+//       (indicates the QC process found issues, some were fixed, but more surfaced — iterative rework)
+//     Overdue Findings = open findings past their dueDate (stuck in rework loop)
+//   These proxies are standard in pharma QC analytics where full audit trails aren't available.
+//
 function MetricsPage(props) {
   var bundles = props.bundles;
   var terms = props.terms || DEFAULT_TERMS;
@@ -1122,11 +1159,114 @@ function MetricsPage(props) {
   var metricsFilter = _mf[0];
   var setMetricsFilter = _mf[1];
 
+  // ── Compute all metrics ──────────────────────────────────────
   var metrics = useMemo(function() {
     var activeBundles = bundles.filter(function(b) { return b.state === 'Active'; });
     var completeBundles = bundles.filter(function(b) { return b.state === 'Complete'; });
+    var now = Date.now();
 
-    // Bundles per policy (team/therapeutic area proxy)
+    // ── Findings & Comments ──
+    var totalFindings = 0, openFindings = 0, resolvedFindings = 0;
+    var findingsBySev = { S0: 0, S1: 0, S2: 0, S3: 0 };
+    var totalComments = 0;
+    var overdueFindings = 0;
+    var findingsByAssignee = {};
+
+    bundles.forEach(function(b) {
+      totalComments += b.commentsCount || 0;
+      if (b._findings) {
+        b._findings.forEach(function(f) {
+          totalFindings++;
+          var isResolved = f.status === 'Done' || f.status === 'WontDo';
+          if (isResolved) resolvedFindings++;
+          else {
+            openFindings++;
+            if (f.dueDate && new Date(f.dueDate).getTime() < now) overdueFindings++;
+          }
+          if (f.severity && findingsBySev[f.severity] !== undefined) findingsBySev[f.severity]++;
+          var name = (f.assignee && f.assignee.name) ? f.assignee.name : 'Unassigned';
+          if (!findingsByAssignee[name]) findingsByAssignee[name] = { open: 0, resolved: 0 };
+          if (isResolved) findingsByAssignee[name].resolved++;
+          else findingsByAssignee[name].open++;
+        });
+      }
+    });
+    var resolutionRate = totalFindings > 0 ? Math.round((resolvedFindings / totalFindings) * 100) : 0;
+
+    // Findings trend: group by week using createdAt
+    var findingsTrend = {};
+    bundles.forEach(function(b) {
+      if (b._findings) {
+        b._findings.forEach(function(f) {
+          if (f.createdAt) {
+            var d = new Date(f.createdAt);
+            // Get Monday of the week
+            var day = d.getDay(); var diff = d.getDate() - day + (day === 0 ? -6 : 1);
+            var monday = new Date(d); monday.setDate(diff); monday.setHours(0, 0, 0, 0);
+            var key = monday.toISOString().slice(0, 10);
+            findingsTrend[key] = (findingsTrend[key] || 0) + 1;
+          }
+        });
+      }
+    });
+
+    // ── Time-to-QC Completion ──
+    var cycleTimes = completeBundles.map(function(b) {
+      return (new Date(b.updatedAt).getTime() - new Date(b.createdAt).getTime()) / (1000 * 60 * 60 * 24);
+    }).filter(function(d) { return d >= 0; });
+    var avgCycleTime = cycleTimes.length > 0 ? Math.round(cycleTimes.reduce(function(a, b) { return a + b; }, 0) / cycleTimes.length) : 0;
+    var sortedCycleTimes = cycleTimes.slice().sort(function(a, b) { return a - b; });
+    var medianCycleTime = sortedCycleTimes.length > 0 ? Math.round(sortedCycleTimes[Math.floor(sortedCycleTimes.length / 2)]) : 0;
+
+    // Cycle time by policy
+    var cycleByPolicy = {};
+    completeBundles.forEach(function(b) {
+      var pol = b.policyName || 'Unknown';
+      if (!cycleByPolicy[pol]) cycleByPolicy[pol] = [];
+      var days = (new Date(b.updatedAt).getTime() - new Date(b.createdAt).getTime()) / (1000 * 60 * 60 * 24);
+      if (days >= 0) cycleByPolicy[pol].push(days);
+    });
+
+    // Active bundle age distribution
+    var activeAges = activeBundles.map(function(b) {
+      return (now - new Date(b.createdAt).getTime()) / (1000 * 60 * 60 * 24);
+    });
+    var ageBuckets = { '0-7d': 0, '7-14d': 0, '14-30d': 0, '30-60d': 0, '60+d': 0 };
+    activeAges.forEach(function(a) {
+      if (a < 7) ageBuckets['0-7d']++;
+      else if (a < 14) ageBuckets['7-14d']++;
+      else if (a < 30) ageBuckets['14-30d']++;
+      else if (a < 60) ageBuckets['30-60d']++;
+      else ageBuckets['60+d']++;
+    });
+
+    // ── Rework Indicators ──
+    // Finding density per bundle
+    var bundlesWithFindings = bundles.filter(function(b) { return b._findings && b._findings.length > 0; });
+    var avgFindingDensity = bundlesWithFindings.length > 0
+      ? (totalFindings / bundlesWithFindings.length).toFixed(1) : '0';
+
+    // Bundles with active rework: have BOTH open AND resolved findings
+    var reworkBundles = bundles.filter(function(b) {
+      if (!b._findings || b._findings.length === 0) return false;
+      var hasOpen = false, hasResolved = false;
+      b._findings.forEach(function(f) {
+        if (f.status === 'Done' || f.status === 'WontDo') hasResolved = true;
+        else hasOpen = true;
+      });
+      return hasOpen && hasResolved;
+    });
+
+    // Finding density per policy (for comparison)
+    var densityByPolicy = {};
+    bundles.forEach(function(b) {
+      var pol = b.policyName || 'Unknown';
+      if (!densityByPolicy[pol]) densityByPolicy[pol] = { findings: 0, bundles: 0 };
+      densityByPolicy[pol].bundles++;
+      densityByPolicy[pol].findings += (b._findings ? b._findings.length : 0);
+    });
+
+    // ── Workload ──
     var policyGroups = {};
     bundles.forEach(function(b) {
       var key = b.policyName || 'Unassigned';
@@ -1135,8 +1275,6 @@ function MetricsPage(props) {
       if (b.state === 'Active') policyGroups[key].active++;
       if (b.state === 'Complete') policyGroups[key].complete++;
     });
-
-    // Assignee workload
     var assignees = {};
     bundles.forEach(function(b) {
       var name = (b.stageAssignee && b.stageAssignee.name) ? b.stageAssignee.name : 'Unassigned';
@@ -1144,30 +1282,26 @@ function MetricsPage(props) {
       assignees[name]++;
     });
 
-    // Findings per assignee
-    var findingsByAssignee = {};
-    bundles.forEach(function(b) {
-      if (b._findings) {
-        b._findings.forEach(function(f) {
-          var name = (f.assignee && f.assignee.name) ? f.assignee.name : 'Unassigned';
-          if (!findingsByAssignee[name]) findingsByAssignee[name] = { open: 0, resolved: 0 };
-          if (f.status === 'Done' || f.status === 'WontDo') findingsByAssignee[name].resolved++;
-          else findingsByAssignee[name].open++;
-        });
-      }
-    });
-
     return {
       active: activeBundles.length,
       complete: completeBundles.length,
-      policyGroups: policyGroups,
-      assignees: assignees,
-      findingsByAssignee: findingsByAssignee,
       completionRate: bundles.length > 0 ? Math.round((completeBundles.length / bundles.length) * 100) : 0,
+      // Findings
+      totalFindings: totalFindings, openFindings: openFindings, resolvedFindings: resolvedFindings,
+      resolutionRate: resolutionRate, findingsBySev: findingsBySev, overdueFindings: overdueFindings,
+      totalComments: totalComments, findingsTrend: findingsTrend, findingsByAssignee: findingsByAssignee,
+      // Cycle time
+      avgCycleTime: avgCycleTime, medianCycleTime: medianCycleTime, cycleTimes: cycleTimes,
+      cycleByPolicy: cycleByPolicy, ageBuckets: ageBuckets,
+      // Rework
+      avgFindingDensity: avgFindingDensity, reworkBundles: reworkBundles,
+      bundlesWithFindings: bundlesWithFindings.length, densityByPolicy: densityByPolicy,
+      // Workload
+      policyGroups: policyGroups, assignees: assignees,
     };
   }, [bundles]);
 
-  // Filtered bundles for detail table
+  // ── Filtered bundles for detail table ──
   var filteredMetricsBundles = useMemo(function() {
     if (!metricsFilter) return bundles;
     if (metricsFilter.type === 'active') return bundles.filter(function(b) { return b.state === 'Active'; });
@@ -1177,28 +1311,121 @@ function MetricsPage(props) {
       var name = (b.stageAssignee && b.stageAssignee.name) ? b.stageAssignee.name : 'Unassigned';
       return name === metricsFilter.value;
     });
+    if (metricsFilter.type === 'rework') return metrics.reworkBundles;
+    if (metricsFilter.type === 'overdue') return bundles.filter(function(b) {
+      return b._findings && b._findings.some(function(f) {
+        return f.dueDate && new Date(f.dueDate).getTime() < Date.now() && f.status !== 'Done' && f.status !== 'WontDo';
+      });
+    });
     return bundles;
-  }, [bundles, metricsFilter]);
+  }, [bundles, metricsFilter, metrics.reworkBundles]);
 
   var metricsFilterLabel = metricsFilter
-    ? (metricsFilter.type === 'active' ? 'Active' : metricsFilter.type === 'complete' ? 'Completed' : metricsFilter.type === 'policy' ? P + ': ' + metricsFilter.value : metricsFilter.type === 'assignee' ? 'Assignee: ' + metricsFilter.value : null)
+    ? (metricsFilter.type === 'active' ? 'Active' : metricsFilter.type === 'complete' ? 'Completed'
+      : metricsFilter.type === 'policy' ? P + ': ' + metricsFilter.value
+      : metricsFilter.type === 'assignee' ? 'Assignee: ' + metricsFilter.value
+      : metricsFilter.type === 'rework' ? 'Active Rework'
+      : metricsFilter.type === 'overdue' ? 'Overdue Findings'
+      : null)
     : null;
 
-  // Policy breakdown chart
+  // ── Charts ──────────────────────────────────────────────────
+  // Findings by Severity
   useEffect(function() {
-    var groups = metrics.policyGroups;
-    var names = Object.keys(groups);
-    if (names.length === 0) return;
-    Highcharts.chart('chart-policy-breakdown', {
-      chart: { type: 'bar', height: Math.max(240, names.length * 40), backgroundColor: 'transparent' },
+    var sev = metrics.findingsBySev;
+    var el = document.getElementById('chart-findings-severity');
+    if (!el || metrics.totalFindings === 0) return;
+    Highcharts.chart('chart-findings-severity', {
+      chart: { type: 'bar', height: 180, backgroundColor: 'transparent' },
       title: { text: null },
-      xAxis: { categories: names, labels: { style: { fontSize: '11px' } } },
-      yAxis: { title: { text: B + 's' }, allowDecimals: false, stackLabels: { enabled: true } },
-      plotOptions: { series: { stacking: 'normal', borderRadius: 2, cursor: 'pointer', point: { events: { click: function() { setMetricsFilter({ type: 'policy', value: this.category }); } } } } },
-      series: [
-        { name: 'Active', data: names.map(function(n) { return groups[n].active; }), color: '#543FDE' },
-        { name: 'Complete', data: names.map(function(n) { return groups[n].complete; }), color: '#28A464' },
-      ],
+      xAxis: { categories: ['Critical (S0)', 'Major (S1)', 'Minor (S2)', 'Info (S3)'], labels: { style: { fontSize: '11px' } } },
+      yAxis: { title: { text: null }, allowDecimals: false },
+      plotOptions: { bar: { borderRadius: 3, dataLabels: { enabled: true } } },
+      series: [{ name: 'Findings', data: [sev.S0, sev.S1, sev.S2, sev.S3], showInLegend: false,
+        colorByPoint: true, colors: ['#C20A29', '#FF6543', '#CCB718', '#0070CC'] }],
+      credits: { enabled: false },
+    });
+  }, [metrics]);
+
+  // Findings trend (line chart)
+  useEffect(function() {
+    var trend = metrics.findingsTrend;
+    var weeks = Object.keys(trend).sort();
+    var el = document.getElementById('chart-findings-trend');
+    if (!el || weeks.length === 0) return;
+    Highcharts.chart('chart-findings-trend', {
+      chart: { type: 'area', height: 200, backgroundColor: 'transparent' },
+      title: { text: null },
+      xAxis: { categories: weeks.map(function(w) { return w.slice(5); }), labels: { style: { fontSize: '10px' }, rotation: -45 } },
+      yAxis: { title: { text: null }, allowDecimals: false },
+      plotOptions: { area: { fillOpacity: 0.15, marker: { radius: 4 }, lineWidth: 2 } },
+      series: [{ name: 'Findings created', data: weeks.map(function(w) { return trend[w]; }), color: '#543FDE', showInLegend: false }],
+      credits: { enabled: false },
+    });
+  }, [metrics]);
+
+  // Cycle time by policy
+  useEffect(function() {
+    var cbp = metrics.cycleByPolicy;
+    var policies = Object.keys(cbp).filter(function(p) { return cbp[p].length > 0; });
+    var el = document.getElementById('chart-cycle-by-policy');
+    if (!el || policies.length === 0) return;
+    policies.sort(function(a, b) {
+      var avgA = cbp[a].reduce(function(s, v) { return s + v; }, 0) / cbp[a].length;
+      var avgB = cbp[b].reduce(function(s, v) { return s + v; }, 0) / cbp[b].length;
+      return avgB - avgA;
+    });
+    Highcharts.chart('chart-cycle-by-policy', {
+      chart: { type: 'bar', height: Math.max(200, policies.length * 40), backgroundColor: 'transparent' },
+      title: { text: null },
+      xAxis: { categories: policies, labels: { style: { fontSize: '11px' } } },
+      yAxis: { title: { text: 'Days' }, allowDecimals: false },
+      plotOptions: { bar: { borderRadius: 3, dataLabels: { enabled: true, format: '{y}d' } } },
+      series: [{ name: 'Avg days', data: policies.map(function(p) {
+        return Math.round(cbp[p].reduce(function(s, v) { return s + v; }, 0) / cbp[p].length);
+      }), showInLegend: false, color: '#543FDE' }],
+      credits: { enabled: false },
+    });
+  }, [metrics]);
+
+  // Active bundle age distribution
+  useEffect(function() {
+    var buckets = metrics.ageBuckets;
+    var el = document.getElementById('chart-age-distribution');
+    if (!el) return;
+    var labels = Object.keys(buckets);
+    var values = labels.map(function(k) { return buckets[k]; });
+    if (values.every(function(v) { return v === 0; })) return;
+    Highcharts.chart('chart-age-distribution', {
+      chart: { type: 'column', height: 200, backgroundColor: 'transparent' },
+      title: { text: null },
+      xAxis: { categories: labels, labels: { style: { fontSize: '11px' } } },
+      yAxis: { title: { text: B + 's' }, allowDecimals: false },
+      plotOptions: { column: { borderRadius: 3, dataLabels: { enabled: true }, colorByPoint: true,
+        colors: ['#28A464', '#28A464', '#CCB718', '#FF6543', '#C20A29'] } },
+      series: [{ name: B + 's', data: values, showInLegend: false }],
+      credits: { enabled: false },
+    });
+  }, [metrics]);
+
+  // Finding density by policy
+  useEffect(function() {
+    var dbp = metrics.densityByPolicy;
+    var policies = Object.keys(dbp).filter(function(p) { return dbp[p].bundles > 0; });
+    var el = document.getElementById('chart-density-by-policy');
+    if (!el || policies.length === 0) return;
+    policies.sort(function(a, b) {
+      return (dbp[b].findings / dbp[b].bundles) - (dbp[a].findings / dbp[a].bundles);
+    });
+    Highcharts.chart('chart-density-by-policy', {
+      chart: { type: 'bar', height: Math.max(180, policies.length * 35), backgroundColor: 'transparent' },
+      title: { text: null },
+      xAxis: { categories: policies, labels: { style: { fontSize: '11px' } } },
+      yAxis: { title: { text: 'Findings per ' + B.toLowerCase() }, allowDecimals: true },
+      plotOptions: { bar: { borderRadius: 3, dataLabels: { enabled: true, format: '{y:.1f}' } } },
+      series: [{ name: 'Density', data: policies.map(function(p) {
+        return parseFloat((dbp[p].findings / dbp[p].bundles).toFixed(1));
+      }), showInLegend: false, color: '#FF6543' }],
       credits: { enabled: false },
     });
   }, [metrics]);
@@ -1208,6 +1435,8 @@ function MetricsPage(props) {
     var assignees = metrics.assignees;
     var names = Object.keys(assignees).filter(function(n) { return n !== 'Unassigned'; });
     if (names.length === 0) return;
+    var el = document.getElementById('chart-workload');
+    if (!el) return;
     names.sort(function(a, b) { return assignees[b] - assignees[a]; });
     Highcharts.chart('chart-workload', {
       chart: { type: 'bar', height: Math.max(240, names.length * 35), backgroundColor: 'transparent' },
@@ -1220,11 +1449,13 @@ function MetricsPage(props) {
     });
   }, [metrics]);
 
-  // Findings resolution chart
+  // Findings resolution by assignee
   useEffect(function() {
     var fba = metrics.findingsByAssignee;
     var names = Object.keys(fba).filter(function(n) { return n !== 'Unassigned'; });
     if (names.length === 0) return;
+    var el = document.getElementById('chart-findings-resolution');
+    if (!el) return;
     Highcharts.chart('chart-findings-resolution', {
       chart: { type: 'bar', height: Math.max(240, names.length * 35), backgroundColor: 'transparent' },
       title: { text: null },
@@ -1239,19 +1470,117 @@ function MetricsPage(props) {
     });
   }, [metrics]);
 
+  // Policy breakdown chart
+  useEffect(function() {
+    var groups = metrics.policyGroups;
+    var names = Object.keys(groups);
+    if (names.length === 0) return;
+    var el = document.getElementById('chart-policy-breakdown');
+    if (!el) return;
+    Highcharts.chart('chart-policy-breakdown', {
+      chart: { type: 'bar', height: Math.max(240, names.length * 40), backgroundColor: 'transparent' },
+      title: { text: null },
+      xAxis: { categories: names, labels: { style: { fontSize: '11px' } } },
+      yAxis: { title: { text: B + 's' }, allowDecimals: false, stackLabels: { enabled: true } },
+      plotOptions: { series: { stacking: 'normal', borderRadius: 2, cursor: 'pointer', point: { events: { click: function() { setMetricsFilter({ type: 'policy', value: this.category }); } } } } },
+      series: [
+        { name: 'Active', data: names.map(function(n) { return groups[n].active; }), color: '#543FDE' },
+        { name: 'Complete', data: names.map(function(n) { return groups[n].complete; }), color: '#28A464' },
+      ],
+      credits: { enabled: false },
+    });
+  }, [metrics]);
+
+  // ── Render ──────────────────────────────────────────────────
   return h('div', null,
     h('div', { className: 'page-header' },
       h('h1', null, 'Team Metrics'),
-      h('p', null, 'Workload distribution, productivity, and quality metrics')
+      h('p', null, 'Quality indicators, cycle times, and workload distribution')
     ),
 
+    // ── Section 1: Findings & Quality ──
+    h('div', { className: 'metrics-section-header' }, 'Findings & Quality'),
     h('div', { className: 'stats-row' },
-      h(StatCard, { label: 'Active ' + B + 's', value: metrics.active, color: 'primary', active: metricsFilter && metricsFilter.type === 'active', onClick: function() { setMetricsFilter(metricsFilter && metricsFilter.type === 'active' ? null : { type: 'active' }); } }),
-      h(StatCard, { label: 'Completed', value: metrics.complete, color: 'success', active: metricsFilter && metricsFilter.type === 'complete', onClick: function() { setMetricsFilter(metricsFilter && metricsFilter.type === 'complete' ? null : { type: 'complete' }); } }),
-      h(StatCard, { label: 'Completion Rate', value: metrics.completionRate + '%', color: metrics.completionRate >= 50 ? 'success' : 'warning' }),
-      h(StatCard, { label: P + 's In Use', value: Object.keys(metrics.policyGroups).length })
+      h(StatCard, { label: 'Total Findings', value: metrics.totalFindings, color: 'primary', sub: metrics.totalComments + ' comments' }),
+      h(StatCard, { label: 'Open', value: metrics.openFindings, color: metrics.openFindings > 0 ? 'danger' : 'success', sub: metrics.overdueFindings > 0 ? metrics.overdueFindings + ' overdue' : 'None overdue' }),
+      h(StatCard, { label: 'Resolved', value: metrics.resolvedFindings, color: 'success', sub: metrics.resolutionRate + '% resolution rate' }),
+      h(StatCard, { label: 'Critical (S0)', value: metrics.findingsBySev.S0, color: metrics.findingsBySev.S0 > 0 ? 'danger' : '', sub: 'Highest severity' })
+    ),
+    h('div', { className: 'two-col' },
+      h('div', { className: 'panel' },
+        h('div', { className: 'panel-header' }, h('span', { className: 'panel-title' }, 'Findings by Severity')),
+        h('div', { className: 'panel-body' },
+          metrics.totalFindings > 0
+            ? h('div', { id: 'chart-findings-severity', className: 'chart-container' })
+            : h(EmptyState, { text: 'No findings data' })
+        )
+      ),
+      h('div', { className: 'panel' },
+        h('div', { className: 'panel-header' }, h('span', { className: 'panel-title' }, 'Findings Trend (by week created)')),
+        h('div', { className: 'panel-body' },
+          Object.keys(metrics.findingsTrend).length > 0
+            ? h('div', { id: 'chart-findings-trend', className: 'chart-container' })
+            : h(EmptyState, { text: 'No findings timeline data' })
+        )
+      )
     ),
 
+    // ── Section 2: Time-to-QC Completion ──
+    h('div', { className: 'metrics-section-header' }, 'Time-to-QC Completion'),
+    h('div', { className: 'stats-row' },
+      h(StatCard, { label: 'Avg Cycle Time', value: metrics.avgCycleTime + 'd', color: 'primary', sub: 'Creation to completion' }),
+      h(StatCard, { label: 'Median Cycle Time', value: metrics.medianCycleTime + 'd', sub: metrics.cycleTimes.length + ' completed ' + B.toLowerCase() + 's' }),
+      h(StatCard, { label: 'Active ' + B + 's', value: metrics.active, color: 'info', sub: 'Currently in progress',
+        active: metricsFilter && metricsFilter.type === 'active',
+        onClick: function() { setMetricsFilter(metricsFilter && metricsFilter.type === 'active' ? null : { type: 'active' }); } }),
+      h(StatCard, { label: 'Completion Rate', value: metrics.completionRate + '%', color: metrics.completionRate >= 50 ? 'success' : 'warning', sub: metrics.complete + ' of ' + bundles.length + ' complete' })
+    ),
+    h('div', { className: 'two-col' },
+      h('div', { className: 'panel' },
+        h('div', { className: 'panel-header' }, h('span', { className: 'panel-title' }, 'Avg Cycle Time by ' + P)),
+        h('div', { className: 'panel-body' },
+          Object.keys(metrics.cycleByPolicy).length > 0
+            ? h('div', { id: 'chart-cycle-by-policy', className: 'chart-container' })
+            : h(EmptyState, { text: 'No completed ' + B.toLowerCase() + 's yet' })
+        )
+      ),
+      h('div', { className: 'panel' },
+        h('div', { className: 'panel-header' }, h('span', { className: 'panel-title' }, 'Active ' + B + ' Age Distribution')),
+        h('div', { className: 'panel-body' },
+          metrics.active > 0
+            ? h('div', { id: 'chart-age-distribution', className: 'chart-container' })
+            : h(EmptyState, { text: 'No active ' + B.toLowerCase() + 's' })
+        )
+      )
+    ),
+
+    // ── Section 3: Rework Indicators ──
+    h('div', { className: 'metrics-section-header' }, 'Rework Indicators'),
+    h('div', { style: { fontSize: 12, color: '#8F8FA3', marginBottom: 12, marginTop: -8 } },
+      'Finding density is used as a proxy for rework. Higher density indicates more review-fix-review cycles per ' + B.toLowerCase() + '.'),
+    h('div', { className: 'stats-row' },
+      h(StatCard, { label: 'Avg Finding Density', value: metrics.avgFindingDensity, color: parseFloat(metrics.avgFindingDensity) > 1 ? 'warning' : '', sub: 'Findings per ' + B.toLowerCase() }),
+      h(StatCard, { label: 'Active Rework', value: metrics.reworkBundles.length, color: metrics.reworkBundles.length > 0 ? 'danger' : 'success',
+        sub: 'Open + resolved findings',
+        active: metricsFilter && metricsFilter.type === 'rework',
+        onClick: function() { setMetricsFilter(metricsFilter && metricsFilter.type === 'rework' ? null : { type: 'rework' }); } }),
+      h(StatCard, { label: 'Overdue Findings', value: metrics.overdueFindings, color: metrics.overdueFindings > 0 ? 'danger' : 'success',
+        sub: 'Past due date',
+        active: metricsFilter && metricsFilter.type === 'overdue',
+        onClick: function() { setMetricsFilter(metricsFilter && metricsFilter.type === 'overdue' ? null : { type: 'overdue' }); } }),
+      h(StatCard, { label: B + 's with Findings', value: metrics.bundlesWithFindings, sub: 'Of ' + bundles.length + ' total' })
+    ),
+    h('div', { className: 'panel' },
+      h('div', { className: 'panel-header' }, h('span', { className: 'panel-title' }, 'Finding Density by ' + P + ' (findings per ' + B.toLowerCase() + ')')),
+      h('div', { className: 'panel-body' },
+        Object.keys(metrics.densityByPolicy).length > 0
+          ? h('div', { id: 'chart-density-by-policy', className: 'chart-container' })
+          : h(EmptyState, { text: 'No findings data' })
+      )
+    ),
+
+    // ── Section 4: Workload & Capacity ──
+    h('div', { className: 'metrics-section-header' }, 'Workload & Capacity'),
     h('div', { className: 'panel' },
       h('div', { className: 'panel-header' }, h('span', { className: 'panel-title' }, B + 's by ' + P + ' / Therapeutic Area')),
       h('div', { className: 'panel-body' },
@@ -1260,7 +1589,6 @@ function MetricsPage(props) {
           : h(EmptyState, { text: 'No policy data' })
       )
     ),
-
     h('div', { className: 'two-col' },
       h('div', { className: 'panel' },
         h('div', { className: 'panel-header' }, h('span', { className: 'panel-title' }, 'Assignee Workload')),
@@ -1280,7 +1608,7 @@ function MetricsPage(props) {
       )
     ),
 
-    // Detail table (shown when a filter is active)
+    // ── Detail table (shown when a filter is active) ──
     metricsFilter ? h('div', { className: 'panel', style: { marginTop: 20 } },
       h('div', { className: 'panel-header' },
         h('span', { className: 'panel-title' }, B + 's — ' + metricsFilterLabel),
@@ -1297,6 +1625,7 @@ function MetricsPage(props) {
             { title: 'Project', dataIndex: 'projectName', key: 'project', render: function(t) { return h('span', { style: { color: '#65657B', fontSize: 12 } }, t || '\u2014'); } },
             { title: P, dataIndex: 'policyName', key: 'policy', render: function(t) { return h(Tag, null, t || '\u2014'); } },
             { title: 'Stage', dataIndex: 'stage', key: 'stage', render: function(t) { return h('span', { style: { fontSize: 12 } }, t || '\u2014'); } },
+            { title: 'Findings', key: 'findings', render: function(_, r) { return (r._findings ? r._findings.length : 0); } },
             { title: 'Assignee', key: 'assignee', render: function(_, r) { return (r.stageAssignee && r.stageAssignee.name) || '\u2014'; } },
             { title: 'State', dataIndex: 'state', key: 'state', render: function(s) { return h(Tag, { color: stateColor(s) }, s); } },
           ],
@@ -2003,7 +2332,7 @@ function QCTrackerPage(props) {
   // Column widths state (resizable)
   var _cw = useState({}); var colWidths = _cw[0]; var setColWidths = _cw[1];
   // Hidden columns state
-  var _hc = useState([]); var hiddenCols = _hc[0]; var setHiddenCols = _hc[1];
+  var _hc = useState(['policy']); var hiddenCols = _hc[0]; var setHiddenCols = _hc[1];
   // Derive filter options from scoped bundles (project/tag scope handled at App level)
   var policyOptions = useMemo(function() {
     var names = {};
@@ -2207,13 +2536,8 @@ function QCTrackerPage(props) {
       title: { text: null },
       plotOptions: {
         pie: {
-          innerSize: '55%', cursor: 'pointer',
+          innerSize: '55%',
           dataLabels: { enabled: true, format: '{point.name}: {point.y}', style: { fontSize: '10px' } },
-          point: { events: { click: function() {
-            var state = this.name;
-            if (activeStatCard === state.toLowerCase()) { clearFilters(); }
-            else { setSearchText(''); setFilterPolicies([]); setFilterAssignee(null); setFilterFlags([]); setFilterState(state); setActiveStatCard(state.toLowerCase()); }
-          } } },
         },
       },
       series: [{
@@ -2226,7 +2550,7 @@ function QCTrackerPage(props) {
       }],
       credits: { enabled: false },
     });
-  }, [bundles, stats, activeStatCard]);
+  }, [bundles, stats]);
 
   useEffect(function() {
     if (bundles.length === 0) return;
@@ -2242,9 +2566,9 @@ function QCTrackerPage(props) {
       xAxis: { categories: stageNames, labels: { style: { fontSize: '10px' } } },
       yAxis: { title: { text: null }, allowDecimals: false },
       plotOptions: { bar: { borderRadius: 3, cursor: 'pointer', point: { events: { click: function() {
-        setSearchText(''); setFilterPolicies([]); setFilterState(null); setFilterAssignee(null); setFilterFlags([]);
+        var stageName = this.category;
+        setSearchText(stageName); setFilterPolicies([]); setFilterState(null); setFilterAssignee(null); setFilterFlags([]);
         setActiveStatCard(null);
-        // Use column filter for stage — not stat card
       } } } } },
       series: [{ name: capFirst(B) + 's', data: stageCounts, showInLegend: false }],
       credits: { enabled: false },
@@ -2260,15 +2584,15 @@ function QCTrackerPage(props) {
     // Stat cards — clickable with toggle highlight + subtitles
     h('div', { className: 'stats-row' },
       h('div', { className: 'stat-card-clickable' + (activeStatCard === 'total' ? ' stat-card-active' : ''), onClick: function() { handleStatClick('total'); } },
-        h(StatCard, { label: 'Total ' + capFirst(B) + 's', value: stats.total, color: 'primary', sub: 'Across all projects' })),
+        h(StatCard, { label: 'Total ' + capFirst(B) + 's', value: stats.total, color: 'primary' })),
       h('div', { className: 'stat-card-clickable' + (activeStatCard === 'active' ? ' stat-card-active' : ''), onClick: function() { handleStatClick('active'); } },
-        h(StatCard, { label: 'Active', value: stats.active, color: 'info', sub: 'Currently in progress' })),
+        h(StatCard, { label: 'Active', value: stats.active, color: 'info' })),
       h('div', { className: 'stat-card-clickable' + (activeStatCard === 'openFindings' ? ' stat-card-active' : ''), onClick: function() { handleStatClick('openFindings'); } },
-        h(StatCard, { label: 'Open Findings', value: stats.openFindings, color: stats.openFindings > 0 ? 'danger' : '', sub: stats.totalFindings + ' total findings' })),
+        h(StatCard, { label: 'Open Findings', value: stats.openFindings, color: stats.openFindings > 0 ? 'danger' : '' })),
       h('div', { className: 'stat-card-clickable' + (activeStatCard === 'unassigned' ? ' stat-card-active' : ''), onClick: function() { handleStatClick('unassigned'); } },
-        h(StatCard, { label: 'Unassigned', value: stats.unassigned, color: stats.unassigned > 0 ? 'warning' : '', sub: 'No stage owner' })),
+        h(StatCard, { label: 'Unassigned', value: stats.unassigned, color: stats.unassigned > 0 ? 'warning' : '' })),
       h('div', { className: 'stat-card-clickable' + (activeStatCard === 'complete' ? ' stat-card-active' : ''), onClick: function() { handleStatClick('complete'); } },
-        h(StatCard, { label: 'Complete', value: stats.complete, color: 'success', sub: 'Fully reviewed' }))
+        h(StatCard, { label: 'Complete', value: stats.complete, color: 'success' }))
     ),
 
     // Charts row — compact
@@ -2282,7 +2606,7 @@ function QCTrackerPage(props) {
         )
       ),
       h('div', { className: 'panel' },
-        h('div', { className: 'panel-header' }, h('span', { className: 'panel-title' }, capFirst(B) + 's by Stage')),
+        h('div', { className: 'panel-header' }, h('span', { className: 'panel-title' }, capFirst(B) + 's by Current Stage')),
         h('div', { className: 'panel-body', style: { padding: '4px 8px' } },
           bundles.length > 0
             ? h('div', { id: 'qc-chart-stages', style: { minHeight: 160 } })
@@ -2310,7 +2634,7 @@ function QCTrackerPage(props) {
           onChange: function(e) { setSearchText(e.target.value); setActiveStatCard(null); },
           allowClear: true,
           style: { width: 260, fontSize: 12 },
-          prefix: h('span', { style: { color: '#8F8FA3' } }, '\uD83D\uDD0D'),
+          prefix: h('span', { style: { color: '#8F8FA3' } }, '\u2315'),
         }),
         h(ColumnVisibilityDropdown, {
           columns: columns.map(function(c) { return { key: c.key, title: typeof c.title === 'string' ? c.title : c.key }; }),
@@ -3829,7 +4153,11 @@ function App() {
     h('div', null,
       h(TopNav, { terms: terms, useDummy: useDummy, onToggleDummy: handleToggleDummy, connected: connected }),
       h('div', { className: 'app-layout' },
-        h(Sidebar, { active: activePage, onNav: setActivePage }),
+        h(Sidebar, { active: activePage, onNav: function(page) {
+          setActivePage(page);
+          var mc = document.querySelector('.main-content');
+          if (mc) mc.scrollTop = 0;
+        } }),
         h('div', { className: 'main-content' },
           // Universal Scope Bar
           h('div', { className: 'global-filter-bar' },

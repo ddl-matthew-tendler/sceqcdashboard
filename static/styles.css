@@ -149,7 +149,7 @@ body {
   background: #fff;
   border: 1px solid #E0E0E0;
   border-radius: 8px;
-  padding: 18px 20px;
+  padding: 12px 16px;
   height: 100%;
   box-sizing: border-box;
 }
@@ -164,7 +164,7 @@ body {
 }
 
 .stat-card-value {
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 700;
   color: #2E2E38;
   line-height: 1.1;
@@ -538,6 +538,20 @@ body {
   color: #543FDE;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+/* ── Team Metrics: Section Headers ──────────────────── */
+.metrics-section-header {
+  font-size: 16px;
+  font-weight: 600;
+  color: #2D2D3F;
+  margin-top: 28px;
+  margin-bottom: 12px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid #EDECFB;
+}
+.metrics-section-header:first-of-type {
+  margin-top: 0;
 }
 
 /* ── QC Tracker: Clickable Stat Cards ────────────────── */
