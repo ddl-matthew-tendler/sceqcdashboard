@@ -93,3 +93,29 @@
 ### D22: Automation Jobs API — Ready with Error Diagnostics
 **Decision**: Set `API_GAPS.automationRun.ready = true`. Enhanced error handling provides contextual hints (404 → Jobs API not enabled, 403 → token permissions, etc.). Failed job starts are recorded in execution history. Polling failures stop after 3 consecutive errors with a user-facing notification.
 **Rationale**: The proxy endpoints and UI are fully built. Keeping `ready: false` hides the feature unnecessarily. With clear error messages and diagnostic hints, users can self-diagnose issues on their Domino instance. Recording failures in history provides visibility into API availability.
+
+## 2026-03-27: Data Explorer, Metrics & UI Polish
+
+### D23: Data Explorer Deep-Linking — Cross-App File Opening
+**Decision**: Attachments with extensions `.csv`, `.parquet`, `.xpt`, `.sas7bdat` render as clickable links that open in the Data Explorer app via a `?dataset=<encodedPath>` query parameter. Other file types (`.pdf`, `.sas`, `.log`) keep the existing "View in Domino" link behavior.
+**Rationale**: The Data Explorer app supports deep-linking via query parameter. Path construction differs by attachment type: `DatasetSnapshotFile` → `/domino/datasets/local/snapshots/{datasetName}/{snapshotVersion}/{filename}`, `NetAppVolumeSnapshotFile` → `/domino/netapp-volumes/{volumeName}/{filename}`. These paths were reverse-engineered from the support bundle's `run.json` (which contains `datasetMounts` and `netAppVolumeMounts`) and verified against the Data Explorer app's "Copy Link" output.
+
+### D24: Data Explorer URL Discovery — Beta Apps API + Env Var Fallback
+**Decision**: The Data Explorer URL is discovered via `GET /api/apps/beta/apps`, searching for apps with "data explorer" in the name. Falls back to `DATA_EXPLORER_URL` env var. The fetch runs in a separate `useEffect` with `[]` dependencies — not gated by the `connected` state — because it's a local backend call that doesn't require Domino governance connectivity.
+**Rationale**: Gating behind `connected` prevented the Data Explorer links from appearing in dummy mode. The Beta Apps API is a lightweight discovery mechanism. The env var fallback ensures the feature works even if auto-discovery fails.
+
+### D25: Risk Optimizer — Standard StatCard Alignment
+**Decision**: Replaced the Risk Optimizer's custom `summaryCard()` function (dark `#1E1E2E` background, inline styles) with the standard `StatCard` component used by all other pages. Removed the ⚖ emoji from the page title.
+**Rationale**: The custom cards created visual inconsistency with the rest of the app. All pages should use the same `StatCard` component with `.stats-row` CSS class, white backgrounds, and the standard color palette (primary/danger/warning/success/info).
+
+### D26: Stage Dot Illumination — Glow on Blocked Only
+**Decision**: Removed the always-visible `box-shadow` glow from active (yellow/in-progress) stage dots. Kept the glow on blocked (red) dots only. All hover and click effects remain unchanged for all dot colors.
+**Rationale**: In-progress is a normal state that doesn't need visual emphasis. Blocked (open finding) is the exceptional state that warrants the user's attention via a persistent glow.
+
+### D27: Metrics — Sample Data Indicator Pattern
+**Decision**: When computed metrics have no data (e.g., no completed bundles for cycle time), the app injects realistic sample values and displays an orange "Sample data — no completed deliverables yet" tag above the chart.
+**Rationale**: Empty charts provide no value to demo viewers. Sample data shows the chart's intended purpose while the tag clearly communicates the data isn't real. Uses the same `Tag` component with `color: 'orange'` pattern as the "API Pending" badges.
+
+### D28: Whitelabel Terms — Always Use capFirst()
+**Decision**: All chart titles and UI labels that use whitelabel terms (`terms.bundle`, `terms.policy`) must wrap them in `capFirst()` for proper capitalization.
+**Rationale**: The live Domino API returns lowercase terms (e.g., "deliverable", "qc plan"). Without `capFirst()`, chart titles render as "deliverables by qc plan" instead of "Deliverables by QC Plan". This was caught during live testing.

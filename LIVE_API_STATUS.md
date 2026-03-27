@@ -62,6 +62,16 @@
 - **Status**: PASS
 - **Evidence**: Code at lines 2404-2414 loads from `localStorage.getItem('sce_assignment_rules')` on mount and persists via `localStorage.setItem()` on every `assignmentRules` state change.
 
+### 1.11 Stage Reassignment (Write API)
+- **Status**: PASS
+- **Evidence**: `PATCH /api/governance/v1/bundles/{bundleId}/stages/{stageId}` with body `{"assignee": {"id": "userId"}}` returns 200 OK with updated stage assignment. The endpoint was discovered via live API probing — it uses PATCH (not PUT) and the request body wraps the assignee in an object. Response includes `policyVersionId` for deep-linking.
+- **Code**: Stage timeline dropdowns in QCTrackerExpandedRow and Stage Assignments bulk reassign now call this endpoint directly. `API_GAPS.stageReassign.ready` set to `true`.
+
+### 1.12 Data Explorer App Discovery
+- **Status**: PASS
+- **Evidence**: `GET /api/apps/beta/apps?limit=100` returns list of running apps. The app searches for "data explorer" in app names and extracts `runningAppUrl`. Falls back to `DATA_EXPLORER_URL` env var. Deep-linking via `?dataset=<encodedPath>` confirmed working.
+- **Code**: New `GET /api/data-explorer-url` backend endpoint with caching. Frontend `useEffect` with `[]` dependencies fetches on mount (not gated by `connected` state).
+
 ---
 
 ## Section 2: Needs Attention
@@ -74,12 +84,9 @@
 - **Risk**: If `fetchLiveData()` fails mid-session and falls back to mock data, there's no way for the user to manually re-trigger live mode without a page reload (since the toggle only appears when `!connected`, and the fallback sets `connected: false`).
 - **Recommendation**: Test with `DOMINO_API_HOST` unset to verify fallback behavior and toggle switching.
 
-### 2.2 `domino-logo.svg` Returns 404
-- **Severity**: Low (cosmetic)
-- **Details**: `GET /domino-logo.svg` → 404. The `<img>` tag at line 198 references `static/../domino-logo.svg` which resolves to `/domino-logo.svg`. The file doesn't exist at the project root.
-- **File**: `app.js` line 198 — `h('img', { src: 'static/../domino-logo.svg', ... })`
-- **Impact**: Broken logo image in the top nav.
-- **Fix**: Either place a `domino-logo.svg` at the project root, or update the `src` path to a valid location.
+### 2.2 ~~`domino-logo.svg` Returns 404~~ — RESOLVED
+- **Severity**: ~~Low~~ Resolved (D14)
+- **Fix**: Logo copied to `static/` directory and path updated to `/static/domino-logo.svg`.
 
 ### 2.3 N+1 Query Pattern on Load
 - **Severity**: Medium (performance)
@@ -94,21 +101,15 @@
 - **Files**: `app.js` line 2519 — `apiGet('api/bundles?limit=200')`
 - **Recommendation**: Implement cursor-based pagination or increase limit and add a visible "showing X of Y" indicator when results are truncated.
 
-### 2.5 Some Collaborator Requests Are Sparse
-- **Severity**: Low (data quality)
-- **Details**: The `/v4/projects/{id}/collaborators` endpoint returns only explicitly added collaborators, not the project owner. For example, `Scalable_RWE_Migraine` (owner: `agnes_domino`) returns only `[Agnes Youn]` — the owner IS a collaborator here, but other projects may have owners not listed in collaborators. This means some assignee dropdowns may have incomplete member lists.
-- **Recommendation**: Consider also fetching the project owner from the `/v4/projects` response and merging into the members list.
+### 2.5 ~~Some Collaborator Requests Are Sparse~~ — RESOLVED
+- **Severity**: ~~Low~~ Resolved (D16)
+- **Fix**: Project owner is now extracted from `/v4/projects` response and merged into collaborator list if not already present.
 
-### 2.6 Write APIs Remain Pending
+### 2.6 Write APIs ~~Remain Pending~~ — Partially Resolved
 - **Severity**: Expected (by design)
-- **Details**: All three write actions are correctly gated by `API_GAPS`:
-  - Stage Reassignment (`API_GAPS.stageReassign`)
+- **Details**: Stage Reassignment is now **LIVE** via `PATCH /api/governance/v1/bundles/{bundleId}/stages/{stageId}`. Two write actions remain gated by `API_GAPS`:
   - Bulk Assign (`API_GAPS.bulkAssign`)
   - Apply Rules (`API_GAPS.applyRules`)
-- **Next step**: When Domino governance write endpoints become available, set `ready: true` in the `API_GAPS` config and implement the actual API calls at:
-  - Stage Reassignment: `app.js` line ~1332 (onChange handler)
-  - Bulk Assign: `app.js` line ~1536 (handleBulkAssign)
-  - Apply Rules: `app.js` line ~2108 (handleApplyRules)
 
 ### 2.7 Assignment Rules Storage Is localStorage Only
 - **Severity**: Medium (by design, documented in DECISIONS.md D6)
@@ -130,10 +131,9 @@
 
 | Category | Count |
 |----------|-------|
-| Fully working | 10 items |
-| Needs attention | 8 items |
+| Fully working | 12 items |
+| Needs attention | 5 items (3 resolved) |
 | Blockers | 0 |
 | Console errors | 0 |
-| Failed API calls | 0 (aborted requests were from page reload race, not real failures) |
 
-**The app is fully functional on live data.** All mock data references in `app.js` have been replaced. The 8 attention items are enhancements, not bugs — the two most impactful are the N+1 query pattern (2.3) and the pagination ceiling (2.4), both of which only become issues at scale (300+ bundles).
+**The app is fully functional on live data.** All mock data references in `app.js` have been replaced. The remaining attention items are enhancements, not bugs — the two most impactful are the N+1 query pattern (2.3) and the pagination ceiling (2.4), both of which only become issues at scale (300+ bundles).

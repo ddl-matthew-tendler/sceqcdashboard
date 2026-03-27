@@ -326,16 +326,38 @@ The SCE QC Tracker is a Domino App built for pharmaceutical statistical programm
 
 ---
 
+### 7. Data Explorer / Cross-App Discovery
+
+- **Priority**: Low (nice-to-have)
+- **User Impact**: The app currently discovers the Data Explorer app by calling `GET /api/apps/beta/apps` and searching by name. This works but is fragile — it depends on a naming convention, and if the Data Explorer app is renamed or if multiple apps share similar names, discovery could fail or match the wrong app. A dedicated API or configuration endpoint would be more reliable.
+- **What We Need**: Either a way to register app-to-app links in Domino (e.g., a metadata field or app relationship API), or a query parameter on the Beta Apps API to filter by app name or type:
+  ```
+  Option A: Query parameter on existing endpoint
+
+  GET /api/apps/beta/apps?name=Data+Explorer
+  GET /api/apps/beta/apps?type=data-explorer
+
+  Option B: App-to-app link registry
+
+  GET /api/apps/beta/apps/{appId}/linked-apps
+  POST /api/apps/beta/apps/{appId}/linked-apps
+  ```
+- **Current Workaround**: The app uses the `DATA_EXPLORER_URL` environment variable override, falling back to Beta Apps API name-matching discovery via `GET /api/apps/beta/apps`. This works for now and is sufficient for current deployments.
+- **Notes**: This gap is independent of all other gaps. It is purely a reliability improvement for cross-app navigation. The current workaround (env var + name-based discovery) is functional and acceptable for the foreseeable future.
+
+---
+
 ## Priority Summary
 
 | Gap | Priority | Blocking | Proposed Endpoint |
 |-----|----------|----------|-------------------|
-| 1. Stage Reassignment | High | Blocks all individual assignment changes | `PUT /api/governance/v1/bundles/{bundleId}/stages/{stageId}/assignee` |
+| 1. Stage Reassignment | ~~High~~ RESOLVED | ~~Blocks all individual assignment changes~~ Complete | `PATCH /api/governance/v1/bundles/{bundleId}/stages/{stageId}` with `{"assignee": {"id": "userId"}}` |
 | 2. Bulk Assign | High | Blocks efficient multi-deliverable assignment | `POST /api/governance/v1/bundles/bulk-assign` |
 | 3. Apply Assignment Rules | Medium | Blocks rule-based auto-assignment; depends on Gap 1 | `POST /api/governance/v1/bundles/apply-rules` |
 | 4. Assignment Rules Persistence | Medium | Blocks multi-user/multi-session rule sharing | `GET/PUT /api/governance/v1/projects/{projectId}/assignment-rules` |
 | 5. Pagination | Medium | Silently drops data in projects with 200+ deliverables | Pagination metadata on existing `GET` endpoints |
 | 6. Write Action Audit Trail | Low | Required for GxP compliance; depends on Gaps 1-3 | Audit metadata on all write responses + `GET .../audit-log` |
+| 7. Data Explorer / Cross-App Discovery | Low | Nice-to-have; current workaround is functional | Query param on `GET /api/apps/beta/apps` or app-to-app link registry |
 
 ### Dependency Graph
 
@@ -347,12 +369,14 @@ Gap 1 (Stage Reassignment)
 
 Gap 4 (Rules Persistence) — independent, but value increases with Gap 3
 Gap 5 (Pagination) — independent, no dependencies
+Gap 7 (Data Explorer Discovery) — independent, no dependencies
 ```
 
 ### Recommended Implementation Order
 
-1. **Gap 1** — Stage Reassignment (unblocks all write workflows)
-2. **Gap 2** — Bulk Assign (high-value for QC leads managing large studies)
+1. ~~**Gap 1** — Stage Reassignment~~ **COMPLETE** (resolved 2026-03-27)
+2. **Gap 2** — Bulk Assign (high-value for QC leads managing large studies; can use Gap 1 as fallback)
 3. **Gap 5** — Pagination (data correctness, no write API dependency)
 4. **Gap 4 + Gap 3** — Rules Persistence + Apply Rules (implement together)
 5. **Gap 6** — Audit Trail (design with Gaps 1-2, implement when write APIs stabilize)
+6. **Gap 7** — Data Explorer / Cross-App Discovery (nice-to-have, current workaround is functional)

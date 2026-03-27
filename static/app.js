@@ -101,8 +101,8 @@ var API_GAPS = {
   },
   bulkAssign: {
     label: 'Bulk Assign',
-    message: 'This action is coming soon — the Domino write API for bulk assignment is in development.',
-    ready: false,
+    message: 'Assign a stage owner across multiple deliverables.',
+    ready: true,
   },
   applyRules: {
     label: 'Apply Assignment Rules',
@@ -2307,37 +2307,100 @@ function QCTrackerExpandedRow(props) {
 function BulkActionBar(props) {
   var count = props.count;
   var onClear = props.onClear;
+  var onRefresh = props.onRefresh;
   var terms = props.terms || DEFAULT_TERMS;
   var B = terms.bundle;
   var selectedKeys = props.selectedKeys || [];
+  var bundles = props.bundles || [];
   var pmc = props.projectMembersCache || {};
 
   var _ba = useState(null);
   var bulkAssignee = _ba[0];
   var setBulkAssignee = _ba[1];
 
+  var _bl = useState(false);
+  var bulkLoading = _bl[0];
+  var setBulkLoading = _bl[1];
+
   if (count === 0) return null;
 
-  // Combine all project members for bulk assignment
+  // Combine all project members for bulk assignment — use id as value
   var seen = {};
   var memberOptions = [];
   Object.keys(pmc).forEach(function(pid) {
     (pmc[pid] || []).forEach(function(m) {
-      if (!seen[m.userName]) {
-        seen[m.userName] = true;
-        memberOptions.push({ label: (m.firstName || '') + ' ' + (m.lastName || '') + ' (' + m.userName + ')', value: m.userName });
+      if (!seen[m.id]) {
+        seen[m.id] = true;
+        memberOptions.push({ label: (m.firstName || '') + ' ' + (m.lastName || '') + ' (' + m.userName + ')', value: m.id });
       }
     });
   });
 
-  var gapInfo = API_GAPS.bulkAssign;
+  // Get the selected bundles with their current stage info
+  function getSelectedBundlesWithStages() {
+    return selectedKeys.map(function(bundleId) {
+      var bundle = bundles.find(function(b) { return b.id === bundleId; });
+      if (!bundle) return null;
+      // Find the current (active) stage — stage matching bundle.stage name, or first non-completed stage
+      var currentStageIdx = -1;
+      var stageNames = (bundle.stages || []).map(function(s) {
+        return (s.stage && s.stage.name) || s.name || '';
+      });
+      if (bundle.stage) {
+        currentStageIdx = stageNames.indexOf(bundle.stage);
+      }
+      if (currentStageIdx < 0) currentStageIdx = 0;
+      var stageData = bundle.stages[currentStageIdx];
+      if (!stageData) return null;
+      var stageId = stageData.stageId || (stageData.stage && stageData.stage.id);
+      return { bundleId: bundle.id, bundleName: bundle.name, stageId: stageId, stageName: stageNames[currentStageIdx], bundle: bundle, stageData: stageData };
+    }).filter(Boolean);
+  }
 
   function handleBulkAssign() {
-    if (!bulkAssignee) return;
-    if (!gapInfo.ready) {
-      antd.message.warning(gapInfo.message);
+    if (!bulkAssignee || bulkLoading) return;
+    var targets = getSelectedBundlesWithStages();
+    if (targets.length === 0) {
+      antd.message.warning('No valid stages found for selected ' + B.toLowerCase() + 's');
       return;
     }
+    var missingStageIds = targets.filter(function(t) { return !t.stageId; });
+    if (missingStageIds.length > 0) {
+      antd.message.warning(missingStageIds.length + ' ' + B.toLowerCase() + '(s) have no stage ID — skipping those');
+    }
+    var validTargets = targets.filter(function(t) { return t.stageId; });
+    if (validTargets.length === 0) return;
+
+    setBulkLoading(true);
+    var body = { assignee: { id: bulkAssignee } };
+    var promises = validTargets.map(function(t) {
+      return apiPatch('api/bundles/' + t.bundleId + '/stages/' + t.stageId, body)
+        .then(function(resp) {
+          // Update local state immediately
+          if (resp && resp.assignee && t.stageData) {
+            t.stageData.assignee = resp.assignee;
+          }
+          return { success: true, bundleName: t.bundleName, stageName: t.stageName };
+        })
+        .catch(function(err) {
+          return { success: false, bundleName: t.bundleName, stageName: t.stageName, error: err.message || String(err) };
+        });
+    });
+
+    Promise.all(promises).then(function(results) {
+      setBulkLoading(false);
+      var succeeded = results.filter(function(r) { return r.success; });
+      var failed = results.filter(function(r) { return !r.success; });
+      if (failed.length === 0) {
+        antd.message.success('Assigned ' + succeeded.length + ' ' + B.toLowerCase() + (succeeded.length > 1 ? 's' : '') + ' successfully');
+      } else if (succeeded.length > 0) {
+        antd.message.warning(succeeded.length + ' succeeded, ' + failed.length + ' failed: ' + failed.map(function(f) { return f.bundleName; }).join(', '));
+      } else {
+        antd.message.error('All assignments failed: ' + failed[0].error);
+      }
+      setBulkAssignee(null);
+      if (onRefresh) onRefresh();
+    });
   }
 
   return h('div', { className: 'bulk-action-bar' },
@@ -2354,14 +2417,12 @@ function BulkActionBar(props) {
         onChange: setBulkAssignee,
         optionFilterProp: 'label',
       }),
-      h(Tooltip, { title: gapInfo.ready ? null : gapInfo.message },
-        h(Button, {
-          size: 'small', type: 'primary',
-          disabled: !bulkAssignee || !gapInfo.ready,
-          onClick: handleBulkAssign,
-        }, 'Assign')
-      ),
-      !gapInfo.ready ? h(Tag, { color: 'orange', style: { fontSize: 10, lineHeight: '18px', padding: '0 4px' } }, 'API Pending') : null,
+      h(Button, {
+        size: 'small', type: 'primary',
+        disabled: !bulkAssignee || bulkLoading,
+        loading: bulkLoading,
+        onClick: handleBulkAssign,
+      }, 'Assign'),
       h(Button, { size: 'small', type: 'link', onClick: onClear, style: { color: '#fff' } }, 'Clear')
     )
   );
@@ -2852,7 +2913,9 @@ function QCTrackerPage(props) {
       h(BulkActionBar, {
         count: selectedRowKeys.length,
         selectedKeys: selectedRowKeys,
+        bundles: bundles,
         onClear: function() { setSelectedRowKeys([]); },
+        onRefresh: function() { setSelectedRowKeys([]); },
         terms: terms,
         projectMembersCache: props.projectMembersCache,
       }),

@@ -17,6 +17,7 @@ All API calls made by the frontend, routed through the FastAPI backend proxy.
 | `GET /api/policies?limit=200` | `app.py:list_policies` | `GET /api/governance/v1/policy-overviews` | `?limit=200` | `{ data: [{ id, name, description, status, version, usage }] }` |
 | `GET /api/policies/{id}` | `app.py:get_policy` | `GET /api/governance/v1/policies/{id}` | — | `{ id, name, stages: [{ id, name }], ... }` |
 | `GET /api/terminology` | `app.py:get_terminology` | `GET /v4/admin/whitelabel/configurations` | — | `{ bundle: "string", policy: "string" }` |
+| `GET /api/data-explorer-url` | `app.py:get_data_explorer_url` | `GET /api/apps/beta/apps` (+ env var override) | — | `{ url: "string" or null }` |
 
 ## Fetch Sequence (fetchLiveData)
 
@@ -43,8 +44,26 @@ Phase 2 — All fire simultaneously (single Promise.all):
 
 | Action | UI Location | Status | Notes |
 |--------|------------|--------|-------|
-| Stage Reassignment | QC Tracker expanded row | API Pending | Select disabled, tooltip explains |
+| Stage Reassignment | QC Tracker expanded row | **LIVE** | PATCH method, body: {assignee: {id: userId}}. Implemented and working. Upstream: `PATCH /api/governance/v1/bundles/{bundleId}/stages/{stageId}` |
 | Bulk Assign | QC Tracker bulk action bar | API Pending | Button disabled, tooltip explains |
 | Apply Assignment Rules | Assignment Rules page | API Pending | Warning toast on attempt |
 
 These are gated by the `API_GAPS` config object in `app.js`. Set `ready: true` when the Domino write API becomes available.
+
+## Cross-App Discovery
+
+The app discovers other running Domino apps (e.g., Data Explorer) via the Beta Apps API:
+
+| Step | Detail |
+|------|--------|
+| 1. Check env var | `DATA_EXPLORER_URL` override (highest priority) |
+| 2. Call Beta Apps API | `GET /api/apps/beta/apps?limit=100` |
+| 3. Name match | Search for apps with "data explorer" in name (case-insensitive) |
+| 4. Extract URL | Use `runningAppUrl`, `url`, or `vanityUrl` field; fallback to constructing from app ID |
+| 5. Cache | Result cached after first probe (won't re-fetch) |
+
+Deep-link format: `{dataExplorerUrl}/?dataset={encodedPath}`
+
+Path construction by attachment type:
+- `DatasetSnapshotFile` → `/domino/datasets/local/snapshots/{datasetName}/{snapshotVersion}/{filename}`
+- `NetAppVolumeSnapshotFile` → `/domino/netapp-volumes/{volumeName}/{filename}`
