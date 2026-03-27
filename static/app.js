@@ -6864,7 +6864,20 @@ function App() {
                 style: { marginBottom: 12 },
               })
             : null,
-          renderPage()
+          loading && bundles.length === 0
+            ? h('div', { className: 'page-container' },
+                h(antd.Skeleton, { active: true, title: { width: '30%' }, paragraph: { rows: 0 }, style: { marginBottom: 16 } }),
+                h('div', { className: 'stats-row', style: { marginBottom: 24 } },
+                  h('div', { className: 'stat-card' }, h(antd.Skeleton, { active: true, title: { width: '60%' }, paragraph: { rows: 1, width: ['40%'] } })),
+                  h('div', { className: 'stat-card' }, h(antd.Skeleton, { active: true, title: { width: '60%' }, paragraph: { rows: 1, width: ['40%'] } })),
+                  h('div', { className: 'stat-card' }, h(antd.Skeleton, { active: true, title: { width: '60%' }, paragraph: { rows: 1, width: ['40%'] } })),
+                  h('div', { className: 'stat-card' }, h(antd.Skeleton, { active: true, title: { width: '60%' }, paragraph: { rows: 1, width: ['40%'] } }))
+                ),
+                h('div', { className: 'panel', style: { padding: 16 } },
+                  h(antd.Skeleton, { active: true, title: false, paragraph: { rows: 8, width: ['100%', '95%', '100%', '90%', '100%', '95%', '85%', '100%'] } })
+                )
+              )
+            : renderPage()
         )
       ),
       h(DetailDrawer, {
