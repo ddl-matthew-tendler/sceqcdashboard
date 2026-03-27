@@ -399,19 +399,71 @@ def v4_post(path, json_body=None):
 def start_project_run(project_id: str, body: dict):
     """Start a Domino job in the given project.
     Body: {"command": "python scripts/validate.py", "title": "Automation: ..."}
+    Tries multiple known Domino Jobs API paths.
     """
+    host = get_domino_host()
+    if not host:
+        raise HTTPException(status_code=503, detail="DOMINO_API_HOST not set")
+    headers = get_auth_headers()
+    headers["Content-Type"] = "application/json"
+
     payload = {
         "projectId": project_id,
         "commandToRun": body.get("command", ""),
         "title": body.get("title", "Automation Run"),
     }
-    return v4_post("/jobs/start", json_body=payload)
+
+    # Try known Domino Jobs API endpoint patterns
+    endpoints = [
+        f"{host}/v4/jobs/start",
+        f"{host}/api/jobs/v1/jobs",
+        f"{host}/v4/projects/{project_id}/runs",
+        f"{host}/api/runs/v1/runs",
+    ]
+
+    last_resp = None
+    for url in endpoints:
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=60)
+            if resp.status_code in (200, 201):
+                return resp.json()
+            last_resp = resp
+        except Exception:
+            continue
+
+    # If none worked, return the last error for debugging
+    detail = last_resp.text if last_resp else "All endpoints failed"
+    status = last_resp.status_code if last_resp else 503
+    raise HTTPException(status_code=status, detail=detail)
 
 
 @app.get("/api/projects/{project_id}/runs/{run_id}")
 def get_project_run(project_id: str, run_id: str):
-    """Get status of a Domino job run."""
-    return v4_get(f"/jobs/{run_id}")
+    """Get status of a Domino job run. Tries multiple endpoint patterns."""
+    host = get_domino_host()
+    if not host:
+        raise HTTPException(status_code=503, detail="DOMINO_API_HOST not set")
+    headers = get_auth_headers()
+
+    endpoints = [
+        f"{host}/v4/jobs/{run_id}",
+        f"{host}/api/jobs/v1/jobs/{run_id}",
+        f"{host}/api/runs/v1/runs/{run_id}",
+    ]
+
+    last_resp = None
+    for url in endpoints:
+        try:
+            resp = requests.get(url, headers=headers, timeout=30)
+            if resp.status_code == 200:
+                return resp.json()
+            last_resp = resp
+        except Exception:
+            continue
+
+    detail = last_resp.text if last_resp else "All endpoints failed"
+    status = last_resp.status_code if last_resp else 503
+    raise HTTPException(status_code=status, detail=detail)
 
 
 # ── Whitelabel terminology ─────────────────────────────────────────

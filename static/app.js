@@ -68,8 +68,8 @@ var API_GAPS = {
   },
   automationRun: {
     label: 'Run Automation',
-    message: 'This action requires the Domino Jobs API (v4/jobs). The proxy endpoints are ready — set ready: true once confirmed working on your Domino instance.',
-    ready: false,
+    message: 'Trigger a Domino job via the Jobs API. If the job fails to start, check that the Jobs API is enabled on your Domino instance and that the script path is valid.',
+    ready: true,
   },
 };
 
@@ -4045,7 +4045,27 @@ function AutomationRulesPage(props) {
       antd.message.success('Job started: ' + runId);
       pollJobStatus(rule.id, rule.projectId, runId);
     }).catch(function(err) {
-      antd.message.error('Failed to start job: ' + (err.message || err));
+      var detail = (err.message || String(err));
+      var hint = '';
+      if (detail.indexOf('404') >= 0) hint = ' — The Jobs API may not be enabled on this Domino instance.';
+      else if (detail.indexOf('403') >= 0) hint = ' — Check that your API token has permission to start jobs.';
+      else if (detail.indexOf('401') >= 0) hint = ' — Authentication failed. Verify your Domino API token.';
+      else if (detail.indexOf('503') >= 0) hint = ' — DOMINO_API_HOST may not be configured.';
+      antd.notification.error({
+        message: 'Automation Job Failed to Start',
+        description: detail + hint,
+        duration: 8,
+      });
+      // Record the failure in history so the user can see it
+      setAutomationHistory(function(prev) {
+        return [{
+          id: 'hist-' + Date.now(), ruleId: rule.id, runId: 'N/A',
+          projectId: rule.projectId, policyName: rule.policyName,
+          stageName: rule.stageName, scriptPath: rule.scriptPath,
+          startedAt: new Date().toISOString(), status: 'Start Failed',
+          completedAt: new Date().toISOString(),
+        }].concat(prev);
+      });
     });
   }
 
@@ -4060,6 +4080,7 @@ function AutomationRulesPage(props) {
         setAutomationHistory(function(prev) {
           return prev.map(function(h) { return h.runId === runId ? Object.assign({}, h, { status: 'Timeout', completedAt: new Date().toISOString() }) : h; });
         });
+        antd.notification.warning({ message: 'Job Polling Timeout', description: 'Job ' + runId + ' did not complete within 10 minutes. It may still be running in Domino — check the project runs page.', duration: 10 });
         return;
       }
       apiGet('/api/projects/' + projectId + '/runs/' + runId)
@@ -4076,7 +4097,20 @@ function AutomationRulesPage(props) {
             else antd.message.error('Job ' + status + ': ' + runId);
           }
         })
-        .catch(function() { /* swallow polling errors */ });
+        .catch(function(err) {
+          // After 3 consecutive poll failures, stop polling and report
+          if (!pollJobStatus._failCount) pollJobStatus._failCount = {};
+          pollJobStatus._failCount[runId] = (pollJobStatus._failCount[runId] || 0) + 1;
+          if (pollJobStatus._failCount[runId] >= 3) {
+            clearInterval(interval);
+            delete pollJobStatus._failCount[runId];
+            setRunningJobs(function(prev) { var next = Object.assign({}, prev); delete next[ruleId]; return next; });
+            setAutomationHistory(function(prev) {
+              return prev.map(function(h) { return h.runId === runId ? Object.assign({}, h, { status: 'Poll Error', completedAt: new Date().toISOString() }) : h; });
+            });
+            antd.notification.error({ message: 'Job Status Unavailable', description: 'Could not poll status for job ' + runId + '. The job may still be running — check the Domino project runs page.', duration: 8 });
+          }
+        });
     }, 5000);
   }
 
@@ -4124,10 +4158,10 @@ function AutomationRulesPage(props) {
     { title: 'Script', dataIndex: 'scriptPath', key: 'script', ellipsis: true,
       render: function(t) { return h('code', { style: { fontSize: 11 } }, t); } },
     { title: 'Status', dataIndex: 'status', key: 'status', width: 110,
-      filters: [{ text: 'Running', value: 'Running' }, { text: 'Succeeded', value: 'Succeeded' }, { text: 'Failed', value: 'Failed' }, { text: 'Completed', value: 'Completed' }],
+      filters: [{ text: 'Running', value: 'Running' }, { text: 'Succeeded', value: 'Succeeded' }, { text: 'Failed', value: 'Failed' }, { text: 'Completed', value: 'Completed' }, { text: 'Start Failed', value: 'Start Failed' }, { text: 'Timeout', value: 'Timeout' }, { text: 'Poll Error', value: 'Poll Error' }],
       onFilter: function(v, r) { return r.status === v; },
       render: function(s) {
-        var color = s === 'Succeeded' || s === 'Completed' ? 'green' : s === 'Failed' || s === 'Error' ? 'red' : s === 'Running' ? 'blue' : 'default';
+        var color = s === 'Succeeded' || s === 'Completed' ? 'green' : s === 'Failed' || s === 'Error' || s === 'Start Failed' ? 'red' : s === 'Running' ? 'blue' : s === 'Timeout' || s === 'Poll Error' ? 'orange' : 'default';
         return h(Tag, { color: color }, s || 'Unknown');
       } },
     { title: 'Run ID', dataIndex: 'runId', key: 'runId', width: 120, ellipsis: true,
