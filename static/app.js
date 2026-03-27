@@ -3478,7 +3478,15 @@ function QCTrackerPage(props) {
       plotOptions: {
         pie: {
           innerSize: '55%',
+          cursor: 'pointer',
           dataLabels: { enabled: true, format: '{point.name}: {point.y}', style: { fontSize: '10px' } },
+          point: { events: { click: function() {
+            var stateName = this.name; // 'Active', 'Complete', or 'Archived'
+            // Use stable setters directly (not handleStatClick which may be stale in this closure)
+            setSearchText(''); setFilterPolicies([]); setFilterState(null); setFilterAssignee(null); setFilterFlags([]); setFilterStage(null);
+            setActiveStatCard(stateName === 'Active' ? 'active' : stateName === 'Complete' ? 'complete' : null);
+            setFilterState(stateName);
+          } } },
         },
       },
       series: [{
