@@ -3818,6 +3818,7 @@ function AssignmentRulesPage(props) {
   var assignmentRules = props.assignmentRules;
   var setAssignmentRules = props.setAssignmentRules;
   var terms = props.terms;
+  var onNavigate = props.onNavigate;
   var B = terms.bundle || 'Bundle';
   var P = terms.policy || 'Policy';
 
@@ -4103,7 +4104,10 @@ function AssignmentRulesPage(props) {
   return h('div', null,
     // Page header
     h('div', { className: 'page-header' },
-      h('h2', null, 'Bulk Assignment Rules'),
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: 12 } },
+        h('h2', { style: { margin: 0 } }, 'Bulk Assignment Rules'),
+        onNavigate ? h(Button, { size: 'small', onClick: function() { onNavigate('stages'); } }, '\u2190 Stage Manager') : null
+      ),
       h('p', { className: 'page-subtitle' }, 'Define rules to bulk-assign team members to ' + B.toLowerCase() + ' stages')
     ),
 
@@ -4287,6 +4291,7 @@ function StageAssignmentsPage(props) {
   var bundles = props.bundles;
   var terms = props.terms;
   var projectMembersCache = props.projectMembersCache || {};
+  var onNavigate = props.onNavigate;
   var B = capFirst(terms.bundle || 'Bundle');
   var P = capFirst(terms.policy || 'Policy');
 
@@ -4588,7 +4593,10 @@ function StageAssignmentsPage(props) {
     // Header
     h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 } },
       h('div', null,
-        h('h2', { style: { margin: 0, fontSize: 20, fontWeight: 600, color: '#2D2D3F' } }, 'Stage Manager'),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 12 } },
+          h('h2', { style: { margin: 0, fontSize: 20, fontWeight: 600, color: '#2D2D3F' } }, 'Stage Manager'),
+          onNavigate ? h(Button, { size: 'small', onClick: function() { onNavigate('rules'); } }, 'Bulk Assignment Rules \u2192') : null
+        ),
         h('div', { style: { color: '#8F8FA3', fontSize: 13, marginTop: 4 } },
           'View all stages across ' + B.toLowerCase() + 's. Identify unassigned work, reassign owners, and manage workload.'
         )
@@ -6766,7 +6774,7 @@ function App() {
       case 'tracker':
         return h(QCTrackerPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms, projectMembersCache: projectMembersCache, dataExplorerUrl: dataExplorerUrl, connected: connected, policies: livePolicies, onRefresh: function() { if (connected) fetchLiveData(); } });
       case 'rules':
-        return h(AssignmentRulesPage, { bundles: bundles, setBundles: setBundles, assignmentRules: assignmentRules, setAssignmentRules: setAssignmentRules, terms: terms, projectMembersCache: projectMembersCache, livePolicies: livePolicies });
+        return h(AssignmentRulesPage, { bundles: bundles, setBundles: setBundles, assignmentRules: assignmentRules, setAssignmentRules: setAssignmentRules, terms: terms, projectMembersCache: projectMembersCache, livePolicies: livePolicies, onNavigate: setActivePage });
       case 'milestones':
         return h(MilestonesPage, { bundles: scopedBundles, loading: loading, terms: terms });
       case 'approvals':
@@ -6776,7 +6784,7 @@ function App() {
       case 'metrics':
         return h(MetricsPage, { bundles: scopedBundles, terms: terms });
       case 'stages':
-        return h(StageAssignmentsPage, { bundles: bundles, terms: terms, projectMembersCache: projectMembersCache });
+        return h(StageAssignmentsPage, { bundles: bundles, terms: terms, projectMembersCache: projectMembersCache, onNavigate: setActivePage });
       case 'automation':
         return h(AutomationRulesPage, { bundles: bundles, automationRules: automationRules, setAutomationRules: setAutomationRules, automationHistory: automationHistory, setAutomationHistory: setAutomationHistory, terms: terms, projectMembersCache: projectMembersCache });
       case 'risk':
