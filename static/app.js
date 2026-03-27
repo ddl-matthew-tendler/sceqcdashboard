@@ -342,20 +342,32 @@ var NAV_ITEMS = [
 function Sidebar(props) {
   var active = props.active;
   var onNav = props.onNav;
-  return h('div', { className: 'sidebar' },
+  var collapsed = props.collapsed;
+  var onToggleCollapse = props.onToggleCollapse;
+  return h('div', { className: 'sidebar' + (collapsed ? ' sidebar-collapsed' : '') },
     NAV_ITEMS.map(function(item) {
       var IconComp = icons && icons[item.iconName] ? icons[item.iconName] : null;
-      return h('div', {
-        key: item.key,
-        className: 'sidebar-item' + (active === item.key ? ' active' : ''),
-        onClick: function() { onNav(item.key); },
-      },
-        h('span', { className: 'sidebar-icon' },
-          IconComp ? h(IconComp, null) : null
-        ),
-        h('span', null, item.label)
+      return h(Tooltip, { key: item.key, title: collapsed ? item.label : null, placement: 'right' },
+        h('div', {
+          className: 'sidebar-item' + (active === item.key ? ' active' : ''),
+          onClick: function() { onNav(item.key); },
+        },
+          h('span', { className: 'sidebar-icon' },
+            IconComp ? h(IconComp, null) : null
+          ),
+          collapsed ? null : h('span', null, item.label)
+        )
       );
-    })
+    }),
+    h('div', {
+      className: 'sidebar-collapse-btn',
+      onClick: onToggleCollapse,
+      title: collapsed ? 'Expand sidebar' : 'Collapse sidebar',
+    },
+      icons && icons.MenuFoldOutlined && icons.MenuUnfoldOutlined
+        ? h(collapsed ? icons.MenuUnfoldOutlined : icons.MenuFoldOutlined, null)
+        : h('span', null, collapsed ? '\u00BB' : '\u00AB')
+    )
   );
 }
 
@@ -6383,6 +6395,8 @@ function App() {
   var _sc3b = useState(false); var filterMyFutureStage = _sc3b[0]; var setFilterMyFutureStage = _sc3b[1];
   var _sc3c = useState(false); var filterMyPriorStage = _sc3c[0]; var setFilterMyPriorStage = _sc3c[1];
   var _sc4 = useState(null); var scopeCurrentUser = _sc4[0]; var setScopeCurrentUser = _sc4[1];
+  var _sidebarCollapsed = useState(function() { try { return localStorage.getItem('sce_sidebar_collapsed') === 'true'; } catch(e) { return false; } });
+  var sidebarCollapsed = _sidebarCollapsed[0]; var setSidebarCollapsed = _sidebarCollapsed[1];
 
   // Load assignment rules from localStorage on mount
   useEffect(function() {
@@ -6783,7 +6797,19 @@ function App() {
     h('div', null,
       h(TopNav, { terms: terms, useDummy: useDummy, onToggleDummy: handleToggleDummy, connected: connected }),
       h('div', { className: 'app-layout' },
-        h(Sidebar, { active: activePage, onNav: function(page) {
+        h(Sidebar, { active: activePage, collapsed: sidebarCollapsed, onToggleCollapse: function() {
+          setSidebarCollapsed(function(c) {
+            var next = !c;
+            try { localStorage.setItem('sce_sidebar_collapsed', String(next)); } catch(e) {}
+            // Trigger Highcharts reflow after sidebar animation
+            setTimeout(function() {
+              if (typeof Highcharts !== 'undefined' && Highcharts.charts) {
+                Highcharts.charts.forEach(function(chart) { if (chart) chart.reflow(); });
+              }
+            }, 300);
+            return next;
+          });
+        }, onNav: function(page) {
           setActivePage(page);
           var mc = document.querySelector('.main-content');
           if (mc) mc.scrollTop = 0;

@@ -79,6 +79,38 @@ body {
   border-right: 1px solid #E0E0E0;
   padding: 16px 0;
   flex-shrink: 0;
+  transition: width 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+.sidebar-collapsed {
+  width: 56px;
+}
+.sidebar-collapsed .sidebar-item {
+  padding: 10px 0;
+  justify-content: center;
+  gap: 0;
+  border-left-width: 3px;
+}
+.sidebar-collapse-btn {
+  margin-top: auto;
+  padding: 10px 20px;
+  font-size: 14px;
+  color: #8F8FA3;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  border-top: 1px solid #E0E0E0;
+}
+.sidebar-collapse-btn:hover {
+  color: #543FDE;
+  background: #F5F5F8;
+}
+.sidebar-collapsed .sidebar-collapse-btn {
+  padding: 10px 0;
 }
 
 .sidebar-item {
