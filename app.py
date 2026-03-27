@@ -18,6 +18,83 @@ def get_domino_host():
     return host.rstrip("/")
 
 
+# Governance API may live on a different internal service than DOMINO_API_HOST.
+# nucleus-frontend doesn't serve /api/governance/v1/* inside the cluster.
+# We probe candidate hosts on first call and cache the working one.
+_gov_host_cache = {"host": None, "probed": False}
+
+
+def _get_gov_host_candidates():
+    """Return list of (label, base_url) candidates for governance API."""
+    primary = get_domino_host()
+    candidates = []
+    if primary:
+        candidates.append(("DOMINO_API_HOST", primary))
+
+    # DOMINO_API_PROXY may route to all APIs including governance
+    proxy = os.environ.get("DOMINO_API_PROXY", "").rstrip("/")
+    if proxy and proxy != primary:
+        candidates.append(("DOMINO_API_PROXY", proxy))
+
+    # DOMINO_USER_HOST may be the external-facing URL
+    user_host = os.environ.get("DOMINO_USER_HOST", "").rstrip("/")
+    if user_host:
+        # Ensure it has a scheme
+        if not user_host.startswith("http"):
+            user_host = "https://" + user_host
+        if user_host != primary:
+            candidates.append(("DOMINO_USER_HOST", user_host))
+
+    # Common internal Kubernetes service names for governance
+    for svc in [
+        "http://governance-service.domino-platform:80",
+        "http://governance-svc.domino-platform:80",
+        "http://nucleus-frontend.domino-platform:80",
+    ]:
+        if svc.rstrip("/") != primary:
+            candidates.append(("k8s:" + svc.split("//")[1].split(".")[0], svc))
+
+    return candidates
+
+
+def _get_gov_host():
+    """Return the working governance API host, probing if needed."""
+    if _gov_host_cache["probed"]:
+        return _gov_host_cache["host"]
+
+    # Get auth for probing
+    api_key = _get_api_key()
+    if not api_key:
+        token = _get_sidecar_token()
+        if token:
+            api_key = token  # Use sidecar token as API key for probe
+
+    if not api_key:
+        _gov_host_cache["probed"] = True
+        return None
+
+    candidates = _get_gov_host_candidates()
+    for label, base_url in candidates:
+        try:
+            test_url = f"{base_url}/api/governance/v1/bundles?limit=1"
+            r = requests.get(test_url, headers={"X-Domino-Api-Key": api_key}, timeout=10)
+            if r.status_code == 200:
+                logger.info(f"Governance host probe: {label} ({base_url}) WORKS")
+                _gov_host_cache["host"] = base_url
+                _gov_host_cache["probed"] = True
+                return base_url
+            else:
+                logger.info(f"Governance host probe: {label} ({base_url}) → {r.status_code}")
+        except Exception as e:
+            logger.info(f"Governance host probe: {label} ({base_url}) → ERROR: {e}")
+
+    # No candidate worked — fall back to primary
+    logger.warning("Governance host probe: no candidate worked, falling back to DOMINO_API_HOST")
+    _gov_host_cache["host"] = None
+    _gov_host_cache["probed"] = True
+    return None
+
+
 def _get_api_key():
     """Return an API key if one is available (local dev or Domino env)."""
     return (
@@ -51,10 +128,10 @@ def get_auth_headers():
 
 def gov_get(path, params=None):
     """GET governance endpoint, trying API key first, then Bearer, then API key with sidecar token."""
-    host = get_domino_host()
-    if not host:
+    gov_host = _get_gov_host() or get_domino_host()
+    if not gov_host:
         raise HTTPException(status_code=503, detail="DOMINO_API_HOST not set")
-    url = f"{host}/api/governance/v1{path}"
+    url = f"{gov_host}/api/governance/v1{path}"
 
     # Strategy 1: API key (works for local dev and if DOMINO_USER_API_KEY is set)
     api_key = _get_api_key()
@@ -101,10 +178,10 @@ def gov_get(path, params=None):
 
 
 def gov_post(path, json_body=None):
-    host = get_domino_host()
-    if not host:
+    gov_host = _get_gov_host() or get_domino_host()
+    if not gov_host:
         raise HTTPException(status_code=503, detail="DOMINO_API_HOST not set")
-    url = f"{host}/api/governance/v1{path}"
+    url = f"{gov_host}/api/governance/v1{path}"
 
     api_key = _get_api_key()
     if api_key:
@@ -287,44 +364,51 @@ def debug_auth():
     except Exception as e:
         sidecar_raw = f"ERROR: {e}"
 
-    # List all DOMINO_* env vars (names only, not values)
+    # Show key host-related env vars (values, not secrets)
+    host_vars = {}
+    for k in ["DOMINO_API_HOST", "DOMINO_API_PROXY", "DOMINO_USER_HOST",
+              "DOMINO_PROJECT_ID", "DOMINO_PROJECT_NAME", "DOMINO_PROJECT_OWNER"]:
+        host_vars[k] = os.environ.get(k, "(not set)")
+
+    # List all DOMINO_* env vars (names only)
     domino_vars = sorted([k for k in os.environ if k.startswith("DOMINO")])
 
-    # Test governance API connectivity
+    # Test governance API connectivity against multiple candidate hosts
     gov_test = {}
-    host = get_domino_host()
-    if host and sidecar_token:
-        test_url = f"{host}/api/governance/v1/bundles?limit=1"
-        token_val = sidecar_token.replace("...", "")  # Don't use truncated token
-        # Re-fetch full token for testing
-        try:
-            full_resp = requests.get("http://localhost:8899/access-token", timeout=3)
-            full_token = full_resp.text.strip()
-            if full_token.startswith("Bearer "):
-                full_token = full_token[len("Bearer "):]
+    candidates = _get_gov_host_candidates()
 
-            # Test X-Domino-Api-Key
-            r1 = requests.get(test_url, headers={"X-Domino-Api-Key": full_token}, timeout=10)
-            gov_test["X-Domino-Api-Key"] = {"status": r1.status_code, "body_preview": r1.text[:200]}
+    try:
+        full_resp = requests.get("http://localhost:8899/access-token", timeout=3)
+        full_token = full_resp.text.strip()
+        if full_token.startswith("Bearer "):
+            full_token = full_token[len("Bearer "):]
+        api_key = _get_api_key()
+        auth_token = api_key or full_token
 
-            # Test Bearer
-            r2 = requests.get(test_url, headers={"Authorization": f"Bearer {full_token}"}, timeout=10)
-            gov_test["Bearer"] = {"status": r2.status_code, "body_preview": r2.text[:200]}
+        for label, base_url in candidates:
+            test_url = f"{base_url}/api/governance/v1/bundles?limit=1"
+            try:
+                r = requests.get(test_url, headers={"X-Domino-Api-Key": auth_token}, timeout=10)
+                gov_test[label] = {"url": test_url, "status": r.status_code, "body_preview": r.text[:200]}
+            except Exception as e:
+                gov_test[label] = {"url": test_url, "error": str(e)}
 
-            # Test v4 (should work with Bearer)
-            v4_url = f"{host}/v4/users/self"
-            r3 = requests.get(v4_url, headers={"Authorization": f"Bearer {full_token}"}, timeout=10)
-            gov_test["v4_Bearer"] = {"status": r3.status_code, "body_preview": r3.text[:200]}
-        except Exception as e:
-            gov_test["error"] = str(e)
+        # Also test v4 on primary host
+        v4_url = f"{get_domino_host()}/v4/users/self"
+        r3 = requests.get(v4_url, headers={"Authorization": f"Bearer {full_token}"}, timeout=10)
+        gov_test["v4_Bearer"] = {"url": v4_url, "status": r3.status_code, "body_preview": r3.text[:200]}
+    except Exception as e:
+        gov_test["error"] = str(e)
 
     return {
         "has_API_KEY_OVERRIDE": has_override,
         "has_DOMINO_USER_API_KEY": has_user_key,
         "has_DOMINO_API_HOST": has_host,
         "domino_host": get_domino_host() or "(not set)",
+        "gov_host": _get_gov_host() or "(same as domino_host)",
         "sidecar_token_preview": sidecar_token,
         "sidecar_raw_preview": sidecar_raw,
+        "host_vars": host_vars,
         "domino_env_vars": domino_vars,
         "governance_test": gov_test,
     }
