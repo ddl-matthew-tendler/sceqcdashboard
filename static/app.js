@@ -195,15 +195,17 @@ function TopNav(props) {
   var connected = props.connected;
   // Only show whitelabel badge if terms differ from defaults
   var isWhitelabeled = terms.bundle !== DEFAULT_TERMS.bundle || terms.policy !== DEFAULT_TERMS.policy;
+  var B = capFirst(terms.bundle);
+  var P = capFirst(terms.policy);
   return h('div', { className: 'top-nav' },
     h('img', { src: 'static/domino-logo.svg', className: 'top-nav-logo', alt: 'Domino' }),
     h('div', { className: 'top-nav-divider' }),
     h('span', { className: 'top-nav-title' }, 'SCE QC Tracker'),
     h('div', { className: 'top-nav-right' },
       isWhitelabeled
-        ? h(Tooltip, { title: terms.bundle + 's & ' + terms.policy + ' terminology active' },
+        ? h(Tooltip, { title: B + 's & ' + P + ' terminology active' },
             h('span', { className: 'top-nav-whitelabel-badge' },
-              terms.bundle + 's / ' + terms.policy
+              B + 's / ' + P
             )
           )
         : null,
@@ -1227,7 +1229,7 @@ function StagePopoverContent(props) {
 }
 
 
-//  COMPONENT: Stage Pipeline (inline SVG dots)
+//  COMPONENT: Stage Pipeline (HTML dots with click-to-popover)
 // ═══════════════════════════════════════════════════════════════
 function StagePipeline(props) {
   var bundle = props.bundle;
@@ -1242,80 +1244,42 @@ function StagePipeline(props) {
 
   var _pop = useState(null); var popoverStage = _pop[0]; var setPopoverStage = _pop[1];
 
-  var dotR = 6;
-  var gap = 8;
-  var step = dotR * 2 + gap;
-  var svgW = stageNames.length * dotR * 2 + (stageNames.length - 1) * gap;
-  var svgH = dotR * 2 + 4;
+  return h('div', { className: 'stage-pipeline-row', onClick: function(e) { e.stopPropagation(); } },
+    stageNames.map(function(name, j) {
+      var dotState;
+      if (isComplete || j < currentIdx) dotState = 'completed';
+      else if (j === currentIdx) dotState = hasOpenFindings ? 'blocked' : 'active';
+      else dotState = 'pending';
 
-  var elements = [];
+      var isLast = j === stageNames.length - 1;
+      var lineState = (isComplete || j < currentIdx) ? 'completed' : 'pending';
 
-  // Connector lines
-  for (var i = 0; i < stageNames.length - 1; i++) {
-    var x1 = dotR + i * step + dotR;
-    var x2 = x1 + gap;
-    var lineColor = (isComplete || i < currentIdx) ? '#28A464' : '#D1D1DB';
-    var dashArray = (isComplete || i < currentIdx) ? 'none' : '3,2';
-    elements.push(h('line', {
-      key: 'line-' + i,
-      x1: x1, y1: svgH / 2, x2: x2, y2: svgH / 2,
-      stroke: lineColor, strokeWidth: 2, strokeDasharray: dashArray
-    }));
-  }
-
-  // Dots
-  for (var j = 0; j < stageNames.length; j++) {
-    var cx = dotR + j * step;
-    var cy = svgH / 2;
-    var dotState;
-    if (isComplete || j < currentIdx) dotState = 'completed';
-    else if (j === currentIdx) dotState = hasOpenFindings ? 'blocked' : 'active';
-    else dotState = 'pending';
-
-    var fill, stroke, strokeW, className;
-    if (dotState === 'completed') { fill = '#28A464'; stroke = 'none'; strokeW = 0; className = ''; }
-    else if (dotState === 'active') { fill = '#F59E0B'; stroke = 'none'; strokeW = 0; className = 'stage-dot-pulse'; }
-    else if (dotState === 'blocked') { fill = '#C20A29'; stroke = 'none'; strokeW = 0; className = 'stage-dot-pulse'; }
-    else { fill = 'transparent'; stroke = '#D1D1DB'; strokeW = 2; className = ''; }
-
-    // Create popover content for this dot
-    var popContent = (function(idx, name, state) {
-      return h(StagePopoverContent, {
-        bundle: bundle, stageIdx: idx, stageName: name, dotState: state,
+      var popContent = h(StagePopoverContent, {
+        bundle: bundle, stageIdx: j, stageName: name, dotState: dotState,
         onFindingsClick: onFindingsClick,
         onClose: function() { setPopoverStage(null); },
       });
-    })(j, stageNames[j], dotState);
 
-    elements.push(
-      h(Popover, {
-        key: 'dot-' + j,
-        content: popContent,
-        trigger: 'click',
-        open: popoverStage === j,
-        onOpenChange: (function(idx) {
-          return function(visible) { setPopoverStage(visible ? idx : null); };
-        })(j),
-        placement: 'bottom',
-        overlayClassName: 'stage-popover-overlay',
-        arrow: { pointAtCenter: true },
-      },
-        h('circle', {
-          cx: cx, cy: cy, r: dotR - (strokeW ? 1 : 0),
-          fill: fill, stroke: stroke, strokeWidth: strokeW,
-          className: className + ' stage-dot-interactive',
-          style: { cursor: 'pointer' },
-          onClick: function(e) { e.stopPropagation(); },
-        })
-      )
-    );
-  }
-
-  return h('svg', {
-    width: svgW, height: svgH,
-    className: 'stage-pipeline',
-    style: { verticalAlign: 'middle', overflow: 'visible' }
-  }, elements);
+      return h('div', { key: j, className: 'stage-pip-item' },
+        h(Popover, {
+          content: popContent,
+          trigger: 'click',
+          open: popoverStage === j,
+          onOpenChange: (function(idx) {
+            return function(visible) { setPopoverStage(visible ? idx : null); };
+          })(j),
+          placement: 'bottom',
+          overlayClassName: 'stage-popover-overlay',
+          arrow: { pointAtCenter: true },
+        },
+          h('div', { className: 'stage-pip-dot ' + dotState })
+        ),
+        !isLast
+          ? h('div', { className: 'stage-pip-line ' + lineState })
+          : null
+      );
+    })
+  );
 }
 
 
@@ -1501,37 +1465,47 @@ function QCTrackerExpandedRow(props) {
             )
       ),
 
-      // #4/#6: Approvals section with divider and compact layout
-      bundle._approvals && bundle._approvals.length > 0
-        ? h('div', { className: 'tracker-expanded-section' },
-            h('div', { className: 'tracker-section-title' }, 'Approvals (' + bundle._approvals.length + ')'),
-            bundle._approvals.map(function(a, i) {
-              return h('div', { key: i, className: 'tracker-approval-row' },
-                h('span', { className: 'tracker-approval-dot', style: { background: approvalStatusColor(a.status) } }),
-                h('span', { className: 'tracker-approval-name' }, a.name),
-                a.approvers && a.approvers.length > 0
-                  ? h('span', { className: 'tracker-approval-actors' }, a.approvers.map(function(ap) { return ap.name; }).join(', '))
-                  : null,
-                a.updatedAt
-                  ? h('span', { className: 'tracker-approval-time' }, fmtTimeAgo(a.updatedAt))
-                  : null
-              );
-            })
-          )
-        : null,
+      // Approvals section
+      h('div', { className: 'tracker-expanded-section' },
+        bundle._approvals && bundle._approvals.length > 0
+          ? h('div', null,
+              h('div', { className: 'tracker-section-title' }, 'Approvals (' + bundle._approvals.length + ')'),
+              bundle._approvals.map(function(a, i) {
+                return h('div', { key: i, className: 'tracker-approval-row' },
+                  h('span', { className: 'tracker-approval-dot', style: { background: approvalStatusColor(a.status) } }),
+                  h('span', { className: 'tracker-approval-name' }, a.name),
+                  a.approvers && a.approvers.length > 0
+                    ? h('span', { className: 'tracker-approval-actors' }, a.approvers.map(function(ap) { return ap.name; }).join(', '))
+                    : null,
+                  a.updatedAt
+                    ? h('span', { className: 'tracker-approval-time' }, fmtTimeAgo(a.updatedAt))
+                    : null
+                );
+              })
+            )
+          : h('div', null,
+              h('div', { className: 'tracker-section-title' }, 'Approvals'),
+              h('div', { className: 'tracker-empty-state' }, 'No approvals configured for this stage.')
+            )
+      ),
 
-      // #4: Gates section with divider
-      bundle._gates && bundle._gates.length > 0
-        ? h('div', { className: 'tracker-expanded-section' },
-            h('div', { className: 'tracker-section-title' }, 'Gates (' + bundle._gates.length + ')'),
-            bundle._gates.map(function(g, i) {
-              return h('div', { key: i, className: 'tracker-approval-row' },
-                h(Tag, { color: g.isOpen ? 'success' : 'error', style: { fontSize: 11 } }, g.isOpen ? 'Open' : 'Closed'),
-                h('span', { className: 'tracker-approval-name' }, g.name)
-              );
-            })
-          )
-        : null,
+      // Gates section
+      h('div', { className: 'tracker-expanded-section' },
+        bundle._gates && bundle._gates.length > 0
+          ? h('div', null,
+              h('div', { className: 'tracker-section-title' }, 'Gates (' + bundle._gates.length + ')'),
+              bundle._gates.map(function(g, i) {
+                return h('div', { key: i, className: 'tracker-approval-row' },
+                  h(Tag, { color: g.isOpen ? 'success' : 'error', style: { fontSize: 11 } }, g.isOpen ? 'Open' : 'Closed'),
+                  h('span', { className: 'tracker-approval-name' }, g.name)
+                );
+              })
+            )
+          : h('div', null,
+              h('div', { className: 'tracker-section-title' }, 'Gates'),
+              h('div', { className: 'tracker-empty-state' }, 'No quality gates defined.')
+            )
+      ),
 
       // #3/#4/#10: Attachments section — wider columns, no Source column, with divider
       bundle._attachments && bundle._attachments.length > 0
@@ -1581,7 +1555,7 @@ function QCTrackerExpandedRow(props) {
           )
         : h('div', { className: 'tracker-expanded-section' },
             h('div', { className: 'tracker-section-title' }, 'Attachments'),
-            h('div', { className: 'tracker-empty-state' }, 'No attachments linked to this deliverable.')
+            h('div', { className: 'tracker-empty-state' }, 'No attachments linked to this ' + B.toLowerCase() + '.')
           )
     )
   );
@@ -1722,7 +1696,7 @@ function FindingsDrawer(props) {
           pagination: findings.length > 10 ? { pageSize: 10 } : false,
           columns: columns,
         })
-      : h(Empty, { description: 'No findings for this deliverable' })
+      : h(Empty, { description: 'No findings recorded' })
   );
 }
 
@@ -1788,7 +1762,7 @@ function AttachmentsDrawer(props) {
           pagination: attachments.length > 10 ? { pageSize: 10 } : false,
           columns: columns,
         })
-      : h(Empty, { description: 'No attachments for this deliverable' })
+      : h(Empty, { description: 'No attachments linked' })
   );
 }
 
@@ -1897,7 +1871,7 @@ function QCTrackerPage(props) {
   // Excel-like column filters + sorters
   var columns = [
     {
-      title: B, dataIndex: 'name', key: 'name', width: 140, fixed: 'left',
+      title: capFirst(B), dataIndex: 'name', key: 'name', width: 140, fixed: 'left',
       sorter: function(a, b) { return a.name.localeCompare(b.name); },
       render: function(name, record) {
         var nameColor = record.state === 'Complete' ? '#28A464' : record.state === 'Archived' ? '#8F8FA3' : '#543FDE';
@@ -1912,7 +1886,7 @@ function QCTrackerPage(props) {
       onFilter: function(v, r) { return r.projectName === v; },
       sorter: function(a, b) { return (a.projectName || '').localeCompare(b.projectName || ''); },
       render: function(t) { return h('span', { style: { fontSize: 12 } }, t || '\u2014'); } },
-    { title: P, dataIndex: 'policyName', key: 'policy', width: 150, ellipsis: true,
+    { title: capFirst(P), dataIndex: 'policyName', key: 'policy', width: 150, ellipsis: true,
       filters: policyOptions.map(function(p) { return { text: p, value: p }; }),
       onFilter: function(v, r) { return r.policyName === v; },
       render: function(t) { return t ? h(Tag, { style: { fontSize: 10 } }, t) : '\u2014'; } },
@@ -1989,7 +1963,7 @@ function QCTrackerPage(props) {
     // Stat cards — clickable to filter
     h('div', { className: 'stats-row' },
       h('div', { className: 'stat-card-clickable', onClick: function() { handleStatClick('total'); } },
-        h(StatCard, { label: 'Total ' + B + 's', value: stats.total, color: 'primary' })),
+        h(StatCard, { label: 'Total ' + capFirst(B) + 's', value: stats.total, color: 'primary' })),
       h('div', { className: 'stat-card-clickable', onClick: function() { handleStatClick('active'); } },
         h(StatCard, { label: 'Active', value: stats.active, color: 'info' })),
       h('div', { className: 'stat-card-clickable', onClick: function() { handleStatClick('openFindings'); } },
@@ -3043,7 +3017,7 @@ function App() {
             }, 'Prior stage'),
             hasScopeFilters
               ? h('span', { style: { marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 } },
-                  h(Tag, { color: 'purple' }, scopedBundles.length + ' of ' + bundles.length + ' deliverables'),
+                  h(Tag, { color: 'purple' }, scopedBundles.length + ' of ' + bundles.length + ' ' + terms.bundle.toLowerCase() + 's'),
                   h(Button, { type: 'link', size: 'small', onClick: function() {
                     setScopeProjects([]); setScopeTags([]); setFilterMyCurrentStage(false); setFilterMyFutureStage(false); setFilterMyPriorStage(false);
                   } }, 'Clear all')

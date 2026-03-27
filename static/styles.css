@@ -834,6 +834,145 @@ body {
   margin: 0 4px;
 }
 
+/* ── Stage Popover ────────────────────────────────── */
+.stage-popover-overlay .ant-popover-inner {
+  padding: 0;
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.08);
+}
+
+.stage-popover {
+  width: 260px;
+  font-family: Inter, Lato, Helvetica Neue, Arial, sans-serif;
+}
+
+.stage-popover-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid #F0F0F3;
+}
+
+.stage-popover-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.stage-popover-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #2E2E38;
+  line-height: 1.3;
+}
+
+.stage-popover-status {
+  font-size: 11px;
+  color: #8F8FA3;
+  margin-top: 1px;
+}
+
+.stage-popover-evidence {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 1px;
+  background: #F0F0F3;
+  margin: 0;
+}
+
+.stage-popover-card {
+  background: #fff;
+  padding: 10px 8px;
+  text-align: center;
+  transition: background 0.15s;
+}
+
+.stage-popover-card.clickable {
+  cursor: pointer;
+}
+
+.stage-popover-card.clickable:hover {
+  background: #F8F7FF;
+}
+
+.stage-popover-card-value {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.stage-popover-card-label {
+  font-size: 9px;
+  color: #8F8FA3;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-top: 3px;
+  line-height: 1.3;
+}
+
+.stage-popover-footer {
+  padding: 8px 16px 10px;
+  border-top: 1px solid #F0F0F3;
+  text-align: center;
+}
+
+.stage-popover-link {
+  font-size: 11px;
+  color: #543FDE;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.stage-popover-link:hover {
+  text-decoration: underline;
+}
+
+/* ── HTML Stage Pipeline (table Progress column) ──── */
+.stage-pipeline-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.stage-pip-item {
+  display: flex;
+  align-items: center;
+}
+
+.stage-pip-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.stage-pip-dot:hover {
+  transform: scale(1.35);
+  box-shadow: 0 0 0 3px rgba(84,63,222,0.2);
+}
+
+.stage-pip-dot.completed { background: #28A464; }
+.stage-pip-dot.active { background: #F59E0B; box-shadow: 0 0 0 3px rgba(245,158,11,0.25); }
+.stage-pip-dot.active:hover { box-shadow: 0 0 0 4px rgba(245,158,11,0.35); }
+.stage-pip-dot.blocked { background: #C20A29; box-shadow: 0 0 0 3px rgba(194,10,41,0.2); }
+.stage-pip-dot.blocked:hover { box-shadow: 0 0 0 4px rgba(194,10,41,0.3); }
+.stage-pip-dot.pending { background: transparent; border: 2px solid #D1D1DB; }
+
+.stage-pip-line {
+  width: 8px;
+  height: 2px;
+  flex-shrink: 0;
+}
+
+.stage-pip-line.completed { background: #28A464; }
+.stage-pip-line.pending {
+  background: repeating-linear-gradient(90deg, #D1D1DB 0, #D1D1DB 2px, transparent 2px, transparent 4px);
+}
+
 /* ── Assignment Rules ──────────────────────────────── */
 .rules-preview-skip { opacity: 0.45; }
 .page-subtitle { color: #65657B; font-size: 13px; margin-top: 2px; }
