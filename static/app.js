@@ -6415,6 +6415,23 @@ function App() {
     try { localStorage.setItem('sce_automation_history', JSON.stringify(automationHistory.slice(0, 200))); } catch(e) {}
   }, [automationHistory]);
 
+  // Reflow all Highcharts instances on window resize
+  useEffect(function() {
+    var timer;
+    function handleResize() {
+      clearTimeout(timer);
+      timer = setTimeout(function() {
+        if (typeof Highcharts !== 'undefined' && Highcharts.charts) {
+          Highcharts.charts.forEach(function(chart) {
+            if (chart) chart.reflow();
+          });
+        }
+      }, 200);
+    }
+    window.addEventListener('resize', handleResize);
+    return function() { window.removeEventListener('resize', handleResize); clearTimeout(timer); };
+  }, []);
+
   // Set scopeCurrentUser from fetched currentUser
   useEffect(function() {
     if (currentUser && currentUser.userName && !scopeCurrentUser) {
