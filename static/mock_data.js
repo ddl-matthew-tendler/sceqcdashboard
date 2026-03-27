@@ -59,7 +59,7 @@ var MOCK_POLICIES = [
     status: 'Published',
     stages: [
       'Study Registration and Protocol Lock',
-      'Data Assets and OMOP Governance',
+      'Data Assets and OMOP Review',
       'Cohort Definition and Reproducibility',
       'Pipeline Execution and Environment Lock',
       'Statistical Analysis and Results Review',
@@ -68,11 +68,11 @@ var MOCK_POLICIES = [
   },
   {
     id: '94d5f81f-644b-4b53-a9e8-133c0dea42ab',
-    name: 'Surgical AI Governance QC Plan',
+    name: 'Surgical AI QC Plan',
     status: 'Published',
     stages: [
       'Model Initiation and Intended Use Declaration',
-      'Data Governance and Feature Engineering Review',
+      'Data Quality and Feature Engineering Review',
       'Training Pipeline and Reproducibility Audit',
       'Clinical Validation and Safety Review',
       'Regulatory Documentation and Submission Readiness',
@@ -140,7 +140,7 @@ var MOCK_PROJECT_TAGS = {
     { key: 'Technique', value: 'Computer-Vision / Deep-Learning' },
   ],
   'proj-data-access': [
-    { key: 'Team', value: 'Data-Governance' },
+    { key: 'Team', value: 'Data-Quality' },
     { key: 'Project-Status', value: 'Active' },
     { key: 'Data-Quality', value: 'Mixed' },
   ],
@@ -286,7 +286,7 @@ var MOCK_BUNDLES = [
   },
   // Surgical AI deliverable
   {
-    id: 'a084c730-c66f-43a3-aaee-2cefbbc66ca1', name: 'Surgical AI Governance Feb 2026', state: 'Active',
+    id: 'a084c730-c66f-43a3-aaee-2cefbbc66ca1', name: 'Surgical AI Validation Feb 2026', state: 'Active',
     projectId: 'proj-surgical-ai', projectName: 'Surgical_AI_Validation',
     projectOwner: 'agnes_domino',
     policyId: MOCK_POLICIES[5].id, policyName: MOCK_POLICIES[5].name,
@@ -300,7 +300,7 @@ var MOCK_BUNDLES = [
   // Data Access deliverable
   {
     id: '15ec424a-0dca-4d91-b9fe-4bf2c7e3a673', name: 'Data Access Request Feb 2026', state: 'Active',
-    projectId: 'proj-data-access', projectName: 'Data_Governance_Central',
+    projectId: 'proj-data-access', projectName: 'Data_Quality_Central',
     projectOwner: 'etan_domino',
     policyId: MOCK_POLICIES[6].id, policyName: MOCK_POLICIES[6].name,
     stage: 'Legal & Privacy Review',
@@ -394,7 +394,7 @@ var MOCK_APPROVALS = {
     { id: 'a-011a', name: 'Protocol Lock Sign-Off', bundleId: '8813c744-6a8a-436d-aa20-68e072d3f829', status: 'PendingSubmission',
       approvers: [{ id: MOCK_USERS.agnes.id, name: 'agnes_domino' }, { id: 'rwe-team', name: 'RWE_Team' }],
       updatedAt: '2026-03-25T10:00:00Z' },
-    { id: 'a-011b', name: 'Data Governance Sign-Off', bundleId: '8813c744-6a8a-436d-aa20-68e072d3f829', status: 'PendingSubmission',
+    { id: 'a-011b', name: 'Data Quality Sign-Off', bundleId: '8813c744-6a8a-436d-aa20-68e072d3f829', status: 'PendingSubmission',
       approvers: [{ id: MOCK_USERS.agnes.id, name: 'agnes_domino' }, { id: 'rwe-team', name: 'RWE_Team' }] },
     { id: 'a-011c', name: 'Cohort Logic Sign-Off', bundleId: '8813c744-6a8a-436d-aa20-68e072d3f829', status: 'PendingSubmission',
       approvers: [{ id: MOCK_USERS.agnes.id, name: 'agnes_domino' }, { id: 'rwe-team', name: 'RWE_Team' }] },
@@ -544,7 +544,7 @@ var MOCK_ATTACHMENTS = {
     {
       id: "3b2a3aa3-641b-4461-af63-40bed9999447",
       type: "Report",
-      identifier: { branch: "master", commit: "683d6b13f1109e06cc9e7f47687e99999456c412", source: "DFS", filename: "FDA_AI_Governance_Policy_Domino.docx" },
+      identifier: { branch: "master", commit: "683d6b13f1109e06cc9e7f47687e99999456c412", source: "DFS", filename: "FDA_AI_QC_Policy_Domino.docx" },
       createdAt: "2026-02-17T21:48:50.630514Z",
       createdBy: { id: "69160c9da4464d12be7f6e84", firstName: "Agnes", lastName: "Youn", userName: "agnes_domino" }
     },

@@ -96,7 +96,7 @@ function buildDataExplorerUrl(baseUrl, attachment) {
 var API_GAPS = {
   stageReassign: {
     label: 'Stage Reassignment',
-    message: 'Reassign a stage owner via the Domino governance API.',
+    message: 'Reassign a stage owner via the Domino API.',
     ready: true,
   },
   bulkAssign: {
@@ -105,7 +105,7 @@ var API_GAPS = {
     ready: true,
   },
   applyRules: {
-    label: 'Apply Assignment Rules',
+    label: 'Apply Bulk Assignment Rules',
     message: 'This action is coming soon — the Domino write API for applying rules is in development.',
     ready: false,
   },
@@ -333,8 +333,8 @@ var NAV_ITEMS = [
   { key: 'approvals', iconName: 'CheckCircleOutlined', label: 'Approvals' },
   { key: 'findings', iconName: 'FileSearchOutlined', label: 'Findings & QC' },
   { key: 'metrics', iconName: 'BarChartOutlined', label: 'Team Metrics' },
-  { key: 'stages', iconName: 'ApartmentOutlined', label: 'Stage Assignments' },
-  { key: 'rules', iconName: 'SettingOutlined', label: 'Assignment Rules' },
+  { key: 'stages', iconName: 'ApartmentOutlined', label: 'Stage Manager' },
+  { key: 'rules', iconName: 'SettingOutlined', label: 'Bulk Assignment Rules' },
   { key: 'automation', iconName: 'ThunderboltOutlined', label: 'Automation' },
   { key: 'risk', iconName: 'SlidersOutlined', label: 'Risk Optimizer' },
 ];
@@ -719,7 +719,7 @@ function MilestonesPage(props) {
     ),
     h('div', { className: 'panel' },
       h('div', { className: 'panel-header' },
-        h('span', { className: 'panel-title' }, 'Programming Milestones'),
+        h('span', { className: 'panel-title' }, 'Deliverable Stages'),
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 16 } },
           h('span', { style: { fontSize: 12, color: '#8F8FA3' } }, activeBundles.length + ' active ' + B.toLowerCase() + 's'),
           // Color legend
@@ -1463,15 +1463,31 @@ function MetricsPage(props) {
         return f.dueDate && new Date(f.dueDate).getTime() < Date.now() && f.status !== 'Done' && f.status !== 'WontDo';
       });
     });
+    if (metricsFilter.type === 'severity') return bundles.filter(function(b) {
+      return b._findings && b._findings.some(function(f) { return f.severity === metricsFilter.value; });
+    });
+    if (metricsFilter.type === 'density') return bundles.filter(function(b) {
+      return (b.policyName || 'Unknown') === metricsFilter.value && b._findings && b._findings.length > 0;
+    });
+    if (metricsFilter.type === 'creator') return bundles.filter(function(b) {
+      return b._findings && b._findings.some(function(f) {
+        var creator = (f.createdBy && (f.createdBy.name || f.createdBy.userName)) || 'Unknown';
+        return creator === metricsFilter.value;
+      });
+    });
     return bundles;
   }, [bundles, metricsFilter, metrics.reworkBundles]);
 
+  var sevLabels = { S0: 'Critical (S0)', S1: 'Major (S1)', S2: 'Minor (S2)', S3: 'Info (S3)' };
   var metricsFilterLabel = metricsFilter
     ? (metricsFilter.type === 'active' ? 'Active' : metricsFilter.type === 'complete' ? 'Completed'
       : metricsFilter.type === 'policy' ? P + ': ' + metricsFilter.value
       : metricsFilter.type === 'assignee' ? 'Assignee: ' + metricsFilter.value
       : metricsFilter.type === 'rework' ? 'Active Rework'
       : metricsFilter.type === 'overdue' ? 'Overdue Findings'
+      : metricsFilter.type === 'severity' ? 'Severity: ' + (sevLabels[metricsFilter.value] || metricsFilter.value)
+      : metricsFilter.type === 'density' ? 'Findings in: ' + metricsFilter.value
+      : metricsFilter.type === 'creator' ? 'Creator: ' + metricsFilter.value
       : null)
     : null;
 
@@ -1486,7 +1502,10 @@ function MetricsPage(props) {
       title: { text: null },
       xAxis: { categories: ['Critical (S0)', 'Major (S1)', 'Minor (S2)', 'Info (S3)'], labels: { style: { fontSize: '11px' } } },
       yAxis: { title: { text: null }, allowDecimals: false },
-      plotOptions: { bar: { borderRadius: 3, dataLabels: { enabled: true } } },
+      plotOptions: { bar: { borderRadius: 3, dataLabels: { enabled: true }, cursor: 'pointer', point: { events: { click: function() {
+        var sevMap = { 'Critical (S0)': 'S0', 'Major (S1)': 'S1', 'Minor (S2)': 'S2', 'Info (S3)': 'S3' };
+        setMetricsFilter({ type: 'severity', value: sevMap[this.category] || this.category });
+      } } } } },
       series: [{ name: 'Findings', data: [sev.S0, sev.S1, sev.S2, sev.S3], showInLegend: false,
         colorByPoint: true, colors: ['#C20A29', '#FF6543', '#CCB718', '#0070CC'] }],
       credits: { enabled: false },
@@ -1568,7 +1587,7 @@ function MetricsPage(props) {
       title: { text: null },
       xAxis: { categories: policies, labels: { style: { fontSize: '11px' } } },
       yAxis: { title: { text: 'Findings per ' + B.toLowerCase() }, allowDecimals: true },
-      plotOptions: { bar: { borderRadius: 3, dataLabels: { enabled: true, format: '{y:.1f}' } } },
+      plotOptions: { bar: { borderRadius: 3, dataLabels: { enabled: true, format: '{y:.1f}' }, cursor: 'pointer', point: { events: { click: function() { setMetricsFilter({ type: 'density', value: this.category }); } } } } },
       series: [{ name: 'Density', data: policies.map(function(p) {
         return parseFloat((dbp[p].findings / dbp[p].bundles).toFixed(1));
       }), showInLegend: false, color: '#FF6543' }],
@@ -1629,7 +1648,7 @@ function MetricsPage(props) {
       title: { text: null },
       xAxis: { categories: names, labels: { style: { fontSize: '11px' } } },
       yAxis: { title: { text: 'Findings' }, allowDecimals: false, stackLabels: { enabled: true } },
-      plotOptions: { series: { stacking: 'normal', borderRadius: 2 } },
+      plotOptions: { series: { stacking: 'normal', borderRadius: 2, cursor: 'pointer', point: { events: { click: function() { setMetricsFilter({ type: 'creator', value: this.category }); } } } } },
       series: [
         { name: 'Open', data: names.map(function(n) { return fc[n].open; }), color: '#FF6543' },
         { name: 'Resolved', data: names.map(function(n) { return fc[n].resolved; }), color: '#28A464' },
@@ -1844,7 +1863,7 @@ function StagePopoverContent(props) {
   var assigneeName = assignee ? assignee.name : null;
   var dominoUrl = getDominoBundleUrl(bundle, stageName);
 
-  // Governance summary counts
+  // Summary counts
   var openFindings = (bundle._findings || []).filter(function(f) { return f.status !== 'Done' && f.status !== 'WontDo'; }).length;
   var totalFindings = (bundle._findings || []).length;
   var totalApprovals = (bundle._approvals || []).length;
@@ -2590,6 +2609,399 @@ function AttachmentsDrawer(props) {
 
 
 // ═══════════════════════════════════════════════════════════════
+//  COMPONENT: CSV Upload Drawer
+// ═══════════════════════════════════════════════════════════════
+function CSVUploadDrawer(props) {
+  var visible = props.visible;
+  var onClose = props.onClose;
+  var policies = props.policies || [];
+  var projects = props.projects || [];
+  var connected = props.connected;
+  var onComplete = props.onComplete;
+  var terms = props.terms || DEFAULT_TERMS;
+  var B = capFirst(terms.bundle);
+
+  var _step = useState(0); var step = _step[0]; var setStep = _step[1]; // 0=upload, 1=map, 2=preview, 3=uploading, 4=done
+  var _file = useState(null); var csvFile = _file[0]; var setCsvFile = _file[1];
+  var _rows = useState([]); var csvRows = _rows[0]; var setCsvRows = _rows[1];
+  var _headers = useState([]); var csvHeaders = _headers[0]; var setCsvHeaders = _headers[1];
+  var _mapping = useState({}); var mapping = _mapping[0]; var setMapping = _mapping[1];
+  var _defaultPolicy = useState(null); var defaultPolicy = _defaultPolicy[0]; var setDefaultPolicy = _defaultPolicy[1];
+  var _defaultProject = useState(null); var defaultProject = _defaultProject[0]; var setDefaultProject = _defaultProject[1];
+  var _progress = useState({ done: 0, total: 0, errors: [] }); var progress = _progress[0]; var setProgress = _progress[1];
+
+  var REQUIRED_FIELDS = [
+    { key: 'name', label: B + ' Name', description: 'Unique name for each ' + B.toLowerCase(), required: true },
+    { key: 'policyId', label: 'QC Plan ID', description: 'Policy/QC Plan ID (or use default below)', required: false },
+    { key: 'projectId', label: 'Project ID', description: 'Domino project ID (or use default below)', required: false },
+  ];
+
+  function reset() {
+    setStep(0); setCsvFile(null); setCsvRows([]); setCsvHeaders([]);
+    setMapping({}); setDefaultPolicy(null); setDefaultProject(null);
+    setProgress({ done: 0, total: 0, errors: [] });
+  }
+
+  function handleClose() {
+    reset();
+    onClose();
+  }
+
+  // Parse CSV
+  function parseCSV(text) {
+    var lines = text.split(/\r?\n/).filter(function(l) { return l.trim(); });
+    if (lines.length < 2) { antd.message.error('CSV must have a header row and at least one data row.'); return; }
+    // Parse header
+    var headers = parseCSVLine(lines[0]);
+    var rows = [];
+    for (var i = 1; i < lines.length; i++) {
+      var vals = parseCSVLine(lines[i]);
+      if (vals.length === 0 || (vals.length === 1 && !vals[0])) continue;
+      var row = {};
+      headers.forEach(function(h, idx) { row[h] = vals[idx] || ''; });
+      row._rowNum = i + 1;
+      rows.push(row);
+    }
+    setCsvHeaders(headers);
+    setCsvRows(rows);
+    // Auto-map columns by name similarity
+    var autoMap = {};
+    headers.forEach(function(h) {
+      var lower = h.toLowerCase().replace(/[_\s-]/g, '');
+      if (lower === 'name' || lower === 'deliverablename' || lower === 'bundlename' || lower === 'evidencename') autoMap.name = h;
+      else if (lower === 'policyid' || lower === 'qcplanid' || lower === 'policyname') autoMap.policyId = h;
+      else if (lower === 'projectid' || lower === 'projectname') autoMap.projectId = h;
+    });
+    setMapping(autoMap);
+    setStep(1);
+  }
+
+  function parseCSVLine(line) {
+    var result = []; var current = ''; var inQuotes = false;
+    for (var i = 0; i < line.length; i++) {
+      var ch = line[i];
+      if (inQuotes) {
+        if (ch === '"' && line[i + 1] === '"') { current += '"'; i++; }
+        else if (ch === '"') inQuotes = false;
+        else current += ch;
+      } else {
+        if (ch === '"') inQuotes = true;
+        else if (ch === ',') { result.push(current.trim()); current = ''; }
+        else current += ch;
+      }
+    }
+    result.push(current.trim());
+    return result;
+  }
+
+  function handleFileChange(info) {
+    var file = info.file;
+    if (file.status === 'removed') { setCsvFile(null); return; }
+    setCsvFile(file.originFileObj || file);
+    var reader = new FileReader();
+    reader.onload = function(e) { parseCSV(e.target.result); };
+    reader.readAsText(file.originFileObj || file);
+  }
+
+  // Validation
+  var validationErrors = useMemo(function() {
+    if (step < 2) return [];
+    var errors = [];
+    if (!mapping.name) { errors.push('Must map a column to "' + B + ' Name".'); }
+    if (!mapping.policyId && !defaultPolicy) { errors.push('Must map a "QC Plan ID" column or select a default QC Plan.'); }
+    if (!mapping.projectId && !defaultProject) { errors.push('Must map a "Project ID" column or select a default Project.'); }
+    // Check for empty names
+    if (mapping.name) {
+      var emptyNames = csvRows.filter(function(r) { return !r[mapping.name] || !r[mapping.name].trim(); });
+      if (emptyNames.length > 0) errors.push(emptyNames.length + ' row(s) have empty names (rows: ' + emptyNames.slice(0, 5).map(function(r) { return r._rowNum; }).join(', ') + ').');
+    }
+    return errors;
+  }, [step, mapping, defaultPolicy, defaultProject, csvRows]);
+
+  // Preview data
+  var previewRows = useMemo(function() {
+    return csvRows.map(function(r) {
+      return {
+        _rowNum: r._rowNum,
+        name: mapping.name ? r[mapping.name] : '',
+        policyId: mapping.policyId ? r[mapping.policyId] : (defaultPolicy || ''),
+        projectId: mapping.projectId ? r[mapping.projectId] : (defaultProject || ''),
+        _valid: !!(mapping.name && r[mapping.name] && r[mapping.name].trim()) && !!(mapping.policyId ? r[mapping.policyId] : defaultPolicy) && !!(mapping.projectId ? r[mapping.projectId] : defaultProject),
+      };
+    });
+  }, [csvRows, mapping, defaultPolicy, defaultProject]);
+
+  // Upload function — 1-by-1 with concurrency control
+  function startUpload() {
+    if (!connected) {
+      antd.message.warning('Cannot upload in dummy mode — connect to a Domino instance first.');
+      return;
+    }
+    var validRows = previewRows.filter(function(r) { return r._valid; });
+    if (validRows.length === 0) { antd.message.error('No valid rows to upload.'); return; }
+    setStep(3);
+    setProgress({ done: 0, total: validRows.length, errors: [] });
+
+    var idx = 0;
+    var errors = [];
+    var CONCURRENCY = 3;
+
+    function uploadNext() {
+      if (idx >= validRows.length) {
+        if (idx === validRows.length) {
+          setStep(4);
+          setProgress(function(p) { return Object.assign({}, p, { errors: errors }); });
+          if (onComplete) onComplete();
+        }
+        return;
+      }
+      var row = validRows[idx++];
+      var body = { name: row.name.trim(), policyId: row.policyId, projectId: row.projectId };
+      apiPost('api/bundles', body)
+        .then(function() {
+          setProgress(function(p) { return Object.assign({}, p, { done: p.done + 1 }); });
+        })
+        .catch(function(err) {
+          errors.push({ row: row._rowNum, name: row.name, error: (err && err.message) || String(err) });
+          setProgress(function(p) { return Object.assign({}, p, { done: p.done + 1, errors: errors.slice() }); });
+        })
+        .then(uploadNext);
+    }
+
+    for (var c = 0; c < Math.min(CONCURRENCY, validRows.length); c++) { uploadNext(); }
+  }
+
+  var policyOptions = policies.map(function(p) { return { label: p.name || p.id, value: p.id }; });
+  var projectOptions = projects.map(function(p) { return { label: p.name || p.id, value: p.id }; });
+  var headerOptions = [{ label: '— Do not map —', value: '' }].concat(csvHeaders.map(function(h) { return { label: h, value: h }; }));
+
+  var steps = [
+    { title: 'Upload' },
+    { title: 'Map Columns' },
+    { title: 'Preview' },
+    { title: 'Uploading' },
+    { title: 'Done' },
+  ];
+
+  return h(Drawer, {
+    title: 'Import ' + B + 's from CSV',
+    open: visible,
+    onClose: handleClose,
+    width: 720,
+    destroyOnClose: true,
+    footer: step === 1 ? h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: 8 } },
+      h(Button, { onClick: function() { setStep(0); reset(); } }, 'Back'),
+      h(Button, { type: 'primary', onClick: function() { setStep(2); } }, 'Next: Preview')
+    ) : step === 2 ? h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: 8 } },
+      h(Button, { onClick: function() { setStep(1); } }, 'Back'),
+      h(Button, { type: 'primary', disabled: validationErrors.length > 0, onClick: startUpload },
+        'Upload ' + previewRows.filter(function(r) { return r._valid; }).length + ' ' + B + 's')
+    ) : null,
+  },
+    // Steps indicator
+    h(antd.Steps, { current: step, size: 'small', items: steps, style: { marginBottom: 20 } }),
+
+    // Step 0: Upload file
+    step === 0 ? h('div', null,
+      h(antd.Upload.Dragger, {
+        name: 'file',
+        accept: '.csv,.tsv',
+        maxCount: 1,
+        beforeUpload: function() { return false; },
+        onChange: handleFileChange,
+        showUploadList: true,
+      },
+        h('p', { className: 'ant-upload-drag-icon' },
+          icons && icons.InboxOutlined ? h(icons.InboxOutlined, { style: { fontSize: 48, color: '#543FDE' } }) : h('span', { style: { fontSize: 36 } }, '\uD83D\uDCC1')
+        ),
+        h('p', { className: 'ant-upload-text' }, 'Click or drag a CSV file here'),
+        h('p', { className: 'ant-upload-hint' }, 'The file should have a header row. Each row will create one ' + B.toLowerCase() + '.')
+      ),
+      h('div', { style: { marginTop: 16 } },
+        h(antd.Collapse, { items: [{
+          key: 'template',
+          label: 'CSV Template & Requirements',
+          children: h('div', null,
+            h('p', { style: { fontSize: 12, color: '#65657B' } }, 'Required columns:'),
+            h('ul', { style: { fontSize: 12, color: '#65657B', paddingLeft: 20 } },
+              h('li', null, h('strong', null, 'name'), ' — Unique name for each ' + B.toLowerCase()),
+              h('li', null, h('strong', null, 'policyId'), ' — QC Plan ID (or set a default during mapping)'),
+              h('li', null, h('strong', null, 'projectId'), ' — Domino Project ID (or set a default during mapping)')
+            ),
+            h('p', { style: { fontSize: 12, color: '#8F8FA3', marginTop: 8 } }, 'Example CSV:'),
+            h('pre', { style: { fontSize: 11, background: '#F5F5F5', padding: 8, borderRadius: 4 } },
+              'name,policyId,projectId\n"ADAE Q1 2026","abc-123","proj-001"\n"ADSL Q1 2026","abc-123","proj-001"'
+            )
+          )
+        }] })
+      )
+    ) : null,
+
+    // Step 1: Column mapping
+    step === 1 ? h('div', null,
+      h('div', { style: { marginBottom: 16 } },
+        h(Tag, { color: 'blue' }, csvRows.length + ' rows found'),
+        h(Tag, null, csvHeaders.length + ' columns')
+      ),
+      h('div', { style: { fontSize: 13, fontWeight: 600, marginBottom: 12, color: '#2E2E38' } }, 'Map your CSV columns to fields:'),
+      REQUIRED_FIELDS.map(function(field) {
+        return h('div', { key: field.key, style: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 } },
+          h('div', { style: { width: 130, fontSize: 12, fontWeight: 500 } },
+            field.label,
+            field.required ? h('span', { style: { color: '#C20A29' } }, ' *') : null
+          ),
+          h(Select, {
+            placeholder: 'Select CSV column...',
+            value: mapping[field.key] || undefined,
+            onChange: function(val) {
+              setMapping(function(prev) {
+                var next = Object.assign({}, prev);
+                if (val) next[field.key] = val; else delete next[field.key];
+                return next;
+              });
+            },
+            options: headerOptions,
+            allowClear: true,
+            style: { width: 220 },
+            size: 'small',
+          }),
+          h('span', { style: { fontSize: 11, color: '#8F8FA3' } }, field.description)
+        );
+      }),
+      h(antd.Divider, null),
+      h('div', { style: { fontSize: 13, fontWeight: 600, marginBottom: 12, color: '#2E2E38' } }, 'Default values (applied when column is not mapped):'),
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 } },
+        h('div', { style: { width: 130, fontSize: 12, fontWeight: 500 } }, 'Default QC Plan'),
+        h(Select, {
+          placeholder: 'Select a QC Plan...',
+          value: defaultPolicy || undefined,
+          onChange: setDefaultPolicy,
+          options: policyOptions,
+          showSearch: true,
+          optionFilterProp: 'label',
+          allowClear: true,
+          style: { width: 300 },
+          size: 'small',
+        })
+      ),
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 } },
+        h('div', { style: { width: 130, fontSize: 12, fontWeight: 500 } }, 'Default Project'),
+        h(Select, {
+          placeholder: 'Select a project...',
+          value: defaultProject || undefined,
+          onChange: setDefaultProject,
+          options: projectOptions,
+          showSearch: true,
+          optionFilterProp: 'label',
+          allowClear: true,
+          style: { width: 300 },
+          size: 'small',
+        })
+      ),
+      h(antd.Divider, null),
+      h('div', { style: { fontSize: 12, fontWeight: 500, marginBottom: 8 } }, 'Sample data (first 3 rows):'),
+      h(Table, {
+        dataSource: csvRows.slice(0, 3),
+        columns: csvHeaders.map(function(h) {
+          return { title: h, dataIndex: h, key: h, ellipsis: true, width: 120 };
+        }),
+        rowKey: '_rowNum',
+        size: 'small',
+        pagination: false,
+        scroll: { x: csvHeaders.length * 120 },
+      })
+    ) : null,
+
+    // Step 2: Preview
+    step === 2 ? h('div', null,
+      validationErrors.length > 0
+        ? h(antd.Alert, {
+            type: 'error',
+            showIcon: true,
+            style: { marginBottom: 16 },
+            message: 'Validation Errors',
+            description: h('ul', { style: { margin: 0, paddingLeft: 16 } },
+              validationErrors.map(function(e, i) { return h('li', { key: i }, e); })
+            ),
+          })
+        : h(antd.Alert, {
+            type: 'success',
+            showIcon: true,
+            style: { marginBottom: 16 },
+            message: previewRows.filter(function(r) { return r._valid; }).length + ' of ' + previewRows.length + ' rows ready to upload',
+          }),
+      !connected ? h(antd.Alert, { type: 'warning', showIcon: true, style: { marginBottom: 16 },
+        message: 'Dummy mode — upload is disabled. Connect to a Domino instance to create ' + B.toLowerCase() + 's.' }) : null,
+      h(Table, {
+        dataSource: previewRows,
+        columns: [
+          { title: 'Row', dataIndex: '_rowNum', key: 'row', width: 50 },
+          { title: B + ' Name', dataIndex: 'name', key: 'name', ellipsis: true },
+          { title: 'QC Plan ID', dataIndex: 'policyId', key: 'policy', ellipsis: true, width: 180 },
+          { title: 'Project ID', dataIndex: 'projectId', key: 'project', ellipsis: true, width: 180 },
+          { title: 'Valid', key: 'valid', width: 60, align: 'center',
+            render: function(_, r) { return r._valid ? h(Tag, { color: 'green' }, 'Yes') : h(Tag, { color: 'red' }, 'No'); } },
+        ],
+        rowKey: '_rowNum',
+        size: 'small',
+        pagination: { pageSize: 10, size: 'small' },
+      })
+    ) : null,
+
+    // Step 3: Uploading
+    step === 3 ? h('div', { style: { textAlign: 'center', padding: '40px 0' } },
+      h(antd.Progress, {
+        type: 'circle',
+        percent: progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0,
+        format: function() { return progress.done + ' / ' + progress.total; },
+      }),
+      h('div', { style: { marginTop: 16, fontSize: 14, color: '#65657B' } },
+        'Creating ' + B.toLowerCase() + 's... Please do not close this drawer.'
+      ),
+      progress.errors.length > 0
+        ? h('div', { style: { marginTop: 12 } },
+            h(Tag, { color: 'red' }, progress.errors.length + ' error' + (progress.errors.length !== 1 ? 's' : ''))
+          )
+        : null
+    ) : null,
+
+    // Step 4: Done
+    step === 4 ? h('div', { style: { textAlign: 'center', padding: '40px 0' } },
+      h(antd.Result, {
+        status: progress.errors.length === 0 ? 'success' : 'warning',
+        title: progress.errors.length === 0
+          ? 'All ' + progress.total + ' ' + B.toLowerCase() + 's created successfully!'
+          : (progress.total - progress.errors.length) + ' of ' + progress.total + ' created',
+        subTitle: progress.errors.length > 0
+          ? progress.errors.length + ' failed — see details below'
+          : 'You can now find them in the QC Tracker.',
+        extra: [
+          h(Button, { key: 'close', type: 'primary', onClick: handleClose }, 'Close'),
+          h(Button, { key: 'again', onClick: reset }, 'Upload More'),
+        ],
+      }),
+      progress.errors.length > 0
+        ? h('div', { style: { textAlign: 'left', marginTop: 16 } },
+            h('div', { style: { fontWeight: 600, fontSize: 13, marginBottom: 8 } }, 'Failed rows:'),
+            h(Table, {
+              dataSource: progress.errors,
+              columns: [
+                { title: 'Row', dataIndex: 'row', key: 'row', width: 50 },
+                { title: 'Name', dataIndex: 'name', key: 'name' },
+                { title: 'Error', dataIndex: 'error', key: 'error', ellipsis: true },
+              ],
+              rowKey: 'row',
+              size: 'small',
+              pagination: false,
+            })
+          )
+        : null
+    ) : null
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════
 //  PAGE: QC Tracker
 // ═══════════════════════════════════════════════════════════════
 function QCTrackerPage(props) {
@@ -2600,6 +3012,13 @@ function QCTrackerPage(props) {
   var B = terms.bundle;
   var P = terms.policy;
   var dataExplorerUrl = props.dataExplorerUrl || null;
+  var connected = props.connected;
+  var policies = props.policies || [];
+  var projects = props.projects || [];
+  var onRefresh = props.onRefresh;
+
+  // CSV upload state
+  var _csv1 = useState(false); var csvDrawerOpen = _csv1[0]; var setCsvDrawerOpen = _csv1[1];
 
   // Filter state
   var _fs1 = useState(''); var searchText = _fs1[0]; var setSearchText = _fs1[1];
@@ -2630,6 +3049,15 @@ function QCTrackerPage(props) {
     var names = {};
     bundles.forEach(function(b) { if (b.projectName) names[b.projectName] = true; });
     return Object.keys(names).sort();
+  }, [bundles]);
+
+  // Project objects for CSV upload (id + name)
+  var projectObjects = useMemo(function() {
+    var map = {};
+    bundles.forEach(function(b) {
+      if (b.projectId && !map[b.projectId]) map[b.projectId] = { id: b.projectId, name: b.projectName || b.projectId };
+    });
+    return Object.values(map);
   }, [bundles]);
 
   var assigneeOptions = useMemo(function() {
@@ -2794,7 +3222,7 @@ function QCTrackerPage(props) {
       ],
       onFilter: function(v, r) { return r.state === v; },
       render: function(s) { return h(Tag, { color: stateColor(s), style: { fontSize: 11 } }, s); } },
-    { title: '\uD83D\uDCCE', key: 'attachments', width: 50, align: 'center',
+    { title: h(Tooltip, { title: 'Attachments' }, icons && icons.PaperClipOutlined ? h(icons.PaperClipOutlined, { style: { fontSize: 14, color: '#8F8FA3' } }) : 'Att'), key: 'attachments', width: 50, align: 'center',
       sorter: function(a, b) { return (a._attachments || []).length - (b._attachments || []).length; },
       render: function(_, record) {
         var count = (record._attachments || []).length;
@@ -2807,7 +3235,7 @@ function QCTrackerPage(props) {
         );
       }
     },
-    { title: 'Flags', key: 'flags', width: 70,
+    { title: h(Tooltip, { title: 'Status indicators for each deliverable. \u26A0 = count of open findings (not Done/Won\'t Do). \u2205 = current stage has no assignee. \u2713 = all approvals are approved. Use the filter to isolate flagged items.', overlayStyle: { maxWidth: 320 } }, h('span', { style: { cursor: 'help', borderBottom: '1px dashed #B0B0C0' } }, 'Flags')), key: 'flags', width: 70,
       filters: [
         { text: 'Open Findings', value: 'open_findings' },
         { text: 'Unassigned', value: 'unassigned' },
@@ -2873,10 +3301,29 @@ function QCTrackerPage(props) {
   }, [bundles]);
 
   return h('div', null,
-    h('div', { className: 'page-header' },
-      h('h1', null, 'QC Tracker'),
-      h('p', null, 'Track all ' + capFirst(B).toLowerCase() + 's across projects and ' + capFirst(P).toLowerCase() + 's')
+    h('div', { className: 'page-header', style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' } },
+      h('div', null,
+        h('h1', null, 'QC Tracker'),
+        h('p', null, 'Track all ' + capFirst(B).toLowerCase() + 's across projects and ' + capFirst(P).toLowerCase() + 's')
+      ),
+      h(Tooltip, { title: 'Import ' + capFirst(B).toLowerCase() + 's from a CSV file' },
+        h(Button, {
+          onClick: function() { setCsvDrawerOpen(true); },
+          icon: icons && icons.UploadOutlined ? h(icons.UploadOutlined) : null,
+        }, 'Import CSV')
+      )
     ),
+
+    // CSV Upload Drawer
+    h(CSVUploadDrawer, {
+      visible: csvDrawerOpen,
+      onClose: function() { setCsvDrawerOpen(false); },
+      policies: policies,
+      projects: projectObjects,
+      connected: connected,
+      onComplete: onRefresh,
+      terms: terms,
+    }),
 
     // Stat cards — clickable with toggle highlight + subtitles
     h('div', { className: 'stats-row' },
@@ -3433,7 +3880,7 @@ function AssignmentRulesPage(props) {
   return h('div', null,
     // Page header
     h('div', { className: 'page-header' },
-      h('h2', null, 'Assignment Rules'),
+      h('h2', null, 'Bulk Assignment Rules'),
       h('p', { className: 'page-subtitle' }, 'Define rules to bulk-assign team members to ' + B.toLowerCase() + ' stages')
     ),
 
@@ -3570,7 +4017,7 @@ function AssignmentRulesPage(props) {
 
           // Apply Rules Modal
           h(Modal, {
-            title: 'Apply Assignment Rules',
+            title: 'Apply Bulk Assignment Rules',
             open: applyModalOpen,
             onOk: handleApplyRules,
             onCancel: function() { setApplyModalOpen(false); },
@@ -3918,9 +4365,9 @@ function StageAssignmentsPage(props) {
     // Header
     h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 } },
       h('div', null,
-        h('h2', { style: { margin: 0, fontSize: 20, fontWeight: 600, color: '#2D2D3F' } }, 'Stage Assignments'),
+        h('h2', { style: { margin: 0, fontSize: 20, fontWeight: 600, color: '#2D2D3F' } }, 'Stage Manager'),
         h('div', { style: { color: '#8F8FA3', fontSize: 13, marginTop: 4 } },
-          'All stages across all ' + B.toLowerCase() + 's — find unassigned work and manage assignments in bulk.'
+          'View all stages across ' + B.toLowerCase() + 's — identify unassigned work, reassign owners, and manage workload.'
         )
       ),
       selectedRowKeys.length > 0
@@ -3956,6 +4403,7 @@ function StageAssignmentsPage(props) {
       h(StatCard, {
         label: 'Unassigned',
         value: totalUnassigned,
+        color: totalUnassigned > 0 ? 'danger' : 'success',
         onClick: totalUnassigned > 0 ? function() {
           setFilterAssignee('__unassigned__');
           setFilterStatus([]);
@@ -3965,6 +4413,7 @@ function StageAssignmentsPage(props) {
       h(StatCard, {
         label: 'Future Unassigned',
         value: futureUnassigned,
+        color: futureUnassigned > 0 ? 'warning' : '',
         onClick: futureUnassigned > 0 ? function() {
           setFilterAssignee('__unassigned__');
           setFilterStatus(['Future']);
@@ -3974,6 +4423,7 @@ function StageAssignmentsPage(props) {
       h(StatCard, {
         label: 'Current Unassigned',
         value: currentUnassigned,
+        color: currentUnassigned > 0 ? 'danger' : 'success',
         onClick: currentUnassigned > 0 ? function() {
           setFilterAssignee('__unassigned__');
           setFilterStatus(['Current']);
@@ -4048,7 +4498,7 @@ function StageAssignmentsPage(props) {
 // ═══════════════════════════════════════════════════════════════
 //
 // Allows admins to define rules that trigger Domino Jobs when a
-// governance stage completes. Rules are stored in localStorage.
+// QC stage completes. Rules are stored in localStorage.
 // Execution uses Domino v4 Jobs API (POST /v4/jobs/start).
 //
 function AutomationRulesPage(props) {
@@ -4402,7 +4852,7 @@ function AutomationRulesPage(props) {
   return h('div', { className: 'page-container' },
     h('div', { className: 'page-header' },
       h('h1', null, 'Automation Rules'),
-      h('p', null, 'Define scripts that run automatically when governance stages complete. Outputs can be attached to ' + B.toLowerCase() + 's.')
+      h('p', null, 'Define scripts that run automatically when QC stages complete. Outputs can be attached to ' + B.toLowerCase() + 's.')
     ),
 
     // Project selector
@@ -5896,6 +6346,8 @@ function App() {
     if (typeof MOCK_TERMINOLOGY !== 'undefined') {
       setTerms(MOCK_TERMINOLOGY);
     }
+    // Set a mock Data Explorer URL so attachment links render in dummy mode
+    setDataExplorerUrl('__mock_data_explorer__');
     setLoading(false);
     setError(null);
   }
@@ -6076,7 +6528,7 @@ function App() {
     // All other pages get scopedBundles
     switch (activePage) {
       case 'tracker':
-        return h(QCTrackerPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms, projectMembersCache: projectMembersCache, dataExplorerUrl: dataExplorerUrl });
+        return h(QCTrackerPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms, projectMembersCache: projectMembersCache, dataExplorerUrl: dataExplorerUrl, connected: connected, policies: livePolicies, onRefresh: function() { if (connected) fetchLiveData(); } });
       case 'rules':
         return h(AssignmentRulesPage, { bundles: bundles, setBundles: setBundles, assignmentRules: assignmentRules, setAssignmentRules: setAssignmentRules, terms: terms, projectMembersCache: projectMembersCache, livePolicies: livePolicies });
       case 'milestones':

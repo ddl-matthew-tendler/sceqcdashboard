@@ -331,6 +331,14 @@ def list_attachment_overviews(limit: int = 200, offset: int = 0):
     return gov_get("/attachment-overviews", params=params)
 
 
+# ── Create Bundle ─────────────────────────────────────────────────
+
+@app.post("/api/bundles")
+def create_bundle(body: dict):
+    """Create a new governance bundle. Body: { name, policyId, projectId }."""
+    return gov_post("/bundles", json_body=body)
+
+
 # ── Computed Policy (rich detail per bundle+policy) ────────────────
 
 @app.post("/api/compute-policy")
