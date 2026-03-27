@@ -15,25 +15,44 @@ def get_domino_host():
     return host.rstrip("/")
 
 
-def get_auth_headers():
+def _get_token():
+    """Return (api_key, token) — exactly one will be set."""
     api_key = os.environ.get("API_KEY_OVERRIDE")
     if api_key:
-        return {"X-Domino-Api-Key": api_key}
+        return api_key, None
     try:
         response = requests.get("http://localhost:8899/access-token")
         token = response.text.strip()
         if token.startswith("Bearer "):
-            return {"Authorization": token}
-        return {"Authorization": f"Bearer {token}"}
+            token = token[len("Bearer "):]
+        return None, token
     except Exception:
         raise HTTPException(status_code=503, detail="Cannot acquire auth token")
+
+
+def get_auth_headers():
+    """Auth headers for v4 endpoints (Bearer token works)."""
+    api_key, token = _get_token()
+    if api_key:
+        return {"X-Domino-Api-Key": api_key}
+    return {"Authorization": f"Bearer {token}"}
+
+
+def get_gov_auth_headers():
+    """Auth headers for governance endpoints (require X-Domino-Api-Key)."""
+    api_key, token = _get_token()
+    if api_key:
+        return {"X-Domino-Api-Key": api_key}
+    # Governance API rejects Bearer tokens with "endpoint not found".
+    # Send the sidecar token as an API key instead.
+    return {"X-Domino-Api-Key": token}
 
 
 def gov_get(path, params=None):
     host = get_domino_host()
     if not host:
         raise HTTPException(status_code=503, detail="DOMINO_API_HOST not set")
-    headers = get_auth_headers()
+    headers = get_gov_auth_headers()
     url = f"{host}/api/governance/v1{path}"
     resp = requests.get(url, headers=headers, params=params, timeout=30)
     if resp.status_code != 200:
@@ -45,7 +64,7 @@ def gov_post(path, json_body=None):
     host = get_domino_host()
     if not host:
         raise HTTPException(status_code=503, detail="DOMINO_API_HOST not set")
-    headers = get_auth_headers()
+    headers = get_gov_auth_headers()
     headers["Content-Type"] = "application/json"
     url = f"{host}/api/governance/v1{path}"
     resp = requests.post(url, headers=headers, json=json_body, timeout=30)
