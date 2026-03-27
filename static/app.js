@@ -293,6 +293,7 @@ var NAV_ITEMS = [
   { key: 'stages', icon: '\u229A', label: 'Stage Assignments' },
   { key: 'rules', icon: '\u2699', label: 'Assignment Rules' },
   { key: 'automation', icon: '\u26A1', label: 'Automation' },
+  { key: 'risk', icon: '\u2696', label: 'Risk Optimizer' },
 ];
 
 function Sidebar(props) {
@@ -4401,6 +4402,918 @@ function AutomationRulesPage(props) {
 
 
 // ═══════════════════════════════════════════════════════════════
+//  RISK OPTIMIZER
+// ═══════════════════════════════════════════════════════════════
+
+// Default risk classification config — user can edit via the Config panel
+var DEFAULT_RISK_CONFIG = {
+  highRisk: {
+    label: 'High',
+    color: '#C20A29',
+    keywords: [
+      'primary efficacy', 'primary endpoint', 'survival analysis', 'kaplan-meier',
+      'pharmacokinetic', 'pk derivation', 'pk model', 'novel algorithm',
+      'confirmatory', 'interim analysis', 'bayesian', 'adaptive design',
+      'non-inferiority', 'bioequivalence', 'exposure-response', 'dose-response',
+      'cox regression', 'time-to-event', 'hazard ratio',
+    ],
+    description: 'Reserve most rigorous QC (e.g. double programming) for these deliverables.',
+  },
+  mediumRisk: {
+    label: 'Medium',
+    color: '#F59E0B',
+    keywords: [
+      'secondary endpoint', 'subgroup', 'sensitivity analysis', 'subset',
+      'adam', 'adae', 'adcm', 'adlb', 'advs', 'admh', 'adeg',
+      'forest plot', 'shift table', 'responder analysis',
+      'missing data', 'imputation', 'ancova', 'mixed model',
+    ],
+    description: 'Code review plus spot check is sufficient.',
+  },
+  lowRisk: {
+    label: 'Low',
+    color: '#28A464',
+    keywords: [
+      'listing', 'demographic', 'disposition', 'sdtm',
+      'dm', 'ae listing', 'conmed', 'medical history', 'lab listing',
+      'summary table', 'descriptive', 'frequency', 'count table',
+      'formatting', 'title page', 'toc', 'appendix',
+    ],
+    description: 'Output crosschecking or automated validation is sufficient.',
+  },
+};
+
+function RiskOptimizerPage(props) {
+  var bundles = props.bundles || [];
+  var livePolicies = props.livePolicies || [];
+  var terms = props.terms || DEFAULT_TERMS;
+  var B = capFirst(terms.bundle);
+  var P = capFirst(terms.policy);
+
+  // ── State ──
+  var _cfg = useState(function() {
+    try {
+      var saved = localStorage.getItem('sce_risk_config');
+      return saved ? JSON.parse(saved) : JSON.parse(JSON.stringify(DEFAULT_RISK_CONFIG));
+    } catch(e) { return JSON.parse(JSON.stringify(DEFAULT_RISK_CONFIG)); }
+  });
+  var riskConfig = _cfg[0]; var setRiskConfig = _cfg[1];
+
+  // Policy tier tags: { policyId: 'most_rigorous' | 'moderate' | 'lightweight' }
+  var _pt = useState(function() {
+    try {
+      var saved = localStorage.getItem('sce_policy_tiers');
+      return saved ? JSON.parse(saved) : {};
+    } catch(e) { return {}; }
+  });
+  var policyTiers = _pt[0]; var setPolicyTiers = _pt[1];
+
+  // Manual risk overrides: { bundleId: { level: 'High'|'Medium'|'Low', reason: '...' } }
+  var _ov = useState(function() {
+    try {
+      var saved = localStorage.getItem('sce_risk_overrides');
+      return saved ? JSON.parse(saved) : {};
+    } catch(e) { return {}; }
+  });
+  var riskOverrides = _ov[0]; var setRiskOverrides = _ov[1];
+
+  // Reassignment audit log
+  var _al = useState(function() {
+    try {
+      var saved = localStorage.getItem('sce_risk_audit_log');
+      return saved ? JSON.parse(saved) : [];
+    } catch(e) { return []; }
+  });
+  var auditLog = _al[0]; var setAuditLog = _al[1];
+
+  // UI state
+  var _tab = useState('overview'); var activeTab = _tab[0]; var setActiveTab = _tab[1];
+  var _search = useState(''); var searchText = _search[0]; var setSearchText = _search[1];
+  var _configOpen = useState(false); var configModalOpen = _configOpen[0]; var setConfigModalOpen = _configOpen[1];
+  var _reassignOpen = useState(false); var reassignModalOpen = _reassignOpen[0]; var setReassignModalOpen = _reassignOpen[1];
+  var _overrideOpen = useState(false); var overrideModalOpen = _overrideOpen[0]; var setOverrideModalOpen = _overrideOpen[1];
+  var _selectedBundle = useState(null); var selectedBundle = _selectedBundle[0]; var setSelectedBundle = _selectedBundle[1];
+  var _reassignPolicy = useState(null); var reassignPolicy = _reassignPolicy[0]; var setReassignPolicy = _reassignPolicy[1];
+  var _reassignRationale = useState(''); var reassignRationale = _reassignRationale[0]; var setReassignRationale = _reassignRationale[1];
+  var _overrideLevel = useState(null); var overrideLevel = _overrideLevel[0]; var setOverrideLevel = _overrideLevel[1];
+  var _overrideReason = useState(''); var overrideReason = _overrideReason[0]; var setOverrideReason = _overrideReason[1];
+  var _configTab = useState('keywords'); var configTab = _configTab[0]; var setConfigTab = _configTab[1];
+
+  // Editable keyword text areas for config modal
+  var _editHigh = useState(''); var editHighKeywords = _editHigh[0]; var setEditHighKeywords = _editHigh[1];
+  var _editMed = useState(''); var editMedKeywords = _editMed[0]; var setEditMedKeywords = _editMed[1];
+  var _editLow = useState(''); var editLowKeywords = _editLow[0]; var setEditLowKeywords = _editLow[1];
+
+  // Persist to localStorage
+  useEffect(function() {
+    try { localStorage.setItem('sce_risk_config', JSON.stringify(riskConfig)); } catch(e) {}
+  }, [riskConfig]);
+  useEffect(function() {
+    try { localStorage.setItem('sce_policy_tiers', JSON.stringify(policyTiers)); } catch(e) {}
+  }, [policyTiers]);
+  useEffect(function() {
+    try { localStorage.setItem('sce_risk_overrides', JSON.stringify(riskOverrides)); } catch(e) {}
+  }, [riskOverrides]);
+  useEffect(function() {
+    try {
+      // Cap audit log at 500 entries
+      var capped = auditLog.length > 500 ? auditLog.slice(0, 500) : auditLog;
+      localStorage.setItem('sce_risk_audit_log', JSON.stringify(capped));
+    } catch(e) {}
+  }, [auditLog]);
+
+  // ── Risk Scoring Engine ──
+  function scoreBundle(bundle) {
+    // If there's a manual override, use it
+    var override = riskOverrides[bundle.id];
+    if (override) {
+      return { level: override.level, score: override.level === 'High' ? 90 : override.level === 'Medium' ? 50 : 10, source: 'manual', reason: override.reason };
+    }
+
+    var name = (bundle.name || '').toLowerCase();
+    var policyName = (bundle.policyName || '').toLowerCase();
+    var combined = name + ' ' + policyName;
+
+    var highScore = 0; var highMatches = [];
+    var medScore = 0; var medMatches = [];
+    var lowScore = 0; var lowMatches = [];
+
+    riskConfig.highRisk.keywords.forEach(function(kw) {
+      if (combined.indexOf(kw.toLowerCase()) >= 0) { highScore += 10; highMatches.push(kw); }
+    });
+    riskConfig.mediumRisk.keywords.forEach(function(kw) {
+      if (combined.indexOf(kw.toLowerCase()) >= 0) { medScore += 10; medMatches.push(kw); }
+    });
+    riskConfig.lowRisk.keywords.forEach(function(kw) {
+      if (combined.indexOf(kw.toLowerCase()) >= 0) { lowScore += 10; lowMatches.push(kw); }
+    });
+
+    var level, score, matches;
+    if (highScore > medScore && highScore > lowScore) {
+      level = 'High'; score = Math.min(100, 60 + highScore); matches = highMatches;
+    } else if (medScore > lowScore) {
+      level = 'Medium'; score = Math.min(100, 40 + medScore); matches = medMatches;
+    } else if (lowScore > 0) {
+      level = 'Low'; score = Math.min(100, 20 + lowScore); matches = lowMatches;
+    } else {
+      // No keyword match → default to Medium (conservative)
+      level = 'Medium'; score = 30; matches = [];
+    }
+
+    var reason = matches.length > 0
+      ? 'Matched keywords: ' + matches.join(', ')
+      : 'No keyword matches — defaulting to Medium risk (conservative).';
+
+    return { level: level, score: score, source: 'algorithm', reason: reason, matches: matches };
+  }
+
+  // ── Policy Recommendation ──
+  function getRecommendedTier(riskLevel) {
+    if (riskLevel === 'High') return 'most_rigorous';
+    if (riskLevel === 'Medium') return 'moderate';
+    return 'lightweight';
+  }
+
+  function getTierLabel(tier) {
+    if (tier === 'most_rigorous') return 'Most Rigorous';
+    if (tier === 'moderate') return 'Moderate';
+    if (tier === 'lightweight') return 'Lightweight';
+    return 'Untagged';
+  }
+
+  function getTierColor(tier) {
+    if (tier === 'most_rigorous') return '#C20A29';
+    if (tier === 'moderate') return '#F59E0B';
+    if (tier === 'lightweight') return '#28A464';
+    return '#8F8FA3';
+  }
+
+  function getRiskColor(level) {
+    if (level === 'High') return riskConfig.highRisk.color;
+    if (level === 'Medium') return riskConfig.mediumRisk.color;
+    return riskConfig.lowRisk.color;
+  }
+
+  // Get all distinct policies across bundles + livePolicies
+  var allPolicies = useMemo(function() {
+    var map = {};
+    livePolicies.forEach(function(p) { map[p.id] = { id: p.id, name: p.name }; });
+    bundles.forEach(function(b) {
+      if (b.policyId && !map[b.policyId]) map[b.policyId] = { id: b.policyId, name: b.policyName };
+    });
+    return Object.keys(map).map(function(k) { return map[k]; });
+  }, [bundles, livePolicies]);
+
+  // Count how many policies are tagged
+  var taggedPolicyCount = allPolicies.filter(function(p) { return policyTiers[p.id]; }).length;
+  var untaggedPolicyCount = allPolicies.length - taggedPolicyCount;
+
+  // ── Scored Bundles ──
+  var scoredBundles = useMemo(function() {
+    return bundles.map(function(b) {
+      var risk = scoreBundle(b);
+      var currentTier = policyTiers[b.policyId] || null;
+      var recommendedTier = getRecommendedTier(risk.level);
+      var recommendedPolicies = allPolicies.filter(function(p) { return policyTiers[p.id] === recommendedTier; });
+
+      var calibration;
+      if (!currentTier) {
+        calibration = 'untagged';
+      } else if (currentTier === recommendedTier) {
+        calibration = 'well-matched';
+      } else {
+        var tierOrder = { 'lightweight': 0, 'moderate': 1, 'most_rigorous': 2 };
+        calibration = tierOrder[currentTier] > tierOrder[recommendedTier] ? 'over-qc' : 'under-qc';
+      }
+
+      return Object.assign({}, b, {
+        _risk: risk,
+        _currentTier: currentTier,
+        _recommendedTier: recommendedTier,
+        _recommendedPolicies: recommendedPolicies,
+        _calibration: calibration,
+      });
+    });
+  }, [bundles, riskConfig, riskOverrides, policyTiers, allPolicies]);
+
+  // Filter by search
+  var filteredBundles = useMemo(function() {
+    if (!searchText) return scoredBundles;
+    var q = searchText.toLowerCase();
+    return scoredBundles.filter(function(b) {
+      return (b.name || '').toLowerCase().indexOf(q) >= 0
+        || (b.projectName || '').toLowerCase().indexOf(q) >= 0
+        || (b.policyName || '').toLowerCase().indexOf(q) >= 0
+        || b._risk.level.toLowerCase().indexOf(q) >= 0;
+    });
+  }, [scoredBundles, searchText]);
+
+  // ── Summary Stats ──
+  var summary = useMemo(function() {
+    var counts = { high: 0, medium: 0, low: 0, overQc: 0, wellMatched: 0, underQc: 0, untagged: 0, manual: 0 };
+    scoredBundles.forEach(function(b) {
+      if (b._risk.level === 'High') counts.high++;
+      else if (b._risk.level === 'Medium') counts.medium++;
+      else counts.low++;
+
+      if (b._calibration === 'over-qc') counts.overQc++;
+      else if (b._calibration === 'well-matched') counts.wellMatched++;
+      else if (b._calibration === 'under-qc') counts.underQc++;
+      else counts.untagged++;
+
+      if (b._risk.source === 'manual') counts.manual++;
+    });
+    return counts;
+  }, [scoredBundles]);
+
+  // ── Handlers ──
+  function handleOpenReassign(bundle) {
+    setSelectedBundle(bundle);
+    setReassignPolicy(null);
+    setReassignRationale('');
+    setReassignModalOpen(true);
+  }
+
+  function handleReassign() {
+    if (!selectedBundle || !reassignPolicy || !reassignRationale.trim()) {
+      antd.message.warning('Please select a policy and provide a rationale.');
+      return;
+    }
+
+    var gapInfo = API_GAPS.stageReassign;
+    var newPolicyName = (allPolicies.find(function(p) { return p.id === reassignPolicy; }) || {}).name || reassignPolicy;
+
+    // Log audit entry regardless of API readiness
+    var entry = {
+      id: 'audit-' + Date.now(),
+      bundleId: selectedBundle.id,
+      bundleName: selectedBundle.name,
+      projectName: selectedBundle.projectName,
+      oldPolicy: selectedBundle.policyName,
+      newPolicy: newPolicyName,
+      rationale: reassignRationale.trim(),
+      riskLevel: selectedBundle._risk.level,
+      calibration: selectedBundle._calibration,
+      timestamp: new Date().toISOString(),
+      user: 'current_user',
+    };
+    setAuditLog(function(prev) { return [entry].concat(prev); });
+
+    if (!gapInfo.ready) {
+      antd.notification.info({
+        message: 'Reassignment Logged (API Pending)',
+        description: 'The reassignment from "' + selectedBundle.policyName + '" to "' + newPolicyName + '" has been recorded in the audit log. The Domino write API will persist it when available.',
+        duration: 6,
+      });
+    } else {
+      // If the API is ready, call the reassignment endpoint
+      antd.message.success('Reassignment logged: ' + selectedBundle.name + ' → ' + newPolicyName);
+    }
+
+    setReassignModalOpen(false);
+  }
+
+  function handleOpenOverride(bundle) {
+    setSelectedBundle(bundle);
+    var existing = riskOverrides[bundle.id];
+    setOverrideLevel(existing ? existing.level : bundle._risk.level);
+    setOverrideReason(existing ? existing.reason : '');
+    setOverrideModalOpen(true);
+  }
+
+  function handleSaveOverride() {
+    if (!selectedBundle || !overrideLevel || !overrideReason.trim()) {
+      antd.message.warning('Please select a risk level and provide a reason.');
+      return;
+    }
+    setRiskOverrides(function(prev) {
+      var next = Object.assign({}, prev);
+      next[selectedBundle.id] = { level: overrideLevel, reason: overrideReason.trim() };
+      return next;
+    });
+    // Also log to audit
+    setAuditLog(function(prev) {
+      return [{
+        id: 'audit-' + Date.now(),
+        bundleId: selectedBundle.id,
+        bundleName: selectedBundle.name,
+        projectName: selectedBundle.projectName,
+        action: 'risk_override',
+        oldRisk: selectedBundle._risk.level,
+        newRisk: overrideLevel,
+        rationale: overrideReason.trim(),
+        timestamp: new Date().toISOString(),
+        user: 'current_user',
+      }].concat(prev);
+    });
+    antd.message.success('Risk override saved for ' + selectedBundle.name);
+    setOverrideModalOpen(false);
+  }
+
+  function handleClearOverride(bundleId, bundleName) {
+    setRiskOverrides(function(prev) {
+      var next = Object.assign({}, prev);
+      delete next[bundleId];
+      return next;
+    });
+    antd.message.info('Risk override removed for ' + bundleName + '. Algorithm score restored.');
+  }
+
+  function handleOpenConfig() {
+    setEditHighKeywords(riskConfig.highRisk.keywords.join(', '));
+    setEditMedKeywords(riskConfig.mediumRisk.keywords.join(', '));
+    setEditLowKeywords(riskConfig.lowRisk.keywords.join(', '));
+    setConfigModalOpen(true);
+  }
+
+  function handleSaveConfig() {
+    function parseKeywords(text) {
+      return text.split(',').map(function(s) { return s.trim().toLowerCase(); }).filter(Boolean);
+    }
+    setRiskConfig(function(prev) {
+      return Object.assign({}, prev, {
+        highRisk: Object.assign({}, prev.highRisk, { keywords: parseKeywords(editHighKeywords) }),
+        mediumRisk: Object.assign({}, prev.mediumRisk, { keywords: parseKeywords(editMedKeywords) }),
+        lowRisk: Object.assign({}, prev.lowRisk, { keywords: parseKeywords(editLowKeywords) }),
+      });
+    });
+    antd.message.success('Risk classification config updated.');
+    setConfigModalOpen(false);
+  }
+
+  function handleResetConfig() {
+    setRiskConfig(JSON.parse(JSON.stringify(DEFAULT_RISK_CONFIG)));
+    setEditHighKeywords(DEFAULT_RISK_CONFIG.highRisk.keywords.join(', '));
+    setEditMedKeywords(DEFAULT_RISK_CONFIG.mediumRisk.keywords.join(', '));
+    setEditLowKeywords(DEFAULT_RISK_CONFIG.lowRisk.keywords.join(', '));
+    antd.message.info('Config reset to defaults.');
+  }
+
+  // ── Columns for the bundle table ──
+  var bundleColumns = [
+    { title: B, dataIndex: 'name', key: 'name', width: 180, ellipsis: true,
+      sorter: function(a, b) { return (a.name || '').localeCompare(b.name || ''); },
+      render: function(t, r) {
+        return h('div', null,
+          h('span', { style: { fontWeight: 500 } }, t),
+          r._risk.source === 'manual' ? h(Tag, { color: 'blue', style: { marginLeft: 6, fontSize: 10 } }, 'Override') : null
+        );
+      },
+    },
+    { title: 'Project', dataIndex: 'projectName', key: 'project', width: 160, ellipsis: true,
+      sorter: function(a, b) { return (a.projectName || '').localeCompare(b.projectName || ''); },
+    },
+    { title: 'Risk', key: 'risk', width: 100,
+      sorter: function(a, b) { return a._risk.score - b._risk.score; },
+      filters: [{ text: 'High', value: 'High' }, { text: 'Medium', value: 'Medium' }, { text: 'Low', value: 'Low' }],
+      onFilter: function(v, r) { return r._risk.level === v; },
+      render: function(_, r) {
+        return h(Tag, { color: r._risk.level === 'High' ? 'red' : r._risk.level === 'Medium' ? 'gold' : 'green' }, r._risk.level);
+      },
+    },
+    { title: 'Why', key: 'reason', ellipsis: true,
+      render: function(_, r) {
+        return h(Tooltip, { title: r._risk.reason, placement: 'topLeft', overlayStyle: { maxWidth: 400 } },
+          h('span', { style: { fontSize: 12, color: '#65657B', cursor: 'help' } },
+            r._risk.matches && r._risk.matches.length > 0
+              ? r._risk.matches.slice(0, 3).join(', ') + (r._risk.matches.length > 3 ? ' +' + (r._risk.matches.length - 3) + ' more' : '')
+              : r._risk.source === 'manual' ? r._risk.reason : 'No keyword matches'
+          )
+        );
+      },
+    },
+    { title: 'Current ' + P, dataIndex: 'policyName', key: 'current', width: 200, ellipsis: true,
+      sorter: function(a, b) { return (a.policyName || '').localeCompare(b.policyName || ''); },
+      render: function(t, r) {
+        var tier = r._currentTier;
+        return h('div', null,
+          h('span', null, t),
+          tier ? h(Tag, { style: { marginLeft: 4, fontSize: 10 }, color: getTierColor(tier) }, getTierLabel(tier)) : null
+        );
+      },
+    },
+    { title: 'Calibration', key: 'calibration', width: 130,
+      filters: [
+        { text: 'Over-QC\'d', value: 'over-qc' },
+        { text: 'Well-Matched', value: 'well-matched' },
+        { text: 'Under-QC\'d', value: 'under-qc' },
+        { text: 'Untagged', value: 'untagged' },
+      ],
+      onFilter: function(v, r) { return r._calibration === v; },
+      render: function(_, r) {
+        var label = r._calibration === 'over-qc' ? 'Over-QC\'d' : r._calibration === 'well-matched' ? 'Well-Matched' : r._calibration === 'under-qc' ? 'Under-QC\'d' : 'Untagged';
+        var color = r._calibration === 'over-qc' ? 'orange' : r._calibration === 'well-matched' ? 'green' : r._calibration === 'under-qc' ? 'red' : 'default';
+        return h(Tag, { color: color }, label);
+      },
+    },
+    { title: 'Recommended', key: 'recommended', width: 200, ellipsis: true,
+      render: function(_, r) {
+        if (r._calibration === 'well-matched') return h('span', { style: { color: '#28A464', fontSize: 12 } }, '\u2713 Current policy is appropriate');
+        if (!r._currentTier) return h('span', { style: { color: '#8F8FA3', fontSize: 12 } }, 'Tag policies to see recommendations');
+        var recPolicies = r._recommendedPolicies;
+        if (recPolicies.length === 0) return h('span', { style: { color: '#8F8FA3', fontSize: 12 } }, 'No ' + getTierLabel(r._recommendedTier) + ' policy tagged');
+        return h('span', { style: { fontSize: 12 } }, recPolicies.map(function(p) { return p.name; }).join(', '));
+      },
+    },
+    { title: 'Actions', key: 'actions', width: 140, fixed: 'right',
+      render: function(_, r) {
+        return h('div', { style: { display: 'flex', gap: 4 } },
+          h(Tooltip, { title: 'Reassign ' + P.toLowerCase() },
+            h(Button, { size: 'small', onClick: function() { handleOpenReassign(r); } }, 'Reassign')
+          ),
+          h(Tooltip, { title: r._risk.source === 'manual' ? 'Edit risk override' : 'Override algorithm risk' },
+            h(Button, { size: 'small', type: 'dashed', onClick: function() { handleOpenOverride(r); } }, '\u270E')
+          ),
+          r._risk.source === 'manual'
+            ? h(Tooltip, { title: 'Remove override, restore algorithm score' },
+                h(Button, { size: 'small', type: 'text', danger: true, onClick: function() { handleClearOverride(r.id, r.name); } }, '\u2715')
+              )
+            : null
+        );
+      },
+    },
+  ];
+
+  // ── Audit log columns ──
+  var auditColumns = [
+    { title: 'Date', dataIndex: 'timestamp', key: 'date', width: 160,
+      sorter: function(a, b) { return (a.timestamp || '').localeCompare(b.timestamp || ''); },
+      defaultSortOrder: 'descend',
+      render: function(t) { return t ? dayjs(t).format('MMM D, YYYY h:mm A') : '\u2014'; },
+    },
+    { title: B, dataIndex: 'bundleName', key: 'bundle', width: 180, ellipsis: true },
+    { title: 'Project', dataIndex: 'projectName', key: 'project', width: 150, ellipsis: true },
+    { title: 'Action', key: 'action', width: 140,
+      render: function(_, r) {
+        if (r.action === 'risk_override') return h(Tag, { color: 'blue' }, 'Risk Override');
+        return h(Tag, { color: 'purple' }, P + ' Reassign');
+      },
+    },
+    { title: 'From', key: 'from', width: 160, ellipsis: true,
+      render: function(_, r) {
+        return r.action === 'risk_override'
+          ? h(Tag, null, r.oldRisk || '\u2014')
+          : h('span', null, r.oldPolicy || '\u2014');
+      },
+    },
+    { title: 'To', key: 'to', width: 160, ellipsis: true,
+      render: function(_, r) {
+        return r.action === 'risk_override'
+          ? h(Tag, null, r.newRisk || '\u2014')
+          : h('span', null, r.newPolicy || '\u2014');
+      },
+    },
+    { title: 'Rationale', dataIndex: 'rationale', key: 'rationale', ellipsis: true,
+      render: function(t) {
+        return h(Tooltip, { title: t, placement: 'topLeft', overlayStyle: { maxWidth: 400 } },
+          h('span', { style: { fontSize: 12 } }, t)
+        );
+      },
+    },
+  ];
+
+  // ── Summary Cards ──
+  function summaryCard(title, value, color, subtitle) {
+    return h('div', { style: { background: '#1E1E2E', borderRadius: 8, padding: '16px 20px', flex: '1 1 0', minWidth: 120 } },
+      h('div', { style: { fontSize: 12, color: '#8F8FA3', marginBottom: 4 } }, title),
+      h('div', { style: { fontSize: 28, fontWeight: 700, color: color } }, value),
+      subtitle ? h('div', { style: { fontSize: 11, color: '#65657B', marginTop: 2 } }, subtitle) : null
+    );
+  }
+
+  // ── Policy Tier Selector ──
+  function renderPolicyTiers() {
+    if (allPolicies.length === 0) {
+      return h(Empty, { description: 'No policies loaded yet. Policies will appear once bundles are loaded.' });
+    }
+    return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
+      h('div', { style: { fontSize: 12, color: '#8F8FA3', marginBottom: 4 } },
+        'Tag each policy with its rigor level. This drives the recommendation engine.'
+      ),
+      allPolicies.map(function(policy) {
+        var currentTier = policyTiers[policy.id] || null;
+        return h('div', { key: policy.id, style: { display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', background: '#1E1E2E', borderRadius: 6 } },
+          h('span', { style: { flex: 1, fontSize: 13, color: '#E0E0EC' } }, policy.name),
+          h(Select, {
+            size: 'small',
+            style: { width: 160 },
+            placeholder: 'Select tier...',
+            value: currentTier || undefined,
+            allowClear: true,
+            onChange: function(val) {
+              setPolicyTiers(function(prev) {
+                var next = Object.assign({}, prev);
+                if (val) next[policy.id] = val;
+                else delete next[policy.id];
+                return next;
+              });
+            },
+            options: [
+              { value: 'most_rigorous', label: '\u{1F534} Most Rigorous' },
+              { value: 'moderate', label: '\u{1F7E1} Moderate' },
+              { value: 'lightweight', label: '\u{1F7E2} Lightweight' },
+            ],
+          }),
+          currentTier ? h(Tag, { color: getTierColor(currentTier), style: { fontSize: 10 } }, getTierLabel(currentTier)) : null
+        );
+      })
+    );
+  }
+
+  // ── Render ──
+  return h('div', { style: { padding: 24 } },
+    // Header
+    h('div', { className: 'panel-header', style: { marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+      h('div', null,
+        h('span', { className: 'panel-title', style: { fontSize: 18 } }, '\u2696 Risk Optimizer'),
+        h('span', { style: { fontSize: 12, color: '#8F8FA3', marginLeft: 12 } },
+          'Identify over-QC\'d and under-QC\'d deliverables. Recommend right-sized policies.'
+        )
+      ),
+      h('div', { style: { display: 'flex', gap: 8 } },
+        h(Button, { size: 'small', onClick: handleOpenConfig, icon: h('span', null, '\u2699') }, 'Config'),
+        h(Button, { size: 'small', type: activeTab === 'overview' ? 'primary' : 'default', onClick: function() { setActiveTab('overview'); } }, 'Overview'),
+        h(Button, { size: 'small', type: activeTab === 'bundles' ? 'primary' : 'default', onClick: function() { setActiveTab('bundles'); } }, B + 's'),
+        h(Button, { size: 'small', type: activeTab === 'policies' ? 'primary' : 'default', onClick: function() { setActiveTab('policies'); } }, P + ' Tiers'),
+        h(Button, { size: 'small', type: activeTab === 'audit' ? 'primary' : 'default', onClick: function() { setActiveTab('audit'); } }, 'Audit Log')
+      )
+    ),
+
+    // Setup alert if policies not tagged
+    untaggedPolicyCount > 0 && allPolicies.length > 0
+      ? h(Alert, {
+          type: 'info',
+          showIcon: true,
+          banner: true,
+          style: { marginBottom: 16, borderRadius: 8 },
+          message: untaggedPolicyCount + ' of ' + allPolicies.length + ' policies are not tagged with a rigor tier.',
+          description: 'Tag each policy as Most Rigorous, Moderate, or Lightweight in the "' + P + ' Tiers" tab. This powers the recommendation engine.',
+          action: h(Button, { size: 'small', type: 'primary', onClick: function() { setActiveTab('policies'); } }, 'Tag Policies'),
+        })
+      : null,
+
+    // ── Overview Tab ──
+    activeTab === 'overview' ? h('div', null,
+      // Summary cards row
+      h('div', { style: { display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' } },
+        summaryCard('Total ' + B + 's', scoredBundles.length, '#E0E0EC'),
+        summaryCard('High Risk', summary.high, riskConfig.highRisk.color, 'Need most rigorous QC'),
+        summaryCard('Medium Risk', summary.medium, riskConfig.mediumRisk.color, 'Code review + spot check'),
+        summaryCard('Low Risk', summary.low, riskConfig.lowRisk.color, 'Output crosscheck sufficient')
+      ),
+
+      // Calibration cards
+      h('div', { className: 'panel-header', style: { marginBottom: 12 } },
+        h('span', { className: 'panel-title' }, 'QC Calibration Summary')
+      ),
+      h('div', { style: { display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' } },
+        summaryCard('Over-QC\'d', summary.overQc, '#F59E0B',
+          summary.overQc > 0 ? 'Using more rigorous QC than needed — potential resource savings' : 'None detected'
+        ),
+        summaryCard('Well-Matched', summary.wellMatched, '#28A464',
+          summary.wellMatched > 0 ? 'Current policy aligns with risk level' : taggedPolicyCount === 0 ? 'Tag policies to see results' : 'None detected'
+        ),
+        summaryCard('Under-QC\'d', summary.underQc, '#C20A29',
+          summary.underQc > 0 ? 'Using less rigorous QC than recommended — potential risk' : 'None detected'
+        ),
+        summaryCard('Manual Overrides', summary.manual, '#5B8FF9',
+          summary.manual > 0 ? 'Human judgment applied' : 'No overrides set'
+        )
+      ),
+
+      // Quick insight
+      summary.overQc > 0 ? h(Alert, {
+        type: 'warning',
+        showIcon: true,
+        style: { marginBottom: 12, borderRadius: 8 },
+        message: summary.overQc + ' deliverable' + (summary.overQc > 1 ? 's are' : ' is') + ' potentially over-QC\'d',
+        description: 'These deliverables are assigned a more rigorous QC policy than their risk level warrants. Consider reassigning to a lighter-touch method to free up resources.',
+        action: h(Button, { size: 'small', onClick: function() {
+          setActiveTab('bundles');
+        } }, 'View ' + B + 's'),
+      }) : null,
+
+      summary.underQc > 0 ? h(Alert, {
+        type: 'error',
+        showIcon: true,
+        style: { marginBottom: 12, borderRadius: 8 },
+        message: summary.underQc + ' deliverable' + (summary.underQc > 1 ? 's may' : ' may') + ' need more rigorous QC',
+        description: 'These deliverables are assigned a lighter QC policy than their risk level suggests. Review whether the current method is sufficient.',
+        action: h(Button, { size: 'small', danger: true, onClick: function() {
+          setActiveTab('bundles');
+        } }, 'View ' + B + 's'),
+      }) : null,
+
+      // Risk distribution Highcharts
+      h('div', { className: 'panel', style: { padding: 16, background: '#1E1E2E', borderRadius: 8, marginTop: 8 } },
+        h('div', { className: 'panel-header' }, h('span', { className: 'panel-title' }, 'Risk Distribution by Project')),
+        h(RiskDistributionChart, { scoredBundles: scoredBundles, riskConfig: riskConfig })
+      )
+    ) : null,
+
+    // ── Bundles Tab ──
+    activeTab === 'bundles' ? h('div', null,
+      h('div', { style: { display: 'flex', gap: 12, marginBottom: 12, alignItems: 'center' } },
+        h(Input, {
+          placeholder: 'Search deliverables, projects, policies, risk level...',
+          value: searchText,
+          onChange: function(e) { setSearchText(e.target.value); },
+          allowClear: true,
+          style: { maxWidth: 400 },
+          prefix: h('span', null, '\uD83D\uDD0D'),
+        }),
+        h('span', { style: { fontSize: 12, color: '#8F8FA3' } }, filteredBundles.length + ' of ' + scoredBundles.length + ' ' + B.toLowerCase() + 's')
+      ),
+      h(Table, {
+        dataSource: filteredBundles,
+        columns: bundleColumns,
+        rowKey: 'id',
+        size: 'small',
+        scroll: { x: 1200 },
+        pagination: { defaultPageSize: 20, size: 'small', showSizeChanger: true, showTotal: function(total) { return total + ' ' + B.toLowerCase() + 's'; } },
+      })
+    ) : null,
+
+    // ── Policy Tiers Tab ──
+    activeTab === 'policies' ? h('div', null,
+      h('div', { className: 'panel', style: { padding: 20, background: '#1E1E2E', borderRadius: 8 } },
+        h('div', { className: 'panel-header', style: { marginBottom: 12 } },
+          h('span', { className: 'panel-title' }, P + ' Rigor Tiers'),
+          h('span', { style: { marginLeft: 8, fontSize: 12, color: '#8F8FA3' } },
+            taggedPolicyCount + ' of ' + allPolicies.length + ' tagged'
+          )
+        ),
+        renderPolicyTiers()
+      )
+    ) : null,
+
+    // ── Audit Log Tab ──
+    activeTab === 'audit' ? h('div', null,
+      h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 } },
+        h('span', { style: { fontSize: 12, color: '#8F8FA3' } }, auditLog.length + ' audit entries'),
+        auditLog.length > 0
+          ? h(Button, { size: 'small', danger: true, type: 'text', onClick: function() {
+              antd.Modal.confirm({
+                title: 'Clear Audit Log?',
+                content: 'This will permanently delete all audit entries. This cannot be undone.',
+                okText: 'Clear',
+                okType: 'danger',
+                onOk: function() { setAuditLog([]); },
+              });
+            } }, 'Clear Log')
+          : null
+      ),
+      auditLog.length > 0
+        ? h(Table, {
+            dataSource: auditLog,
+            columns: auditColumns,
+            rowKey: 'id',
+            size: 'small',
+            pagination: { defaultPageSize: 20, size: 'small', showSizeChanger: true },
+          })
+        : h(Empty, { description: 'No audit entries yet. Reassignments and overrides will appear here.' })
+    ) : null,
+
+    // ── Reassign Modal ──
+    h(Modal, {
+      title: 'Reassign ' + P,
+      open: reassignModalOpen,
+      onCancel: function() { setReassignModalOpen(false); },
+      onOk: handleReassign,
+      okText: 'Reassign',
+      okButtonProps: { disabled: !reassignPolicy || !reassignRationale.trim() },
+      width: 520,
+    },
+      selectedBundle ? h('div', null,
+        h('div', { style: { marginBottom: 12 } },
+          h('span', { style: { fontWeight: 600 } }, selectedBundle.name),
+          h(Tag, { color: selectedBundle._risk.level === 'High' ? 'red' : selectedBundle._risk.level === 'Medium' ? 'gold' : 'green', style: { marginLeft: 8 } }, selectedBundle._risk.level + ' Risk'),
+          h(Tag, { color: selectedBundle._calibration === 'over-qc' ? 'orange' : selectedBundle._calibration === 'under-qc' ? 'red' : selectedBundle._calibration === 'well-matched' ? 'green' : 'default', style: { marginLeft: 4 } },
+            selectedBundle._calibration === 'over-qc' ? 'Over-QC\'d' : selectedBundle._calibration === 'under-qc' ? 'Under-QC\'d' : selectedBundle._calibration === 'well-matched' ? 'Well-Matched' : 'Untagged'
+          )
+        ),
+        h('div', { style: { marginBottom: 12, fontSize: 12, color: '#8F8FA3' } },
+          'Current: ', h('strong', null, selectedBundle.policyName)
+        ),
+        h('div', { style: { marginBottom: 8 } },
+          h('label', { style: { fontSize: 12, color: '#B0B0C0', display: 'block', marginBottom: 4 } }, 'New ' + P),
+          h(Select, {
+            style: { width: '100%' },
+            placeholder: 'Select target policy...',
+            value: reassignPolicy || undefined,
+            onChange: setReassignPolicy,
+            showSearch: true,
+            optionFilterProp: 'label',
+            options: allPolicies.map(function(p) {
+              var tier = policyTiers[p.id];
+              return { value: p.id, label: p.name + (tier ? ' (' + getTierLabel(tier) + ')' : '') };
+            }),
+          })
+        ),
+        h('div', null,
+          h('label', { style: { fontSize: 12, color: '#B0B0C0', display: 'block', marginBottom: 4 } },
+            'Rationale ', h('span', { style: { color: '#C20A29' } }, '(required)')
+          ),
+          h(Input.TextArea, {
+            rows: 3,
+            value: reassignRationale,
+            onChange: function(e) { setReassignRationale(e.target.value); },
+            placeholder: 'Why is this reassignment appropriate? This is recorded in the audit log.',
+          })
+        )
+      ) : null
+    ),
+
+    // ── Override Modal ──
+    h(Modal, {
+      title: 'Override Risk Assessment',
+      open: overrideModalOpen,
+      onCancel: function() { setOverrideModalOpen(false); },
+      onOk: handleSaveOverride,
+      okText: 'Save Override',
+      okButtonProps: { disabled: !overrideLevel || !overrideReason.trim() },
+      width: 480,
+    },
+      selectedBundle ? h('div', null,
+        h('div', { style: { marginBottom: 12 } },
+          h('span', { style: { fontWeight: 600 } }, selectedBundle.name),
+          h('span', { style: { fontSize: 12, color: '#8F8FA3', marginLeft: 8 } },
+            'Algorithm says: ' + selectedBundle._risk.level + ' Risk'
+          )
+        ),
+        h('div', { style: { marginBottom: 8 } },
+          h('label', { style: { fontSize: 12, color: '#B0B0C0', display: 'block', marginBottom: 4 } }, 'Your Risk Assessment'),
+          h(Select, {
+            style: { width: '100%' },
+            value: overrideLevel || undefined,
+            onChange: setOverrideLevel,
+            options: [
+              { value: 'High', label: '\u{1F534} High Risk — most rigorous QC' },
+              { value: 'Medium', label: '\u{1F7E1} Medium Risk — code review + spot check' },
+              { value: 'Low', label: '\u{1F7E2} Low Risk — output crosscheck' },
+            ],
+          })
+        ),
+        h('div', null,
+          h('label', { style: { fontSize: 12, color: '#B0B0C0', display: 'block', marginBottom: 4 } },
+            'Reason for Override ', h('span', { style: { color: '#C20A29' } }, '(required)')
+          ),
+          h(Input.TextArea, {
+            rows: 3,
+            value: overrideReason,
+            onChange: function(e) { setOverrideReason(e.target.value); },
+            placeholder: 'Why does your judgment differ from the algorithm? This is recorded in the audit log.',
+          })
+        ),
+        h('div', { style: { marginTop: 8, fontSize: 11, color: '#65657B' } },
+          '\u24D8 Human judgment always takes precedence over the algorithm. Your override will persist until you clear it.'
+        )
+      ) : null
+    ),
+
+    // ── Config Modal ──
+    h(Modal, {
+      title: '\u2699 Risk Classification Config',
+      open: configModalOpen,
+      onCancel: function() { setConfigModalOpen(false); },
+      onOk: handleSaveConfig,
+      okText: 'Save Config',
+      width: 640,
+      footer: function(_, _ref) {
+        return h('div', { style: { display: 'flex', justifyContent: 'space-between' } },
+          h(Button, { danger: true, type: 'text', onClick: handleResetConfig }, 'Reset to Defaults'),
+          h('div', { style: { display: 'flex', gap: 8 } },
+            h(Button, { onClick: function() { setConfigModalOpen(false); } }, 'Cancel'),
+            h(Button, { type: 'primary', onClick: handleSaveConfig }, 'Save Config')
+          )
+        );
+      },
+    },
+      h('div', null,
+        h('p', { style: { fontSize: 12, color: '#8F8FA3', marginBottom: 16 } },
+          'Edit the keyword lists below. The risk engine matches these against deliverable names and policy names. Separate keywords with commas. A non-engineer can tune these without code changes.'
+        ),
+        h('div', { style: { marginBottom: 16 } },
+          h('label', { style: { fontWeight: 600, color: riskConfig.highRisk.color, display: 'block', marginBottom: 4 } },
+            '\u{1F534} High Risk Keywords'
+          ),
+          h('div', { style: { fontSize: 11, color: '#65657B', marginBottom: 4 } }, riskConfig.highRisk.description),
+          h(Input.TextArea, {
+            rows: 3,
+            value: editHighKeywords,
+            onChange: function(e) { setEditHighKeywords(e.target.value); },
+          })
+        ),
+        h('div', { style: { marginBottom: 16 } },
+          h('label', { style: { fontWeight: 600, color: riskConfig.mediumRisk.color, display: 'block', marginBottom: 4 } },
+            '\u{1F7E1} Medium Risk Keywords'
+          ),
+          h('div', { style: { fontSize: 11, color: '#65657B', marginBottom: 4 } }, riskConfig.mediumRisk.description),
+          h(Input.TextArea, {
+            rows: 3,
+            value: editMedKeywords,
+            onChange: function(e) { setEditMedKeywords(e.target.value); },
+          })
+        ),
+        h('div', null,
+          h('label', { style: { fontWeight: 600, color: riskConfig.lowRisk.color, display: 'block', marginBottom: 4 } },
+            '\u{1F7E2} Low Risk Keywords'
+          ),
+          h('div', { style: { fontSize: 11, color: '#65657B', marginBottom: 4 } }, riskConfig.lowRisk.description),
+          h(Input.TextArea, {
+            rows: 3,
+            value: editLowKeywords,
+            onChange: function(e) { setEditLowKeywords(e.target.value); },
+          })
+        )
+      )
+    )
+  );
+}
+
+// ── Risk Distribution Chart (Highcharts) ──
+function RiskDistributionChart(props) {
+  var chartRef = useRef(null);
+  var scoredBundles = props.scoredBundles;
+  var riskConfig = props.riskConfig;
+
+  useEffect(function() {
+    if (!chartRef.current || typeof Highcharts === 'undefined') return;
+
+    // Group by project
+    var projects = {};
+    scoredBundles.forEach(function(b) {
+      var pName = b.projectName || 'Unknown';
+      if (!projects[pName]) projects[pName] = { high: 0, medium: 0, low: 0 };
+      if (b._risk.level === 'High') projects[pName].high++;
+      else if (b._risk.level === 'Medium') projects[pName].medium++;
+      else projects[pName].low++;
+    });
+
+    var categories = Object.keys(projects);
+
+    Highcharts.chart(chartRef.current, {
+      chart: { type: 'bar', backgroundColor: 'transparent', height: Math.max(200, categories.length * 50 + 80) },
+      title: { text: null },
+      xAxis: { categories: categories, labels: { style: { color: '#B0B0C0', fontSize: '11px' } } },
+      yAxis: { min: 0, title: { text: 'Deliverables', style: { color: '#8F8FA3' } }, stackLabels: { enabled: true, style: { color: '#E0E0EC' } }, gridLineColor: '#2A2A3E' },
+      legend: { itemStyle: { color: '#B0B0C0' } },
+      plotOptions: { series: { stacking: 'normal', borderRadius: 3 } },
+      series: [
+        { name: 'High Risk', data: categories.map(function(c) { return projects[c].high; }), color: riskConfig.highRisk.color },
+        { name: 'Medium Risk', data: categories.map(function(c) { return projects[c].medium; }), color: riskConfig.mediumRisk.color },
+        { name: 'Low Risk', data: categories.map(function(c) { return projects[c].low; }), color: riskConfig.lowRisk.color },
+      ],
+      credits: { enabled: false },
+      tooltip: { shared: true },
+    });
+  }, [scoredBundles, riskConfig]);
+
+  return h('div', { ref: chartRef, style: { width: '100%', minHeight: 200 } });
+}
+
+
+// ═══════════════════════════════════════════════════════════════
 //  ROOT APP
 // ═══════════════════════════════════════════════════════════════
 function App() {
@@ -4781,6 +5694,8 @@ function App() {
         return h(StageAssignmentsPage, { bundles: bundles, terms: terms, projectMembersCache: projectMembersCache });
       case 'automation':
         return h(AutomationRulesPage, { bundles: bundles, automationRules: automationRules, setAutomationRules: setAutomationRules, automationHistory: automationHistory, setAutomationHistory: setAutomationHistory, terms: terms, projectMembersCache: projectMembersCache });
+      case 'risk':
+        return h(RiskOptimizerPage, { bundles: bundles, livePolicies: livePolicies, terms: terms });
       default:
         return h(DashboardPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms });
     }

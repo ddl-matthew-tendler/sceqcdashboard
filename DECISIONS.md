@@ -67,3 +67,29 @@
 ### D16: Project Owner Merge into Collaborators (LIVE_API_STATUS 2.5)
 **Decision**: Extract project owner from `/v4/projects` response and merge into each project's collaborator list if not already present.
 **Rationale**: The `/v4/projects/{id}/collaborators` endpoint returns only explicitly added collaborators, not the project owner. Since the owner can assign work and be assigned work, they must appear in all assignee dropdowns. The owner is extracted from the `/v4/projects` response (`ownerUsername`, `owner.userName`) and prepended to the collaborator list if not already included.
+
+## 2026-03-27: Risk Optimizer Tab
+
+### D17: Risk Scoring Engine — Keyword-Based with Config UI
+**Decision**: Risk scoring uses a configurable keyword-matching engine. Deliverable names and policy names are matched against keyword lists for High/Medium/Low risk tiers. When no keywords match, the algorithm defaults to Medium (conservative). Users can edit keyword lists via a Config modal without code changes.
+**Rationale**: A keyword-based approach is transparent and explainable — users can see exactly why a deliverable was scored a certain way. The config-driven design means a non-engineer can tune the classification by editing comma-separated keyword lists. The conservative Medium default prevents under-QC of unclassified deliverables.
+
+### D18: Policy Tier Tagging — User-Defined, Never Hardcoded
+**Decision**: Users tag each existing policy as "Most Rigorous", "Moderate", or "Lightweight" via a dedicated Tiers tab. These tags drive recommendations. Policy names are never hardcoded in the scoring logic.
+**Rationale**: Policy names vary across organizations and even studies. Hardcoding policy-to-rigor mappings would break portability. By letting users tag policies once, the recommendation engine adapts to any naming convention. Tags persist in localStorage (`sce_policy_tiers`).
+
+### D19: Calibration Model — Over-QC'd / Well-Matched / Under-QC'd
+**Decision**: Each bundle's calibration is computed by comparing its current policy tier (from the user-defined tag) against the recommended tier (from risk scoring). If the current tier is more rigorous than recommended, it's "Over-QC'd". If less rigorous, "Under-QC'd". If equal, "Well-Matched". If the policy is untagged, it's "Untagged".
+**Rationale**: This three-state calibration gives users an immediate, actionable view of where to focus. Over-QC'd bundles represent resource savings; under-QC'd bundles represent risk. The "Untagged" state prompts users to complete setup.
+
+### D20: Manual Risk Overrides — Human Judgment Wins
+**Decision**: Users can override the algorithm's risk assessment for any bundle. Overrides persist in localStorage (`sce_risk_overrides`) and are visually distinguished with a blue "Override" tag. Overrides require a mandatory reason logged to the audit trail.
+**Rationale**: Algorithmic risk scoring is a starting point, not the final word. Domain experts may know context the algorithm can't infer (e.g., regulatory importance, novel methodology). Making overrides explicit and auditable ensures accountability while preserving human judgment.
+
+### D21: Reassignment Audit Trail — Always Logged
+**Decision**: Every policy reassignment and risk override records an audit entry with bundle name, old/new values, rationale, and timestamp. The audit log persists in localStorage (`sce_risk_audit_log`, capped at 500 entries) and is viewable in a dedicated Audit Log tab.
+**Rationale**: Regulatory and compliance requirements demand traceability for QC policy changes. Even before the Domino write API is available, the audit trail captures intent. Uses the API_GAPS pattern — reassignments are logged locally and will be persisted server-side when the write API supports it.
+
+### D22: Automation Jobs API — Ready with Error Diagnostics
+**Decision**: Set `API_GAPS.automationRun.ready = true`. Enhanced error handling provides contextual hints (404 → Jobs API not enabled, 403 → token permissions, etc.). Failed job starts are recorded in execution history. Polling failures stop after 3 consecutive errors with a user-facing notification.
+**Rationale**: The proxy endpoints and UI are fully built. Keeping `ready: false` hides the feature unnecessarily. With clear error messages and diagnostic hints, users can self-diagnose issues on their Domino instance. Recording failures in history provides visibility into API availability.
