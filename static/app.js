@@ -1293,8 +1293,14 @@ function QCTrackerExpandedRow(props) {
               type: 'primary', size: 'small',
               onClick: function() { window.open(dominoUrl, '_blank'); },
               style: { fontSize: 11 },
-            }, '\u2197 Open in Domino')
+            }, '\u2197 View in Domino')
           : null
+      ),
+      // #8: Stage legend
+      h('div', { className: 'tracker-timeline-legend' },
+        h('span', { className: 'tracker-timeline-legend-item' }, h('span', { className: 'tracker-timeline-dot completed', style: { width: 8, height: 8, display: 'inline-block', verticalAlign: 'middle', marginRight: 4 } }), 'Complete'),
+        h('span', { className: 'tracker-timeline-legend-item' }, h('span', { className: 'tracker-timeline-dot active', style: { width: 8, height: 8, display: 'inline-block', verticalAlign: 'middle', marginRight: 4, boxShadow: 'none' } }), 'Current'),
+        h('span', { className: 'tracker-timeline-legend-item' }, h('span', { className: 'tracker-timeline-dot pending', style: { width: 8, height: 8, display: 'inline-block', verticalAlign: 'middle', marginRight: 4 } }), 'Pending')
       ),
       stageNames.map(function(name, idx) {
         var dotState;
@@ -1323,26 +1329,22 @@ function QCTrackerExpandedRow(props) {
           h('div', { className: 'tracker-timeline-content' },
             h('div', { className: 'tracker-timeline-name' + (dotState === 'active' ? ' active' : '') }, name),
             h('div', { className: 'tracker-timeline-meta' },
-              h(Tooltip, { title: gapInfo.ready ? null : gapInfo.message },
-                h(Select, {
-                  size: 'small',
-                  placeholder: 'Assign...',
-                  value: assigneeName || undefined,
-                  style: { minWidth: 160, fontSize: 11 },
-                  showSearch: true,
-                  allowClear: true,
-                  options: memberOptions,
-                  disabled: !gapInfo.ready,
-                  onChange: function(val) {
-                    if (!gapInfo.ready) {
-                      antd.message.warning(gapInfo.message);
-                      return;
-                    }
-                  },
-                  optionFilterProp: 'label',
-                })
-              ),
-              !gapInfo.ready ? h(Tag, { color: 'orange', style: { fontSize: 10, lineHeight: '16px', padding: '0 4px' } }, 'API Pending') : null,
+              // #1/#2: Hide disabled assign + API Pending in favor of assignee display or clean unassigned state
+              gapInfo.ready
+                ? h(Select, {
+                    size: 'small',
+                    placeholder: 'Assign...',
+                    value: assigneeName || undefined,
+                    style: { minWidth: 160, fontSize: 11 },
+                    showSearch: true,
+                    allowClear: true,
+                    options: memberOptions,
+                    onChange: function(val) {},
+                    optionFilterProp: 'label',
+                  })
+                : assigneeName
+                  ? h('span', { style: { fontSize: 12, color: '#2E2E38', fontWeight: 500 } }, assigneeName)
+                  : h('span', { style: { fontSize: 12, color: '#B0B0C0', fontStyle: 'italic' } }, 'Unassigned'),
               h('span', { className: 'tracker-stage-badge ' + dotState },
                 dotState === 'completed' ? 'Done' : dotState === 'active' ? 'Current' : 'Pending'
               )
@@ -1350,8 +1352,9 @@ function QCTrackerExpandedRow(props) {
           )
         );
       }),
-      // Bundle metadata: created/updated info
-      h('div', { className: 'tracker-metadata', style: { marginTop: 16, padding: '10px 0', borderTop: '1px solid #E0E0E0' } },
+      // #9: Metadata section with clear label
+      h('div', { className: 'tracker-metadata' },
+        h('div', { className: 'tracker-section-title', style: { marginBottom: 8 } }, 'Details'),
         bundle.createdBy
           ? h('div', { className: 'tracker-metadata-row' },
               h('span', { className: 'tracker-metadata-label' }, 'Created by'),
@@ -1370,39 +1373,40 @@ function QCTrackerExpandedRow(props) {
           : null
       )
     ),
-    // Right column: findings + approvals
+    // Right column: findings + approvals + gates + attachments
     h('div', { className: 'tracker-expanded-right' },
-      // Findings
-      bundle._findings && bundle._findings.length > 0
-        ? h('div', null,
-            h('div', { className: 'tracker-section-title' }, 'Findings (' + bundle._findings.length + ')'),
-            bundle._findings.slice(0, 5).map(function(f, i) {
-              return h('div', { key: i, className: 'tracker-finding-row' },
-                h(Tag, { color: severityColor(f.severity), style: { color: '#fff', border: 'none', minWidth: 28, textAlign: 'center', fontSize: 11 } }, f.severity),
-                h('span', { className: 'tracker-finding-name' }, f.name),
-                findingStatusTag(f.status),
-                f.assignee ? h('span', { className: 'tracker-finding-meta' }, f.assignee.name) : null,
-                f.dueDate ? h('span', { className: 'tracker-finding-meta' }, dayjs(f.dueDate).format('MMM D')) : null
-              );
-            }),
-            bundle._findings.length > 5
-              ? h('div', { style: { fontSize: 12, color: '#8F8FA3', padding: '4px 0' } }, '+ ' + (bundle._findings.length - 5) + ' more')
-              : null
-          )
-        : h('div', null,
-            h('div', { className: 'tracker-section-title' }, 'Findings'),
-            h('div', { style: { color: '#8F8FA3', fontSize: 12 } }, 'No findings')
-          ),
+      // #4/#7: Findings section with divider and actionable empty state
+      h('div', { className: 'tracker-expanded-section' },
+        bundle._findings && bundle._findings.length > 0
+          ? h('div', null,
+              h('div', { className: 'tracker-section-title' }, 'Findings (' + bundle._findings.length + ')'),
+              bundle._findings.slice(0, 5).map(function(f, i) {
+                return h('div', { key: i, className: 'tracker-finding-row' },
+                  h(Tag, { color: severityColor(f.severity), style: { color: '#fff', border: 'none', minWidth: 28, textAlign: 'center', fontSize: 11 } }, f.severity),
+                  dominoUrl
+                    ? h('a', { href: dominoUrl, target: '_blank', rel: 'noopener noreferrer', className: 'tracker-finding-name', style: { color: '#543FDE' }, title: f.name }, f.name)
+                    : h('span', { className: 'tracker-finding-name', title: f.name }, f.name),
+                  findingStatusTag(f.status)
+                );
+              }),
+              bundle._findings.length > 5
+                ? h('div', { style: { fontSize: 12, color: '#8F8FA3', padding: '4px 0' } }, '+ ' + (bundle._findings.length - 5) + ' more')
+                : null
+            )
+          : h('div', null,
+              h('div', { className: 'tracker-section-title' }, 'Findings'),
+              h('div', { className: 'tracker-empty-state' }, 'No findings recorded. Findings are created in Domino when QC issues are identified.')
+            )
+      ),
 
-      // Approvals
+      // #4/#6: Approvals section with divider and compact layout
       bundle._approvals && bundle._approvals.length > 0
-        ? h('div', { style: { marginTop: 16 } },
+        ? h('div', { className: 'tracker-expanded-section' },
             h('div', { className: 'tracker-section-title' }, 'Approvals (' + bundle._approvals.length + ')'),
             bundle._approvals.map(function(a, i) {
               return h('div', { key: i, className: 'tracker-approval-row' },
                 h('span', { className: 'tracker-approval-dot', style: { background: approvalStatusColor(a.status) } }),
                 h('span', { className: 'tracker-approval-name' }, a.name),
-                h('span', { className: 'tracker-approval-status' }, approvalStatusLabel(a.status)),
                 a.approvers && a.approvers.length > 0
                   ? h('span', { className: 'tracker-approval-actors' }, a.approvers.map(function(ap) { return ap.name; }).join(', '))
                   : null,
@@ -1414,9 +1418,9 @@ function QCTrackerExpandedRow(props) {
           )
         : null,
 
-      // Gates
+      // #4: Gates section with divider
       bundle._gates && bundle._gates.length > 0
-        ? h('div', { style: { marginTop: 16 } },
+        ? h('div', { className: 'tracker-expanded-section' },
             h('div', { className: 'tracker-section-title' }, 'Gates (' + bundle._gates.length + ')'),
             bundle._gates.map(function(g, i) {
               return h('div', { key: i, className: 'tracker-approval-row' },
@@ -1427,9 +1431,9 @@ function QCTrackerExpandedRow(props) {
           )
         : null,
 
-      // Attachments
+      // #3/#4/#10: Attachments section — wider columns, no Source column, with divider
       bundle._attachments && bundle._attachments.length > 0
-        ? h('div', { style: { marginTop: 16 } },
+        ? h('div', { className: 'tracker-expanded-section' },
             h('div', { className: 'tracker-section-title' }, 'Attachments (' + bundle._attachments.length + ')'),
             h(Table, {
               dataSource: bundle._attachments,
@@ -1438,35 +1442,34 @@ function QCTrackerExpandedRow(props) {
               pagination: false,
               style: { fontSize: 11 },
               columns: [
-                { title: 'File', key: 'filename', width: 180, ellipsis: true,
+                { title: 'File', key: 'filename', ellipsis: true,
                   render: function(_, r) {
                     var fname = r.identifier && r.identifier.filename;
                     var name = r.identifier && r.identifier.name;
-                    return h('span', { style: { fontWeight: 500, fontSize: 11 } }, fname || name || 'Unknown');
+                    var label = fname || name || 'Unknown';
+                    if (!dominoUrl) return h('span', { style: { fontWeight: 500, fontSize: 11 } }, label);
+                    return h('a', {
+                      href: dominoUrl,
+                      target: '_blank',
+                      rel: 'noopener noreferrer',
+                      style: { fontWeight: 500, fontSize: 11, color: '#543FDE' },
+                      title: 'View in Domino',
+                    }, label);
                   }
                 },
-                { title: 'Type', dataIndex: 'type', key: 'type', width: 120,
+                { title: 'Type', dataIndex: 'type', key: 'type', width: 140,
                   render: function(t) {
                     var colors = { DatasetSnapshotFile: 'blue', Report: 'green', ModelVersion: 'purple', Endpoint: 'orange', FlowArtifact: 'cyan', NetAppVolumeSnapshotFile: 'default' };
                     return h(Tag, { color: colors[t] || 'default', style: { fontSize: 10 } }, (t || '').replace(/([A-Z])/g, ' $1').trim());
                   }
                 },
-                { title: 'Source', key: 'source', width: 140, ellipsis: true,
-                  render: function(_, r) {
-                    var id = r.identifier || {};
-                    if (id.source === 'DominoDataset') return h('span', { style: { fontSize: 10 } }, (id.name || 'Dataset') + ' @ ' + (id.branch || ''));
-                    if (id.source === 'DominoFlow') return h('span', { style: { fontSize: 10 } }, id.executionWorkflowName || 'Flow');
-                    if (id.source === 'DominoModel') return h('span', { style: { fontSize: 10 } }, (id.name || 'Model') + ' v' + (id.version || ''));
-                    return h('span', { style: { fontSize: 10, color: '#8F8FA3' } }, id.source || id.name || '\u2014');
-                  }
-                },
-                { title: 'Added By', key: 'addedBy', width: 110,
+                { title: 'Added by', key: 'addedBy', width: 130,
                   render: function(_, r) {
                     var name = r.createdBy && (r.createdBy.name || r.createdBy.userName);
                     return h('span', { style: { fontSize: 10 } }, name || '\u2014');
                   }
                 },
-                { title: 'Added', key: 'addedAt', width: 90,
+                { title: 'Added', key: 'addedAt', width: 100,
                   render: function(_, r) {
                     return r.createdAt ? h('span', { style: { fontSize: 10, color: '#8F8FA3' } }, dayjs(r.createdAt).format('MMM D, YYYY')) : '\u2014';
                   }
@@ -1474,9 +1477,9 @@ function QCTrackerExpandedRow(props) {
               ],
             })
           )
-        : h('div', { style: { marginTop: 16 } },
+        : h('div', { className: 'tracker-expanded-section' },
             h('div', { className: 'tracker-section-title' }, 'Attachments'),
-            h('div', { style: { color: '#8F8FA3', fontSize: 12 } }, 'No attachments')
+            h('div', { className: 'tracker-empty-state' }, 'No attachments linked to this deliverable.')
           )
     )
   );
@@ -1568,7 +1571,16 @@ function FindingsDrawer(props) {
       }
     },
     { title: 'Name', dataIndex: 'name', key: 'name', width: 180, ellipsis: true,
-      render: function(t) { return h('span', { style: { fontWeight: 500, fontSize: 12 } }, t || '\u2014'); }
+      render: function(t, r) {
+        if (!dominoUrl) return h('span', { style: { fontWeight: 500, fontSize: 12 } }, t || '\u2014');
+        return h('a', {
+          href: dominoUrl,
+          target: '_blank',
+          rel: 'noopener noreferrer',
+          style: { fontWeight: 500, fontSize: 12, color: '#543FDE' },
+          title: 'View in Domino',
+        }, t || '\u2014');
+      }
     },
     { title: 'Status', dataIndex: 'status', key: 'status', width: 110,
       render: function(s) { return findingStatusTag(s); }
@@ -1597,7 +1609,7 @@ function FindingsDrawer(props) {
     onClose: onClose,
     width: 720,
     extra: dominoUrl
-      ? h(Button, { type: 'primary', size: 'small', onClick: function() { window.open(dominoUrl, '_blank'); } }, '\u2197 View in Domino')
+      ? h(Button, { type: 'primary', size: 'small', onClick: function() { window.open(dominoUrl, '_blank'); }, style: { fontSize: 11 } }, '\u2197 View in Domino')
       : null,
   },
     findings.length > 0
@@ -1634,7 +1646,14 @@ function AttachmentsDrawer(props) {
       render: function(_, r) {
         var id = r.identifier || {};
         var fname = id.filename || id.name || '\u2014';
-        return h('span', { style: { fontWeight: 500, fontSize: 12 } }, fname);
+        if (!dominoUrl) return h('span', { style: { fontWeight: 500, fontSize: 12 } }, fname);
+        return h('a', {
+          href: dominoUrl,
+          target: '_blank',
+          rel: 'noopener noreferrer',
+          style: { fontWeight: 500, fontSize: 12, color: '#543FDE' },
+          title: 'View in Domino',
+        }, fname);
       }
     },
     { title: 'Created', key: 'createdAt', width: 120,
@@ -1656,7 +1675,7 @@ function AttachmentsDrawer(props) {
     onClose: onClose,
     width: 640,
     extra: dominoUrl
-      ? h(Button, { type: 'primary', size: 'small', onClick: function() { window.open(dominoUrl, '_blank'); } }, '\u2197 View in Domino')
+      ? h(Button, { type: 'primary', size: 'small', onClick: function() { window.open(dominoUrl, '_blank'); }, style: { fontSize: 11 } }, '\u2197 View in Domino')
       : null,
   },
     attachments.length > 0
@@ -1953,7 +1972,7 @@ function DetailDrawer(props) {
       ? h(Button, {
           type: 'primary', size: 'small',
           onClick: function() { window.open(dominoUrl, '_blank'); },
-        }, '\u2197 Open in Domino')
+        }, '\u2197 View in Domino')
       : null,
   },
     // Overview
@@ -2528,7 +2547,7 @@ function App() {
   var _s6 = useState(false); var drawerOpen = _s6[0]; var setDrawerOpen = _s6[1];
   var _s7 = useState(null); var error = _s7[0]; var setError = _s7[1];
   var _s8 = useState(DEFAULT_TERMS); var terms = _s8[0]; var setTerms = _s8[1];
-  var _s9 = useState(true); var useDummy = _s9[0]; var setUseDummy = _s9[1];
+  var _s9 = useState(false); var useDummy = _s9[0]; var setUseDummy = _s9[1];
   var _s10 = useState([]); var assignmentRules = _s10[0]; var setAssignmentRules = _s10[1];
 
   // ── Live data state ──────────────────────────────────────────
@@ -2657,6 +2676,11 @@ function App() {
   // Load mock/dummy data
   function loadMockData() {
     setConnected(false);
+    // Set a mock current user so "Assigned to Me" filters work in dummy mode
+    if (typeof MOCK_USERS !== 'undefined' && MOCK_USERS.studyLead) {
+      var mockUser = MOCK_USERS.studyLead;
+      setCurrentUser({ id: mockUser.id, userName: mockUser.name, firstName: mockUser.firstName, lastName: mockUser.lastName });
+    }
     if (typeof MOCK_BUNDLES !== 'undefined') {
       var mockEnriched = MOCK_BUNDLES.map(function(b) {
         var copy = Object.assign({}, b);
@@ -2664,6 +2688,15 @@ function App() {
         copy._findings = (typeof MOCK_FINDINGS !== 'undefined' && MOCK_FINDINGS[b.id]) || [];
         copy._gates = (typeof MOCK_GATES !== 'undefined' && MOCK_GATES[b.id]) || [];
         copy._attachments = (typeof MOCK_ATTACHMENTS !== 'undefined' && MOCK_ATTACHMENTS[b.id]) || [];
+        // Populate the current stage's assignee from the bundle-level stageAssignee
+        if (copy.stageAssignee && copy.stages) {
+          copy.stages = copy.stages.map(function(s) {
+            if (s.stage && s.stage.name === copy.stage) {
+              return Object.assign({}, s, { assignee: { id: copy.stageAssignee.id, name: copy.stageAssignee.name } });
+            }
+            return s;
+          });
+        }
         return copy;
       });
       setBundles(mockEnriched);
@@ -2698,6 +2731,7 @@ function App() {
         var attachResp = topResults[4];
 
         setConnected(true);
+        setUseDummy(false);
 
         // Store current user
         if (user && user.userName) {
