@@ -2147,7 +2147,6 @@ function QCTrackerExpandedRow(props) {
                       var body = { assignee: userId ? { id: userId } : null };
                       apiPatch('api/bundles/' + bundle.id + '/stages/' + stageId, body)
                         .then(function(resp) {
-                          antd.message.success('Stage reassigned');
                           // Update local state: find the stage and update assignee
                           if (resp && resp.assignee) {
                             stageData.assignee = resp.assignee;
@@ -2157,6 +2156,19 @@ function QCTrackerExpandedRow(props) {
                           // Store policyVersionId if returned
                           if (resp && resp.stage && resp.stage.policyVersionId) {
                             bundle._policyVersionId = resp.stage.policyVersionId;
+                          }
+                          // Check read-back verification from backend
+                          if (resp.verified === true) {
+                            antd.message.success('Stage reassigned — verified in Domino');
+                          } else if (resp.verified === false) {
+                            var actualName = resp.actualAssignee ? (resp.actualAssignee.name || resp.actualAssignee.id) : 'nobody';
+                            antd.notification.warning({
+                              message: 'Assignment may not have saved',
+                              description: 'Domino accepted the request but the read-back shows the stage is still assigned to ' + actualName + '. Try refreshing the page to see the current state.',
+                              duration: 10,
+                            });
+                          } else {
+                            antd.message.success('Stage reassigned (verification pending)');
                           }
                         })
                         .catch(function(err) {
@@ -2404,7 +2416,11 @@ function BulkActionBar(props) {
           if (resp && resp.assignee && t.stageData) {
             t.stageData.assignee = resp.assignee;
           }
-          return { success: true, bundleName: t.bundleName, stageName: t.stageName };
+          if (resp.verified === false) {
+            var actualName = resp.actualAssignee ? (resp.actualAssignee.name || resp.actualAssignee.id) : 'nobody';
+            return { success: false, bundleName: t.bundleName, stageName: t.stageName, reason: 'Domino shows ' + actualName + ' instead' };
+          }
+          return { success: true, bundleName: t.bundleName, stageName: t.stageName, verified: resp.verified };
         })
         .catch(function(err) {
           var detail = err.message || String(err);
@@ -2417,11 +2433,14 @@ function BulkActionBar(props) {
       setBulkLoading(false);
       var succeeded = results.filter(function(r) { return r.success; });
       var failed = results.filter(function(r) { return !r.success; });
+      var verified = succeeded.filter(function(r) { return r.verified === true; });
       if (failed.length === 0) {
-        antd.message.success('Assigned ' + succeeded.length + ' ' + B.toLowerCase() + (succeeded.length > 1 ? 's' : '') + ' successfully');
+        var msg = 'Assigned ' + succeeded.length + ' ' + B.toLowerCase() + (succeeded.length > 1 ? 's' : '');
+        msg += verified.length === succeeded.length ? ' — all verified in Domino' : ' (verification pending for ' + (succeeded.length - verified.length) + ')';
+        antd.message.success(msg);
       } else if (succeeded.length > 0) {
         antd.notification.warning({
-          message: succeeded.length + ' of ' + results.length + ' assignments succeeded',
+          message: succeeded.length + ' of ' + results.length + ' assignments succeeded' + (verified.length > 0 ? ' (' + verified.length + ' verified)' : ''),
           description: 'Failed (' + failed.length + '): ' + failed.map(function(f) { return f.bundleName + ' / ' + f.stageName + ' — ' + f.reason; }).join('; '),
           duration: 10,
         });
@@ -3412,7 +3431,6 @@ function QCTrackerPage(props) {
               var body = { assignee: userId ? { id: userId } : null };
               apiPatch('api/bundles/' + record.id + '/stages/' + currentStageId, body)
                 .then(function(resp) {
-                  antd.message.success('Assignee updated');
                   // Update local state with full assignee info
                   var newAssignee = null;
                   if (userId) {
@@ -3433,6 +3451,19 @@ function QCTrackerPage(props) {
                         s.assignee = newAssignee;
                       }
                     });
+                  }
+                  // Check read-back verification from backend
+                  if (resp.verified === true) {
+                    antd.message.success('Assignee updated — verified in Domino');
+                  } else if (resp.verified === false) {
+                    var actualName = resp.actualAssignee ? (resp.actualAssignee.name || resp.actualAssignee.id) : 'nobody';
+                    antd.notification.warning({
+                      message: 'Assignment may not have saved',
+                      description: 'Domino accepted the request but the read-back shows the stage is still assigned to ' + actualName + '. Try refreshing the page.',
+                      duration: 10,
+                    });
+                  } else {
+                    antd.message.success('Assignee updated (verification pending)');
                   }
                   // Force table re-render
                   setRerenderKey(function(k) { return k + 1; });
@@ -4464,6 +4495,13 @@ function StageAssignmentsPage(props) {
     var selectedStages = allStages.filter(function(r) { return selectedRowKeys.indexOf(r.key) >= 0; });
     var promises = selectedStages.map(function(row) {
       return apiPatch('api/bundles/' + row.bundleId + '/stages/' + row.stageId, { assignee: { id: reassignTarget } })
+        .then(function(resp) {
+          if (resp && resp.verified === false) {
+            var actualName = resp.actualAssignee ? (resp.actualAssignee.name || resp.actualAssignee.id) : 'nobody';
+            return { error: true, reason: 'Domino shows ' + actualName + ' instead', bundleName: row.bundleName, stageName: row.stageName };
+          }
+          return { verified: resp && resp.verified, bundleName: row.bundleName, stageName: row.stageName };
+        })
         .catch(function(err) {
           var detail = err.message || String(err);
           var reason = detail.indexOf('403') !== -1 ? 'Permission denied' : detail.indexOf('404') !== -1 ? 'Not found' : detail;
@@ -4472,13 +4510,17 @@ function StageAssignmentsPage(props) {
     });
     Promise.all(promises).then(function(results) {
       var failures = results.filter(function(r) { return r && r.error; });
-      var successCount = selectedStages.length - failures.length;
+      var successes = results.filter(function(r) { return !r.error; });
+      var verified = successes.filter(function(r) { return r.verified === true; });
+      var successCount = successes.length;
       if (failures.length === 0) {
-        antd.message.success('Reassigned ' + selectedStages.length + ' stage' + (selectedStages.length !== 1 ? 's' : '') + ' successfully');
+        var msg = 'Reassigned ' + selectedStages.length + ' stage' + (selectedStages.length !== 1 ? 's' : '');
+        msg += verified.length === successCount ? ' — all verified in Domino' : ' (verification pending for ' + (successCount - verified.length) + ')';
+        antd.message.success(msg);
         if (props.onRefresh) props.onRefresh();
       } else if (successCount > 0) {
         antd.notification.warning({
-          message: successCount + ' of ' + selectedStages.length + ' stages reassigned',
+          message: successCount + ' of ' + selectedStages.length + ' stages reassigned' + (verified.length > 0 ? ' (' + verified.length + ' verified)' : ''),
           description: 'Failed (' + failures.length + '): ' + failures.map(function(f) { return f.bundleName + ' / ' + f.stageName + ' — ' + f.reason; }).join('; '),
           duration: 10,
         });
@@ -5434,6 +5476,30 @@ function RiskOptimizerPage(props) {
   var _reassignRationale = useState(''); var reassignRationale = _reassignRationale[0]; var setReassignRationale = _reassignRationale[1];
   var _overrideLevel = useState(null); var overrideLevel = _overrideLevel[0]; var setOverrideLevel = _overrideLevel[1];
   var _overrideReason = useState(''); var overrideReason = _overrideReason[0]; var setOverrideReason = _overrideReason[1];
+  // Dependency graph state
+  var _rg = useState(function() {
+    try {
+      var saved = localStorage.getItem('sce_risk_graph');
+      return saved ? JSON.parse(saved) : null;
+    } catch(e) { return null; }
+  });
+  var riskGraph = _rg[0]; var setRiskGraph = _rg[1];
+
+  var _graphEnabled = useState(function() {
+    try { return localStorage.getItem('sce_risk_graph_enabled') === 'true'; } catch(e) { return false; }
+  });
+  var graphEnabled = _graphEnabled[0]; var setGraphEnabled = _graphEnabled[1];
+
+  // Graph UI state
+  var _graphDrawerBundle = useState(null); var graphDrawerBundle = _graphDrawerBundle[0]; var setGraphDrawerBundle = _graphDrawerBundle[1];
+  var _addNodeOpen = useState(false); var addNodeOpen = _addNodeOpen[0]; var setAddNodeOpen = _addNodeOpen[1];
+  var _addEdgeOpen = useState(false); var addEdgeOpen = _addEdgeOpen[0]; var setAddEdgeOpen = _addEdgeOpen[1];
+  var _addAnchorOpen = useState(false); var addAnchorOpen = _addAnchorOpen[0]; var setAddAnchorOpen = _addAnchorOpen[1];
+  var _csvImportOpen = useState(false); var csvImportOpen = _csvImportOpen[0]; var setCsvImportOpen = _csvImportOpen[1];
+  var _editNodeId = useState(null); var editNodeId = _editNodeId[0]; var setEditNodeId = _editNodeId[1];
+  var _editEdgeId = useState(null); var editEdgeId = _editEdgeId[0]; var setEditEdgeId = _editEdgeId[1];
+  var _propagationPreview = useState(null); var propagationPreview = _propagationPreview[0]; var setPropagationPreview = _propagationPreview[1];
+
   // Setup wizard state
   var _wizardDismissed = useState(function() {
     try { return localStorage.getItem('sce_risk_wizard_done') === 'true'; } catch(e) { return false; }
@@ -5458,20 +5524,21 @@ function RiskOptimizerPage(props) {
       localStorage.setItem('sce_risk_audit_log', JSON.stringify(capped));
     } catch(e) {}
   }, [auditLog]);
+  useEffect(function() {
+    try {
+      if (riskGraph) localStorage.setItem('sce_risk_graph', JSON.stringify(riskGraph));
+      else localStorage.removeItem('sce_risk_graph');
+    } catch(e) {}
+  }, [riskGraph]);
+  useEffect(function() {
+    try { localStorage.setItem('sce_risk_graph_enabled', graphEnabled ? 'true' : 'false'); } catch(e) {}
+  }, [graphEnabled]);
 
-  // ── Risk Scoring Engine ──
-  function scoreBundle(bundle) {
-    // Matches against evidence name, QC plan name, and deliverable type patterns
-    // (SDTM domains, ADaM prefixes, TFL conventions).
-    // If there's a manual override, use it
-    var override = riskOverrides[bundle.id];
-    if (override) {
-      return { level: override.level, score: override.level === 'High' ? 90 : override.level === 'Medium' ? 50 : 10, source: 'manual', reason: override.reason };
-    }
-
+  // ── Risk Scoring Engine (Three-Layer) ──
+  // Layer 2: Keyword scoring (baseline)
+  function scoreBundleByKeywords(bundle) {
     var name = (bundle.name || '').toLowerCase();
     var policyName = (bundle.policyName || '').toLowerCase();
-    // Derive deliverable type hints from the name for additional matching context
     var deliverableType = '';
     if (/^ad[a-z]/.test(name)) deliverableType = ' adam_dataset';
     if (/^t_/.test(name) || name.indexOf('table') >= 0 || name.indexOf('output') >= 0) deliverableType = ' tfl_output';
@@ -5503,7 +5570,6 @@ function RiskOptimizerPage(props) {
     } else if (lowScore > 0) {
       level = 'Low'; score = Math.min(100, 20 + lowScore); matches = lowMatches;
     } else {
-      // No keyword match → default to Medium (conservative)
       level = 'Medium'; score = 30; matches = [];
     }
 
@@ -5512,6 +5578,218 @@ function RiskOptimizerPage(props) {
       : 'No keyword matches. Defaulting to Medium risk (conservative).';
 
     return { level: level, score: score, source: 'algorithm', reason: reason, matches: matches };
+  }
+
+  // Layer 3: Graph propagation
+  // Computes attenuation factor for a single edge
+  function getEdgeAttenuation(edge) {
+    var scopeFactors = { full: 1.0, partial: 0.6, unknown: 0.8 };
+    var relFactors = { direct: 1.0, indirect: 0.7, reference_only: 0.3 };
+    var scope = scopeFactors[edge.columnScope] || 0.8;
+    var rel = relFactors[edge.relationship] || 1.0;
+    return scope * rel;
+  }
+
+  // Build adjacency lists and run reverse BFS from anchors
+  function computeGraphRisk(graphData) {
+    if (!graphData || !graphData.nodes || !graphData.edges) return {};
+    var nodes = graphData.nodes;
+    var edges = graphData.edges;
+
+    // Build reverse adjacency: for each node, which edges point TO it (incoming)
+    // We propagate BACKWARD from anchors, so we need outgoing edges from anchor perspective
+    // Actually: risk propagates from anchor UPSTREAM. If ADTTE is high-risk anchor,
+    // and DM → ADSL → ADTTE, then DM and ADSL inherit risk.
+    // So we traverse edges in REVERSE: from target back to source.
+    var reverseAdj = {}; // nodeId -> [{ neighborId, edge }]
+    Object.keys(nodes).forEach(function(nid) { reverseAdj[nid] = []; });
+    Object.keys(edges).forEach(function(eid) {
+      var edge = edges[eid];
+      if (!reverseAdj[edge.target]) reverseAdj[edge.target] = [];
+      // From target, we can reach source (going upstream)
+      reverseAdj[edge.target].push({ neighborId: edge.source, edge: edge });
+    });
+
+    var RISK_ORDER = { 'Low': 0, 'Medium': 1, 'High': 2 };
+    var RISK_FROM_ORDER = ['Low', 'Medium', 'High'];
+
+    // Find all anchor nodes
+    var anchors = [];
+    Object.keys(nodes).forEach(function(nid) {
+      if (nodes[nid].anchorRisk) {
+        anchors.push({ id: nid, risk: nodes[nid].anchorRisk, reason: nodes[nid].anchorReason || '' });
+      }
+    });
+
+    // For each node, track best (highest effective) risk from any anchor
+    var nodeResults = {}; // nodeId -> { effectiveRisk, score, anchorNodes, propagationPaths }
+
+    anchors.forEach(function(anchor) {
+      // BFS from anchor, traversing edges in reverse (upstream)
+      var queue = [{ nodeId: anchor.id, attenuation: 1.0, path: [anchor.id] }];
+      var visited = {};
+      visited[anchor.id] = 1.0;
+
+      while (queue.length > 0) {
+        var current = queue.shift();
+        var neighbors = reverseAdj[current.nodeId] || [];
+
+        neighbors.forEach(function(neighbor) {
+          var edgeAtt = getEdgeAttenuation(neighbor.edge);
+          var totalAtt = current.attenuation * edgeAtt;
+
+          // Only visit if this path gives better attenuation than previously seen
+          if (visited[neighbor.neighborId] === undefined || totalAtt > visited[neighbor.neighborId]) {
+            visited[neighbor.neighborId] = totalAtt;
+            var newPath = current.path.concat([neighbor.neighborId]);
+            queue.push({ nodeId: neighbor.neighborId, attenuation: totalAtt, path: newPath });
+
+            // Compute effective risk level based on attenuation thresholds
+            var anchorRiskOrder = RISK_ORDER[anchor.risk];
+            var effectiveRiskOrder;
+            if (totalAtt >= 0.7) {
+              effectiveRiskOrder = anchorRiskOrder; // inherit full anchor risk
+            } else if (totalAtt >= 0.4) {
+              effectiveRiskOrder = Math.max(0, anchorRiskOrder - 1); // one level below
+            } else {
+              effectiveRiskOrder = -1; // no graph influence
+            }
+
+            if (effectiveRiskOrder >= 0) {
+              var effectiveRisk = RISK_FROM_ORDER[effectiveRiskOrder];
+              var pathEntry = {
+                path: newPath.slice().reverse(), // show upstream→downstream order
+                sourceRisk: anchor.risk,
+                attenuatedRisk: effectiveRisk,
+                totalAttenuation: totalAtt,
+              };
+
+              if (!nodeResults[neighbor.neighborId]) {
+                nodeResults[neighbor.neighborId] = {
+                  effectiveRisk: effectiveRisk,
+                  effectiveRiskOrder: effectiveRiskOrder,
+                  score: totalAtt * (60 + anchorRiskOrder * 20),
+                  anchorNodes: [{ id: anchor.id, risk: anchor.risk, reason: anchor.reason }],
+                  propagationPaths: [pathEntry],
+                };
+              } else {
+                var existing = nodeResults[neighbor.neighborId];
+                existing.propagationPaths.push(pathEntry);
+                // Take maximum risk
+                if (effectiveRiskOrder > existing.effectiveRiskOrder) {
+                  existing.effectiveRisk = effectiveRisk;
+                  existing.effectiveRiskOrder = effectiveRiskOrder;
+                  existing.score = totalAtt * (60 + anchorRiskOrder * 20);
+                }
+                if (!existing.anchorNodes.some(function(a) { return a.id === anchor.id; })) {
+                  existing.anchorNodes.push({ id: anchor.id, risk: anchor.risk, reason: anchor.reason });
+                }
+              }
+            }
+          }
+        });
+      }
+
+      // Also record the anchor node itself
+      if (!nodeResults[anchor.id]) {
+        nodeResults[anchor.id] = {
+          effectiveRisk: anchor.risk,
+          effectiveRiskOrder: RISK_ORDER[anchor.risk],
+          score: 60 + RISK_ORDER[anchor.risk] * 20,
+          anchorNodes: [{ id: anchor.id, risk: anchor.risk, reason: anchor.reason }],
+          propagationPaths: [],
+          isAnchor: true,
+        };
+      } else {
+        nodeResults[anchor.id].isAnchor = true;
+      }
+    });
+
+    return nodeResults;
+  }
+
+  // Find the graph node matching a bundle (by bundleId link or name fuzzy match)
+  function findGraphNodeForBundle(bundle, graphData) {
+    if (!graphData || !graphData.nodes) return null;
+    var nodes = graphData.nodes;
+    // First try bundleId match
+    var byId = Object.keys(nodes).find(function(nid) { return nodes[nid].bundleId === bundle.id; });
+    if (byId) return byId;
+    // Then try name match (case-insensitive)
+    var bName = (bundle.name || '').toLowerCase().trim();
+    var byName = Object.keys(nodes).find(function(nid) {
+      var nLabel = (nodes[nid].label || nodes[nid].id || '').toLowerCase().trim();
+      var nId = (nodes[nid].id || '').toLowerCase().trim();
+      return nId === bName || nLabel === bName || nLabel.indexOf(bName) === 0 || bName.indexOf(nId) === 0;
+    });
+    return byName || null;
+  }
+
+  // Memoized graph risk computation
+  var graphRiskResults = useMemo(function() {
+    if (!graphEnabled || !riskGraph) return {};
+    return computeGraphRisk(riskGraph);
+  }, [graphEnabled, riskGraph]);
+
+  // Combined three-layer scoring
+  function scoreBundle(bundle) {
+    // Layer 1: Manual override (highest priority)
+    var override = riskOverrides[bundle.id];
+    if (override) {
+      return { level: override.level, score: override.level === 'High' ? 90 : override.level === 'Medium' ? 50 : 10, source: 'manual', reason: override.reason };
+    }
+
+    // Layer 2: Keyword scoring (baseline)
+    var keywordResult = scoreBundleByKeywords(bundle);
+
+    // Layer 3: Graph propagation (can only upgrade, never downgrade)
+    var RISK_ORDER = { 'Low': 0, 'Medium': 1, 'High': 2 };
+    if (graphEnabled && riskGraph) {
+      var nodeId = findGraphNodeForBundle(bundle, riskGraph);
+      var graphResult = nodeId ? graphRiskResults[nodeId] : null;
+
+      if (graphResult && graphResult.effectiveRisk) {
+        if (RISK_ORDER[graphResult.effectiveRisk] > RISK_ORDER[keywordResult.level]) {
+          var anchorNames = graphResult.anchorNodes.map(function(a) { return a.id; }).join(', ');
+          var bestPath = graphResult.propagationPaths[0];
+          var pathStr = bestPath ? bestPath.path.join(' \u2192 ') : '';
+          var reason = graphResult.isAnchor
+            ? 'Anchor point: ' + graphResult.anchorNodes[0].reason
+            : 'Inherited ' + graphResult.effectiveRisk + ' risk from ' + anchorNames + (pathStr ? ' via ' + pathStr : '');
+
+          return {
+            level: graphResult.effectiveRisk,
+            score: graphResult.score,
+            source: 'graph',
+            reason: reason,
+            matches: keywordResult.matches,
+            graphDetail: {
+              anchorNodes: graphResult.anchorNodes,
+              propagationPaths: graphResult.propagationPaths,
+              maxPropagatedRisk: graphResult.effectiveRisk,
+              effectiveGraphRisk: graphResult.effectiveRisk,
+              keywordRisk: keywordResult.level,
+              resolution: 'graph_upgrade',
+              isAnchor: graphResult.isAnchor || false,
+              nodeId: nodeId,
+            },
+          };
+        }
+        // Graph matches but doesn't upgrade — attach graph info anyway
+        keywordResult.graphDetail = {
+          anchorNodes: graphResult.anchorNodes,
+          propagationPaths: graphResult.propagationPaths,
+          maxPropagatedRisk: graphResult.effectiveRisk,
+          effectiveGraphRisk: graphResult.effectiveRisk,
+          keywordRisk: keywordResult.level,
+          resolution: 'graph_match',
+          isAnchor: graphResult.isAnchor || false,
+          nodeId: nodeId,
+        };
+      }
+    }
+
+    return keywordResult;
   }
 
   // ── Policy Recommendation ──
@@ -5581,7 +5859,7 @@ function RiskOptimizerPage(props) {
         _calibration: calibration,
       });
     });
-  }, [bundles, riskConfig, riskOverrides, policyTiers, allPolicies]);
+  }, [bundles, riskConfig, riskOverrides, policyTiers, allPolicies, graphEnabled, riskGraph, graphRiskResults]);
 
   // Filter by search
   var filteredBundles = useMemo(function() {
@@ -5881,6 +6159,227 @@ function RiskOptimizerPage(props) {
     );
   }
 
+  // ── Graph Management Helpers ──
+  function ensureGraph() {
+    if (!riskGraph) {
+      setRiskGraph({ nodes: {}, edges: {}, source: 'manual', lastUpdated: new Date().toISOString() });
+    }
+  }
+
+  function addGraphNode(node) {
+    setRiskGraph(function(prev) {
+      var g = prev ? JSON.parse(JSON.stringify(prev)) : { nodes: {}, edges: {}, source: 'manual', lastUpdated: '' };
+      g.nodes[node.id] = node;
+      g.lastUpdated = new Date().toISOString();
+      return g;
+    });
+  }
+
+  function removeGraphNode(nodeId) {
+    setRiskGraph(function(prev) {
+      if (!prev) return prev;
+      var g = JSON.parse(JSON.stringify(prev));
+      delete g.nodes[nodeId];
+      // Remove edges connected to this node
+      Object.keys(g.edges).forEach(function(eid) {
+        if (g.edges[eid].source === nodeId || g.edges[eid].target === nodeId) delete g.edges[eid];
+      });
+      g.lastUpdated = new Date().toISOString();
+      return g;
+    });
+  }
+
+  function addGraphEdge(edge) {
+    var eid = edge.source + '->' + edge.target;
+    setRiskGraph(function(prev) {
+      var g = prev ? JSON.parse(JSON.stringify(prev)) : { nodes: {}, edges: {}, source: 'manual', lastUpdated: '' };
+      g.edges[eid] = Object.assign({ id: eid }, edge);
+      g.lastUpdated = new Date().toISOString();
+      return g;
+    });
+  }
+
+  function removeGraphEdge(edgeId) {
+    setRiskGraph(function(prev) {
+      if (!prev) return prev;
+      var g = JSON.parse(JSON.stringify(prev));
+      delete g.edges[edgeId];
+      g.lastUpdated = new Date().toISOString();
+      return g;
+    });
+  }
+
+  function setNodeAnchor(nodeId, risk, reason) {
+    setRiskGraph(function(prev) {
+      if (!prev) return prev;
+      var g = JSON.parse(JSON.stringify(prev));
+      if (g.nodes[nodeId]) {
+        g.nodes[nodeId].anchorRisk = risk;
+        g.nodes[nodeId].anchorReason = reason || '';
+      }
+      g.lastUpdated = new Date().toISOString();
+      return g;
+    });
+  }
+
+  function clearNodeAnchor(nodeId) {
+    setRiskGraph(function(prev) {
+      if (!prev) return prev;
+      var g = JSON.parse(JSON.stringify(prev));
+      if (g.nodes[nodeId]) {
+        g.nodes[nodeId].anchorRisk = null;
+        g.nodes[nodeId].anchorReason = '';
+      }
+      g.lastUpdated = new Date().toISOString();
+      return g;
+    });
+  }
+
+  // Count upstream/downstream neighbors for a node
+  var graphNodeCounts = useMemo(function() {
+    if (!riskGraph || !riskGraph.edges) return {};
+    var counts = {};
+    var edges = riskGraph.edges;
+    Object.keys(riskGraph.nodes || {}).forEach(function(nid) { counts[nid] = { upstream: 0, downstream: 0 }; });
+    Object.keys(edges).forEach(function(eid) {
+      var e = edges[eid];
+      if (counts[e.source]) counts[e.source].downstream++;
+      if (counts[e.target]) counts[e.target].upstream++;
+    });
+    return counts;
+  }, [riskGraph]);
+
+  // Graph node list for tables
+  var graphNodeList = useMemo(function() {
+    if (!riskGraph || !riskGraph.nodes) return [];
+    return Object.keys(riskGraph.nodes).map(function(nid) { return riskGraph.nodes[nid]; });
+  }, [riskGraph]);
+
+  var graphEdgeList = useMemo(function() {
+    if (!riskGraph || !riskGraph.edges) return [];
+    return Object.keys(riskGraph.edges).map(function(eid) { return riskGraph.edges[eid]; });
+  }, [riskGraph]);
+
+  // CDISC auto-suggest: generate standard edges based on naming conventions
+  function getCdiscSuggestions() {
+    if (!riskGraph || !riskGraph.nodes) return [];
+    var nodeIds = Object.keys(riskGraph.nodes);
+    var existingEdges = riskGraph.edges || {};
+    var suggestions = [];
+
+    // Standard CDISC relationships
+    var standardEdges = [
+      // All ADaM depend on ADSL
+      { pattern: /^ad[a-z]/, target: 'adsl', except: ['adsl'], desc: 'Standard ADaM: all ADaM datasets depend on ADSL' },
+      // ADSL depends on DM
+      { source: 'adsl', target: 'dm', desc: 'Standard: ADSL derives from DM' },
+      // ADAE depends on AE
+      { source: 'adae', target: 'ae', desc: 'Standard: ADAE derives from AE domain' },
+      // ADLB depends on LB
+      { source: 'adlb', target: 'lb', desc: 'Standard: ADLB derives from LB domain' },
+      // ADVS depends on VS
+      { source: 'advs', target: 'vs', desc: 'Standard: ADVS derives from VS domain' },
+      // ADCM depends on CM
+      { source: 'adcm', target: 'cm', desc: 'Standard: ADCM derives from CM domain' },
+      // ADMH depends on MH
+      { source: 'admh', target: 'mh', desc: 'Standard: ADMH derives from MH domain' },
+      // ADEG depends on EG
+      { source: 'adeg', target: 'eg', desc: 'Standard: ADEG derives from EG domain' },
+      // ADEX depends on EX
+      { source: 'adex', target: 'ex', desc: 'Standard: ADEX derives from EX domain' },
+    ];
+
+    standardEdges.forEach(function(rule) {
+      if (rule.pattern) {
+        // Pattern-based rule: find all matching source nodes
+        nodeIds.forEach(function(nid) {
+          if (rule.pattern.test(nid) && (!rule.except || rule.except.indexOf(nid) === -1)) {
+            if (nodeIds.indexOf(rule.target) >= 0) {
+              var eid = nid + '->' + rule.target;
+              if (!existingEdges[eid]) {
+                suggestions.push({ source: nid, target: rule.target, desc: rule.desc, edgeId: eid });
+              }
+            }
+          }
+        });
+      } else if (rule.source && rule.target) {
+        if (nodeIds.indexOf(rule.source) >= 0 && nodeIds.indexOf(rule.target) >= 0) {
+          var eid = rule.source + '->' + rule.target;
+          if (!existingEdges[eid]) {
+            suggestions.push({ source: rule.source, target: rule.target, desc: rule.desc, edgeId: eid });
+          }
+        }
+      }
+    });
+
+    return suggestions;
+  }
+
+  // CSV import for edges
+  function handleCsvImport(csvText) {
+    var lines = csvText.trim().split('\n');
+    var added = 0;
+    var errors = [];
+    lines.forEach(function(line, i) {
+      if (i === 0 && line.toLowerCase().indexOf('source') >= 0) return; // skip header
+      var parts = line.split(',').map(function(s) { return s.trim().replace(/^["']|["']$/g, ''); });
+      if (parts.length < 2) { errors.push('Line ' + (i + 1) + ': need at least source,target'); return; }
+      var source = parts[0].toLowerCase();
+      var target = parts[1].toLowerCase();
+      var relationship = parts[2] || 'direct';
+      var columnScope = parts[3] || 'unknown';
+      var annotation = parts[4] || '';
+
+      // Auto-create nodes if they don't exist
+      if (!riskGraph || !riskGraph.nodes[source]) {
+        addGraphNode({ id: source, label: source.toUpperCase(), type: 'unknown', bundleId: null, anchorRisk: null, anchorReason: '' });
+      }
+      if (!riskGraph || !riskGraph.nodes[target]) {
+        addGraphNode({ id: target, label: target.toUpperCase(), type: 'unknown', bundleId: null, anchorRisk: null, anchorReason: '' });
+      }
+
+      addGraphEdge({ source: source, target: target, relationship: relationship, columnScope: columnScope, columnDetail: annotation });
+      added++;
+    });
+
+    if (added > 0) antd.message.success('Imported ' + added + ' edge' + (added > 1 ? 's' : ''));
+    if (errors.length > 0) antd.message.warning(errors.join('; '));
+    setCsvImportOpen(false);
+  }
+
+  // Run propagation preview
+  function runPropagationPreview() {
+    if (!riskGraph) return;
+    var results = computeGraphRisk(riskGraph);
+    var preview = [];
+    Object.keys(riskGraph.nodes).forEach(function(nid) {
+      var node = riskGraph.nodes[nid];
+      // Find matching bundle for keyword risk
+      var matchedBundle = bundles.find(function(b) { return findGraphNodeForBundle(b, riskGraph) === nid; });
+      var keywordRisk = matchedBundle ? scoreBundleByKeywords(matchedBundle).level : 'N/A';
+      var graphResult = results[nid];
+      var graphRisk = graphResult ? graphResult.effectiveRisk : null;
+      var RISK_ORDER = { 'Low': 0, 'Medium': 1, 'High': 2 };
+      var finalRisk = graphRisk && RISK_ORDER[graphRisk] > (RISK_ORDER[keywordRisk] || -1) ? graphRisk : keywordRisk;
+      var change = graphRisk && RISK_ORDER[graphRisk] > (RISK_ORDER[keywordRisk] || -1) ? 'upgrade' : 'none';
+      var bestPath = graphResult && graphResult.propagationPaths[0] ? graphResult.propagationPaths[0].path.join(' \u2192 ') : '';
+
+      preview.push({
+        nodeId: nid,
+        label: node.label || nid,
+        type: node.type,
+        isAnchor: !!(node.anchorRisk),
+        keywordRisk: keywordRisk,
+        graphRisk: graphRisk || '\u2013',
+        finalRisk: finalRisk,
+        change: change,
+        path: bestPath,
+        attenuation: graphResult && graphResult.propagationPaths[0] ? graphResult.propagationPaths[0].totalAttenuation : null,
+      });
+    });
+    setPropagationPreview(preview);
+  }
+
   // ── Setup Wizard ──
   var showWizard = taggedPolicyCount === 0 && !wizardDismissed;
 
@@ -6037,6 +6536,7 @@ function RiskOptimizerPage(props) {
       !showWizard ? h('div', { style: { display: 'flex', gap: 8 } },
         h(Button, { size: 'small', type: activeTab === 'overview' ? 'primary' : 'default', onClick: function() { setActiveTab('overview'); } }, 'Overview'),
         h(Button, { size: 'small', type: activeTab === 'bundles' ? 'primary' : 'default', onClick: function() { setActiveTab('bundles'); } }, B + 's'),
+        h(Button, { size: 'small', type: activeTab === 'graph' ? 'primary' : 'default', onClick: function() { setActiveTab('graph'); } }, 'Dependency Graph'),
         h(Button, { size: 'small', type: activeTab === 'policies' ? 'primary' : 'default', onClick: function() { setActiveTab('policies'); } }, P + ' Tiers'),
         h(Button, { size: 'small', type: activeTab === 'audit' ? 'primary' : 'default', onClick: function() { setActiveTab('audit'); } }, 'Audit Log'),
         h(Button, { size: 'small', type: activeTab === 'config' ? 'primary' : 'default', onClick: function() { setActiveTab('config'); }, icon: h('span', null, '\u2699') }, 'Config')
@@ -6134,6 +6634,285 @@ function RiskOptimizerPage(props) {
         size: 'small',
         scroll: { x: 1200 },
         pagination: { defaultPageSize: 20, size: 'small', showSizeChanger: true, showTotal: function(total) { return total + ' ' + B.toLowerCase() + 's'; } },
+      })
+    ) : null,
+
+    // ── Dependency Graph Tab ──
+    !showWizard && activeTab === 'graph' ? h('div', null,
+      // Graph enabled toggle + status
+      h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 12 } },
+          h(Switch, { checked: graphEnabled, onChange: function(val) { setGraphEnabled(val); if (val) ensureGraph(); } }),
+          h('span', { style: { fontSize: 13, color: graphEnabled ? '#2E2E38' : '#8F8FA3' } },
+            graphEnabled ? 'Graph propagation active' : 'Graph propagation disabled'
+          ),
+          riskGraph ? h(Tag, { color: 'blue', style: { fontSize: 10 } },
+            graphNodeList.length + ' node' + (graphNodeList.length !== 1 ? 's' : '') + ', ' +
+            graphEdgeList.length + ' edge' + (graphEdgeList.length !== 1 ? 's' : '')
+          ) : null
+        ),
+        h('div', { style: { display: 'flex', gap: 8 } },
+          h(Button, { size: 'small', onClick: function() { setCsvImportOpen(true); } }, 'Import CSV'),
+          h(Button, { size: 'small', type: 'primary', disabled: !riskGraph || graphNodeList.length === 0, onClick: runPropagationPreview }, 'Preview Propagation')
+        )
+      ),
+
+      // Info banner
+      !riskGraph || graphNodeList.length === 0
+        ? h(Alert, {
+            type: 'info', showIcon: true, style: { marginBottom: 16, borderRadius: 8 },
+            message: 'Define dataset dependencies to enable graph-based risk propagation',
+            description: 'Add nodes representing your datasets (SDTM domains, ADaM datasets, TFLs), then connect them with edges to show data flow. Set anchor points on high-risk outputs, and risk will propagate upstream through the graph.',
+          })
+        : null,
+
+      // Anchor Points section
+      h('div', { className: 'panel', style: { padding: 16, marginBottom: 16 } },
+        h('div', { className: 'panel-header', style: { marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+          h('span', { className: 'panel-title' }, 'Anchor Points'),
+          h(Button, { size: 'small', disabled: graphNodeList.length === 0, onClick: function() { setAddAnchorOpen(true); } }, 'Add Anchor')
+        ),
+        h('div', { style: { fontSize: 12, color: '#8F8FA3', marginBottom: 12 } },
+          'Anchor points are datasets with a known risk level. Risk propagates from anchors upstream through the dependency graph.'
+        ),
+        (function() {
+          var anchors = graphNodeList.filter(function(n) { return n.anchorRisk; });
+          if (anchors.length === 0) return h('div', { style: { color: '#8F8FA3', fontSize: 12, padding: '8px 0' } }, 'No anchor points defined yet. Add nodes first, then set anchors.');
+          return h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 8 } },
+            anchors.map(function(n) {
+              var affected = graphRiskResults ? Object.keys(graphRiskResults).filter(function(nid) {
+                return nid !== n.id && graphRiskResults[nid] && graphRiskResults[nid].anchorNodes.some(function(a) { return a.id === n.id; });
+              }).length : 0;
+              return h('div', { key: n.id, style: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: '#FAFAFA', borderRadius: 8, border: '1px solid #E8E8EE' } },
+                h(Tag, { color: n.anchorRisk === 'High' ? 'red' : n.anchorRisk === 'Medium' ? 'gold' : 'green' }, n.anchorRisk),
+                h('span', { style: { fontWeight: 500, fontSize: 13 } }, n.label || n.id),
+                h('span', { style: { fontSize: 11, color: '#65657B', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, n.anchorReason),
+                affected > 0 ? h(Tag, { style: { fontSize: 10 } }, affected + ' upstream affected') : null,
+                h(Button, { size: 'small', type: 'text', danger: true, onClick: function() { clearNodeAnchor(n.id); } }, '\u2715')
+              );
+            })
+          );
+        })()
+      ),
+
+      // Nodes table
+      h('div', { className: 'panel', style: { padding: 16, marginBottom: 16 } },
+        h('div', { className: 'panel-header', style: { marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+          h('span', { className: 'panel-title' }, 'Dataset Nodes'),
+          h(Button, { size: 'small', type: 'primary', onClick: function() { ensureGraph(); setAddNodeOpen(true); } }, 'Add Node')
+        ),
+        graphNodeList.length > 0
+          ? h(Table, {
+              dataSource: graphNodeList, rowKey: 'id', size: 'small',
+              pagination: graphNodeList.length > 20 ? { defaultPageSize: 20, size: 'small' } : false,
+              columns: [
+                { title: 'Dataset', dataIndex: 'id', key: 'id', width: 120,
+                  sorter: function(a, b) { return (a.id || '').localeCompare(b.id || ''); },
+                  render: function(t, r) { return h('span', { style: { fontWeight: 500 } }, r.label || t); }
+                },
+                { title: 'Type', dataIndex: 'type', key: 'type', width: 100,
+                  filters: [{ text: 'SDTM', value: 'sdtm' }, { text: 'ADaM', value: 'adam' }, { text: 'TFL', value: 'tfl' }, { text: 'Raw', value: 'raw' }],
+                  onFilter: function(v, r) { return r.type === v; },
+                  render: function(t) { return h(Tag, { style: { fontSize: 10 } }, (t || 'unknown').toUpperCase()); }
+                },
+                { title: 'Linked ' + B, key: 'bundle', width: 180, ellipsis: true,
+                  render: function(_, r) {
+                    if (!r.bundleId) return h('span', { style: { color: '#8F8FA3', fontSize: 11 } }, 'Not linked');
+                    var matched = bundles.find(function(b) { return b.id === r.bundleId; });
+                    return matched ? h('span', { style: { fontSize: 12 } }, matched.name) : h('span', { style: { color: '#8F8FA3', fontSize: 11 } }, 'Bundle not found');
+                  }
+                },
+                { title: 'Anchor', key: 'anchor', width: 100,
+                  render: function(_, r) {
+                    return r.anchorRisk
+                      ? h(Tag, { color: r.anchorRisk === 'High' ? 'red' : r.anchorRisk === 'Medium' ? 'gold' : 'green' }, r.anchorRisk)
+                      : h('span', { style: { color: '#B0B0C0', fontSize: 11 } }, '\u2013');
+                  }
+                },
+                { title: 'Upstream', key: 'upstream', width: 80, align: 'center',
+                  render: function(_, r) { return (graphNodeCounts[r.id] || {}).upstream || 0; }
+                },
+                { title: 'Downstream', key: 'downstream', width: 80, align: 'center',
+                  render: function(_, r) { return (graphNodeCounts[r.id] || {}).downstream || 0; }
+                },
+                { title: '', key: 'actions', width: 60,
+                  render: function(_, r) {
+                    return h(Button, { size: 'small', type: 'text', danger: true, onClick: function() {
+                      antd.Modal.confirm({
+                        title: 'Remove node "' + (r.label || r.id) + '"?',
+                        content: 'This will also remove all connected edges.',
+                        okText: 'Remove', okType: 'danger',
+                        onOk: function() { removeGraphNode(r.id); },
+                      });
+                    } }, '\u2715');
+                  }
+                },
+              ],
+            })
+          : h(Empty, { description: 'No nodes defined. Add dataset nodes to build the dependency graph.' })
+      ),
+
+      // Edges table
+      h('div', { className: 'panel', style: { padding: 16, marginBottom: 16 } },
+        h('div', { className: 'panel-header', style: { marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+          h('span', { className: 'panel-title' }, 'Dependency Edges'),
+          h('div', { style: { display: 'flex', gap: 8 } },
+            (function() {
+              var suggestions = riskGraph ? getCdiscSuggestions() : [];
+              return suggestions.length > 0
+                ? h(Tooltip, { title: suggestions.length + ' CDISC standard edge' + (suggestions.length !== 1 ? 's' : '') + ' can be auto-added' },
+                    h(Button, { size: 'small', onClick: function() {
+                      antd.Modal.confirm({
+                        title: 'Add CDISC Standard Edges?',
+                        content: h('div', null,
+                          h('p', null, 'The following standard CDISC relationships were detected:'),
+                          h('ul', { style: { fontSize: 12 } }, suggestions.map(function(s) {
+                            return h('li', { key: s.edgeId }, s.source.toUpperCase() + ' \u2192 ' + s.target.toUpperCase() + ' \u2014 ' + s.desc);
+                          }))
+                        ),
+                        okText: 'Add All (' + suggestions.length + ')', width: 520,
+                        onOk: function() {
+                          suggestions.forEach(function(s) {
+                            addGraphEdge({ source: s.source, target: s.target, relationship: 'direct', columnScope: 'unknown', columnDetail: s.desc });
+                          });
+                          antd.message.success('Added ' + suggestions.length + ' CDISC standard edges');
+                        },
+                      });
+                    } }, 'CDISC Auto-Suggest')
+                  )
+                : null;
+            })(),
+            h(Button, { size: 'small', type: 'primary', disabled: graphNodeList.length < 2, onClick: function() { setAddEdgeOpen(true); } }, 'Add Edge')
+          )
+        ),
+        graphEdgeList.length > 0
+          ? h(Table, {
+              dataSource: graphEdgeList, rowKey: 'id', size: 'small',
+              pagination: graphEdgeList.length > 20 ? { defaultPageSize: 20, size: 'small' } : false,
+              columns: [
+                { title: 'Source \u2192 Target', key: 'edge', width: 220,
+                  render: function(_, r) {
+                    var srcLabel = riskGraph.nodes[r.source] ? (riskGraph.nodes[r.source].label || r.source) : r.source;
+                    var tgtLabel = riskGraph.nodes[r.target] ? (riskGraph.nodes[r.target].label || r.target) : r.target;
+                    return h('span', null, h('strong', null, srcLabel), ' \u2192 ', h('strong', null, tgtLabel));
+                  }
+                },
+                { title: 'Relationship', dataIndex: 'relationship', key: 'rel', width: 120,
+                  render: function(t) {
+                    var color = t === 'direct' ? 'blue' : t === 'indirect' ? 'default' : 'orange';
+                    return h(Tag, { color: color, style: { fontSize: 10 } }, (t || 'direct').replace('_', ' '));
+                  }
+                },
+                { title: 'Column Scope', dataIndex: 'columnScope', key: 'scope', width: 120,
+                  render: function(t) {
+                    var color = t === 'full' ? 'green' : t === 'partial' ? 'gold' : 'default';
+                    return h(Tag, { color: color, style: { fontSize: 10 } }, t || 'unknown');
+                  }
+                },
+                { title: 'Detail', dataIndex: 'columnDetail', key: 'detail', ellipsis: true,
+                  render: function(t) { return t ? h('span', { style: { fontSize: 12, color: '#65657B' } }, t) : h('span', { style: { color: '#B0B0C0', fontSize: 11 } }, '\u2013'); }
+                },
+                { title: 'Attenuation', key: 'att', width: 100, align: 'center',
+                  render: function(_, r) {
+                    var att = getEdgeAttenuation(r);
+                    var color = att >= 0.8 ? '#C20A29' : att >= 0.5 ? '#F59E0B' : '#28A464';
+                    return h('span', { style: { fontSize: 12, fontWeight: 500, color: color } }, (att * 100).toFixed(0) + '%');
+                  }
+                },
+                { title: '', key: 'actions', width: 50,
+                  render: function(_, r) {
+                    return h(Button, { size: 'small', type: 'text', danger: true, onClick: function() { removeGraphEdge(r.id); } }, '\u2715');
+                  }
+                },
+              ],
+            })
+          : h(Empty, { description: 'No edges defined. Add edges to connect dataset nodes.' })
+      ),
+
+      // Propagation Preview
+      propagationPreview ? h('div', { className: 'panel', style: { padding: 16, marginBottom: 16 } },
+        h('div', { className: 'panel-header', style: { marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+          h('span', { className: 'panel-title' }, 'Propagation Preview'),
+          h('div', { style: { display: 'flex', gap: 8 } },
+            h(Button, { size: 'small', onClick: function() { setPropagationPreview(null); } }, 'Dismiss'),
+            h(Button, { size: 'small', type: 'primary', onClick: function() {
+              setGraphEnabled(true);
+              setPropagationPreview(null);
+              antd.message.success('Graph propagation enabled. Risk scores updated.');
+            } }, 'Apply & Enable')
+          )
+        ),
+        h(Table, {
+          dataSource: propagationPreview, rowKey: 'nodeId', size: 'small',
+          pagination: false,
+          columns: [
+            { title: 'Node', key: 'node', width: 140,
+              render: function(_, r) {
+                return h('span', null,
+                  h('span', { style: { fontWeight: 500 } }, r.label),
+                  r.isAnchor ? h(Tag, { color: 'purple', style: { marginLeft: 6, fontSize: 9 } }, 'ANCHOR') : null
+                );
+              }
+            },
+            { title: 'Type', dataIndex: 'type', key: 'type', width: 80,
+              render: function(t) { return h(Tag, { style: { fontSize: 10 } }, (t || '?').toUpperCase()); }
+            },
+            { title: 'Keyword Risk', key: 'kw', width: 110,
+              render: function(_, r) {
+                var color = r.keywordRisk === 'High' ? 'red' : r.keywordRisk === 'Medium' ? 'gold' : r.keywordRisk === 'Low' ? 'green' : 'default';
+                return h(Tag, { color: color }, r.keywordRisk);
+              }
+            },
+            { title: 'Graph Risk', key: 'gr', width: 110,
+              render: function(_, r) {
+                if (r.graphRisk === '\u2013') return h('span', { style: { color: '#B0B0C0' } }, '\u2013');
+                var color = r.graphRisk === 'High' ? 'red' : r.graphRisk === 'Medium' ? 'gold' : 'green';
+                return h(Tag, { color: color }, r.graphRisk);
+              }
+            },
+            { title: 'Final Risk', key: 'final', width: 110,
+              render: function(_, r) {
+                var color = r.finalRisk === 'High' ? 'red' : r.finalRisk === 'Medium' ? 'gold' : r.finalRisk === 'Low' ? 'green' : 'default';
+                return h(Tag, { color: color, style: { fontWeight: 600 } }, r.finalRisk);
+              }
+            },
+            { title: 'Change', key: 'change', width: 80,
+              render: function(_, r) {
+                if (r.change === 'upgrade') return h(Tag, { color: 'volcano' }, '\u2191 Upgrade');
+                return h('span', { style: { color: '#B0B0C0', fontSize: 11 } }, '\u2013');
+              }
+            },
+            { title: 'Path', dataIndex: 'path', key: 'path', ellipsis: true,
+              render: function(t) { return t ? h('span', { style: { fontSize: 11, color: '#65657B' } }, t) : '\u2013'; }
+            },
+          ],
+        })
+      ) : null,
+
+      // ── Modals ──
+      h(AddNodeModal, {
+        open: addNodeOpen,
+        onClose: function() { setAddNodeOpen(false); },
+        onAdd: function(node) { addGraphNode(node); setAddNodeOpen(false); },
+        bundles: bundles,
+        existingNodeIds: graphNodeList.map(function(n) { return n.id; }),
+      }),
+      h(AddEdgeModal, {
+        open: addEdgeOpen,
+        onClose: function() { setAddEdgeOpen(false); },
+        onAdd: function(edge) { addGraphEdge(edge); setAddEdgeOpen(false); },
+        nodes: graphNodeList,
+      }),
+      h(AddAnchorModal, {
+        open: addAnchorOpen,
+        onClose: function() { setAddAnchorOpen(false); },
+        onAdd: function(nodeId, risk, reason) { setNodeAnchor(nodeId, risk, reason); setAddAnchorOpen(false); },
+        nodes: graphNodeList.filter(function(n) { return !n.anchorRisk; }),
+      }),
+      h(CsvImportModal, {
+        open: csvImportOpen,
+        onClose: function() { setCsvImportOpen(false); },
+        onImport: handleCsvImport,
       })
     ) : null,
 
@@ -6410,6 +7189,267 @@ function RiskDistributionChart(props) {
 }
 
 
+// ── Graph Modal Components ──
+
+function AddNodeModal(props) {
+  var _id = useState(''); var nodeId = _id[0]; var setNodeId = _id[1];
+  var _label = useState(''); var nodeLabel = _label[0]; var setNodeLabel = _label[1];
+  var _type = useState('sdtm'); var nodeType = _type[0]; var setNodeType = _type[1];
+  var _bundle = useState(null); var nodeBundle = _bundle[0]; var setNodeBundle = _bundle[1];
+
+  function handleOk() {
+    var id = nodeId.trim().toLowerCase().replace(/\s+/g, '_');
+    if (!id) { antd.message.warning('Dataset ID is required.'); return; }
+    if (props.existingNodeIds.indexOf(id) >= 0) { antd.message.warning('Node "' + id + '" already exists.'); return; }
+    props.onAdd({ id: id, label: nodeLabel.trim() || id.toUpperCase(), type: nodeType, bundleId: nodeBundle, anchorRisk: null, anchorReason: '' });
+    setNodeId(''); setNodeLabel(''); setNodeType('sdtm'); setNodeBundle(null);
+  }
+
+  // Auto-detect type from ID
+  function handleIdChange(val) {
+    setNodeId(val);
+    var lower = val.toLowerCase().trim();
+    if (/^ad[a-z]/.test(lower)) setNodeType('adam');
+    else if (/^t_/.test(lower) || lower.indexOf('table') >= 0 || lower.indexOf('figure') >= 0) setNodeType('tfl');
+    else {
+      var sdtm = ['dm', 'ae', 'lb', 'vs', 'eg', 'cm', 'mh', 'ds', 'ex', 'sv', 'ta', 'ti', 'ts', 'se', 'pc', 'pp', 'qs', 'ce', 'dd', 'dv', 'hy'];
+      if (sdtm.indexOf(lower) >= 0) setNodeType('sdtm');
+    }
+    if (!nodeLabel) setNodeLabel(val.toUpperCase());
+  }
+
+  return h(Modal, {
+    title: 'Add Dataset Node',
+    open: props.open,
+    onCancel: function() { props.onClose(); setNodeId(''); setNodeLabel(''); setNodeType('sdtm'); setNodeBundle(null); },
+    onOk: handleOk,
+    okText: 'Add Node',
+    okButtonProps: { disabled: !nodeId.trim() },
+    width: 480,
+  },
+    h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12 } },
+      h('div', null,
+        h('label', { style: { fontSize: 12, color: '#65657B', display: 'block', marginBottom: 4 } }, 'Dataset ID'),
+        h(antd.AutoComplete, {
+          style: { width: '100%' },
+          placeholder: 'e.g., dm, adsl, adtte, t_pop...',
+          value: nodeId,
+          onChange: handleIdChange,
+          options: props.bundles.map(function(b) {
+            return { value: (b.name || '').toLowerCase().replace(/\s+/g, '_'), label: b.name };
+          }).filter(function(o) { return props.existingNodeIds.indexOf(o.value) === -1; }),
+          filterOption: function(input, option) { return (option.label || '').toLowerCase().indexOf(input.toLowerCase()) >= 0; },
+        })
+      ),
+      h('div', null,
+        h('label', { style: { fontSize: 12, color: '#65657B', display: 'block', marginBottom: 4 } }, 'Display Label'),
+        h(Input, { placeholder: 'e.g., DM (Demographics)', value: nodeLabel, onChange: function(e) { setNodeLabel(e.target.value); } })
+      ),
+      h('div', null,
+        h('label', { style: { fontSize: 12, color: '#65657B', display: 'block', marginBottom: 4 } }, 'Dataset Type'),
+        h(Select, {
+          style: { width: '100%' },
+          value: nodeType,
+          onChange: setNodeType,
+          options: [
+            { value: 'sdtm', label: 'SDTM Domain' },
+            { value: 'adam', label: 'ADaM Dataset' },
+            { value: 'tfl', label: 'TFL Output' },
+            { value: 'raw', label: 'Raw / Source Data' },
+          ],
+        })
+      ),
+      h('div', null,
+        h('label', { style: { fontSize: 12, color: '#65657B', display: 'block', marginBottom: 4 } }, 'Link to ' + (capFirst ? capFirst('deliverable') : 'Deliverable') + ' (optional)'),
+        h(Select, {
+          style: { width: '100%' },
+          placeholder: 'Select a bundle to link...',
+          value: nodeBundle || undefined,
+          onChange: setNodeBundle,
+          allowClear: true,
+          showSearch: true,
+          optionFilterProp: 'label',
+          options: props.bundles.map(function(b) { return { value: b.id, label: b.name }; }),
+        })
+      )
+    )
+  );
+}
+
+function AddEdgeModal(props) {
+  var _src = useState(null); var edgeSrc = _src[0]; var setEdgeSrc = _src[1];
+  var _tgt = useState(null); var edgeTgt = _tgt[0]; var setEdgeTgt = _tgt[1];
+  var _rel = useState('direct'); var edgeRel = _rel[0]; var setEdgeRel = _rel[1];
+  var _scope = useState('unknown'); var edgeScope = _scope[0]; var setEdgeScope = _scope[1];
+  var _detail = useState(''); var edgeDetail = _detail[0]; var setEdgeDetail = _detail[1];
+
+  function handleOk() {
+    if (!edgeSrc || !edgeTgt) { antd.message.warning('Select both source and target.'); return; }
+    if (edgeSrc === edgeTgt) { antd.message.warning('Source and target must be different.'); return; }
+    props.onAdd({ source: edgeSrc, target: edgeTgt, relationship: edgeRel, columnScope: edgeScope, columnDetail: edgeDetail.trim() });
+    setEdgeSrc(null); setEdgeTgt(null); setEdgeRel('direct'); setEdgeScope('unknown'); setEdgeDetail('');
+  }
+
+  var nodeOptions = props.nodes.map(function(n) { return { value: n.id, label: n.label || n.id }; });
+
+  return h(Modal, {
+    title: 'Add Dependency Edge',
+    open: props.open,
+    onCancel: function() { props.onClose(); setEdgeSrc(null); setEdgeTgt(null); setEdgeRel('direct'); setEdgeScope('unknown'); setEdgeDetail(''); },
+    onOk: handleOk,
+    okText: 'Add Edge',
+    okButtonProps: { disabled: !edgeSrc || !edgeTgt || edgeSrc === edgeTgt },
+    width: 520,
+  },
+    h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12 } },
+      h('div', { style: { display: 'flex', gap: 12 } },
+        h('div', { style: { flex: 1 } },
+          h('label', { style: { fontSize: 12, color: '#65657B', display: 'block', marginBottom: 4 } }, 'Source (upstream)'),
+          h(Select, { style: { width: '100%' }, placeholder: 'Select source...', value: edgeSrc || undefined, onChange: setEdgeSrc, showSearch: true, optionFilterProp: 'label', options: nodeOptions })
+        ),
+        h('div', { style: { display: 'flex', alignItems: 'center', paddingTop: 20, fontSize: 16, color: '#8F8FA3' } }, '\u2192'),
+        h('div', { style: { flex: 1 } },
+          h('label', { style: { fontSize: 12, color: '#65657B', display: 'block', marginBottom: 4 } }, 'Target (downstream)'),
+          h(Select, { style: { width: '100%' }, placeholder: 'Select target...', value: edgeTgt || undefined, onChange: setEdgeTgt, showSearch: true, optionFilterProp: 'label', options: nodeOptions })
+        )
+      ),
+      h('div', { style: { display: 'flex', gap: 12 } },
+        h('div', { style: { flex: 1 } },
+          h('label', { style: { fontSize: 12, color: '#65657B', display: 'block', marginBottom: 4 } }, 'Relationship'),
+          h(Select, { style: { width: '100%' }, value: edgeRel, onChange: setEdgeRel, options: [
+            { value: 'direct', label: 'Direct dependency' },
+            { value: 'indirect', label: 'Indirect dependency' },
+            { value: 'reference_only', label: 'Reference only (metadata)' },
+          ] })
+        ),
+        h('div', { style: { flex: 1 } },
+          h('label', { style: { fontSize: 12, color: '#65657B', display: 'block', marginBottom: 4 } }, 'Column Scope'),
+          h(Select, { style: { width: '100%' }, value: edgeScope, onChange: setEdgeScope, options: [
+            { value: 'full', label: 'Full \u2014 all columns used' },
+            { value: 'partial', label: 'Partial \u2014 some columns used' },
+            { value: 'unknown', label: 'Unknown' },
+          ] })
+        )
+      ),
+      edgeScope === 'partial' ? h('div', null,
+        h('label', { style: { fontSize: 12, color: '#65657B', display: 'block', marginBottom: 4 } }, 'Which columns? (helps explain attenuation)'),
+        h(Input, { placeholder: 'e.g., Only AGE, SEX, RACE used in derivation', value: edgeDetail, onChange: function(e) { setEdgeDetail(e.target.value); } })
+      ) : null,
+      h('div', { style: { fontSize: 11, color: '#8F8FA3', background: '#F8F8FC', padding: 8, borderRadius: 6, marginTop: 4 } },
+        'Attenuation: ',
+        (function() {
+          var att = { full: 1.0, partial: 0.6, unknown: 0.8 }[edgeScope] * { direct: 1.0, indirect: 0.7, reference_only: 0.3 }[edgeRel];
+          return h('strong', null, (att * 100).toFixed(0) + '%');
+        })(),
+        ' \u2014 ',
+        edgeScope === 'partial' ? 'Partial column usage reduces inherited risk.' : edgeScope === 'full' ? 'Full column usage passes inherited risk at full strength.' : 'Unknown scope uses a conservative 80% factor.',
+        ' ',
+        edgeRel === 'reference_only' ? 'Reference-only further reduces to 30%.' : edgeRel === 'indirect' ? 'Indirect dependency reduces to 70%.' : ''
+      )
+    )
+  );
+}
+
+function AddAnchorModal(props) {
+  var _node = useState(null); var anchorNode = _node[0]; var setAnchorNode = _node[1];
+  var _risk = useState('High'); var anchorRisk = _risk[0]; var setAnchorRisk = _risk[1];
+  var _reason = useState(''); var anchorReason = _reason[0]; var setAnchorReason = _reason[1];
+
+  function handleOk() {
+    if (!anchorNode) { antd.message.warning('Select a dataset node.'); return; }
+    if (!anchorReason.trim()) { antd.message.warning('Please provide a reason for this risk anchor.'); return; }
+    props.onAdd(anchorNode, anchorRisk, anchorReason.trim());
+    setAnchorNode(null); setAnchorRisk('High'); setAnchorReason('');
+  }
+
+  return h(Modal, {
+    title: 'Set Risk Anchor',
+    open: props.open,
+    onCancel: function() { props.onClose(); setAnchorNode(null); setAnchorRisk('High'); setAnchorReason(''); },
+    onOk: handleOk,
+    okText: 'Set Anchor',
+    okButtonProps: { disabled: !anchorNode || !anchorReason.trim() },
+    width: 480,
+  },
+    h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12 } },
+      h('div', null,
+        h('label', { style: { fontSize: 12, color: '#65657B', display: 'block', marginBottom: 4 } }, 'Dataset'),
+        h(Select, {
+          style: { width: '100%' },
+          placeholder: 'Select a dataset node...',
+          value: anchorNode || undefined,
+          onChange: setAnchorNode,
+          showSearch: true,
+          optionFilterProp: 'label',
+          options: props.nodes.map(function(n) { return { value: n.id, label: n.label || n.id }; }),
+        })
+      ),
+      h('div', null,
+        h('label', { style: { fontSize: 12, color: '#65657B', display: 'block', marginBottom: 4 } }, 'Risk Level'),
+        h(Select, {
+          style: { width: '100%' },
+          value: anchorRisk,
+          onChange: setAnchorRisk,
+          options: [
+            { value: 'High', label: '\uD83D\uDD34 High Risk' },
+            { value: 'Medium', label: '\uD83D\uDFE1 Medium Risk' },
+            { value: 'Low', label: '\uD83D\uDFE2 Low Risk' },
+          ],
+        })
+      ),
+      h('div', null,
+        h('label', { style: { fontSize: 12, color: '#65657B', display: 'block', marginBottom: 4 } }, 'Reason ', h('span', { style: { color: '#C20A29' } }, '(required)')),
+        h(Input.TextArea, {
+          rows: 2,
+          value: anchorReason,
+          onChange: function(e) { setAnchorReason(e.target.value); },
+          placeholder: 'e.g., Primary efficacy endpoint — patient survival analysis',
+        })
+      ),
+      h('div', { style: { fontSize: 11, color: '#8F8FA3', background: '#F8F8FC', padding: 8, borderRadius: 6 } },
+        'Risk will propagate from this anchor upstream through all connected nodes, attenuated by edge annotations.'
+      )
+    )
+  );
+}
+
+function CsvImportModal(props) {
+  var _csv = useState(''); var csvText = _csv[0]; var setCsvText = _csv[1];
+
+  return h(Modal, {
+    title: 'Import Edges from CSV',
+    open: props.open,
+    onCancel: function() { props.onClose(); setCsvText(''); },
+    onOk: function() { props.onImport(csvText); setCsvText(''); },
+    okText: 'Import',
+    okButtonProps: { disabled: !csvText.trim() },
+    width: 560,
+  },
+    h('div', { style: { display: 'flex', flexDirection: 'column', gap: 12 } },
+      h('div', { style: { fontSize: 12, color: '#65657B' } },
+        'Paste CSV data with columns: ', h('code', null, 'source,target,relationship,column_scope,annotation'),
+        '. Only source and target are required. Nodes will be auto-created if they don\'t exist.'
+      ),
+      h('div', { style: { fontSize: 11, color: '#8F8FA3', background: '#F8F8FC', padding: 8, borderRadius: 6 } },
+        'Example:',
+        h('pre', { style: { margin: '4px 0 0', fontSize: 11 } },
+          'source,target,relationship,column_scope,annotation\n' +
+          'dm,adsl,direct,full,Demographics feed ADSL\n' +
+          'adsl,adtte,direct,partial,Only baseline covariates used\n' +
+          'ae,adae,direct,full,AE domain feeds ADAE'
+        )
+      ),
+      h(Input.TextArea, {
+        rows: 8,
+        value: csvText,
+        onChange: function(e) { setCsvText(e.target.value); },
+        placeholder: 'Paste CSV here...',
+        style: { fontFamily: 'monospace', fontSize: 12 },
+      })
+    )
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  ROOT APP
 // ═══════════════════════════════════════════════════════════════
@@ -6435,19 +7475,113 @@ function App() {
   var _deu = useState(null); var dataExplorerUrl = _deu[0]; var setDataExplorerUrl = _deu[1];
 
   // ── Universal Scope Filters ──────────────────────────────────
-  // Load saved scope defaults from localStorage
-  var _savedScopeDefaults = useMemo(function() {
+  // Load saved scope presets and default from localStorage
+  var _initPresets = useMemo(function() {
     try {
-      var saved = localStorage.getItem('sce_scope_defaults');
-      return saved ? JSON.parse(saved) : null;
-    } catch(e) { return null; }
+      var saved = localStorage.getItem('sce_scope_presets');
+      return saved ? JSON.parse(saved) : [];
+    } catch(e) { return []; }
   }, []);
-  var _sc1 = useState([]); var scopeProjects = _sc1[0]; var setScopeProjects = _sc1[1];
-  var _sc2 = useState([]); var scopeTags = _sc2[0]; var setScopeTags = _sc2[1];
-  var _sc3a = useState(_savedScopeDefaults ? !!_savedScopeDefaults.myCurrentStage : false); var filterMyCurrentStage = _sc3a[0]; var setFilterMyCurrentStage = _sc3a[1];
-  var _sc3b = useState(_savedScopeDefaults ? !!_savedScopeDefaults.myFutureStage : false); var filterMyFutureStage = _sc3b[0]; var setFilterMyFutureStage = _sc3b[1];
-  var _sc3c = useState(_savedScopeDefaults ? !!_savedScopeDefaults.myPriorStage : false); var filterMyPriorStage = _sc3c[0]; var setFilterMyPriorStage = _sc3c[1];
-  var _hasDef = useState(!!_savedScopeDefaults); var hasSavedScopeDefaults = _hasDef[0]; var setHasSavedScopeDefaults = _hasDef[1];
+  var _initDefaultName = useMemo(function() {
+    try { return localStorage.getItem('sce_scope_default_preset') || null; } catch(e) { return null; }
+  }, []);
+  var _initDefault = _initPresets.find(function(p) { return p.name === _initDefaultName; }) || null;
+  var _presets = useState(_initPresets); var scopePresets = _presets[0]; var setScopePresets = _presets[1];
+  var _defName = useState(_initDefaultName); var defaultPresetName = _defName[0]; var setDefaultPresetName = _defName[1];
+  var _activePreset = useState(_initDefaultName); var activePresetName = _activePreset[0]; var setActivePresetName = _activePreset[1];
+  var _presetModalVis = useState(false); var presetSaveOpen = _presetModalVis[0]; var setPresetSaveOpen = _presetModalVis[1];
+  var _presetNameInput = useState(''); var presetNameInput = _presetNameInput[0]; var setPresetNameInput = _presetNameInput[1];
+  var _sc1 = useState(_initDefault ? (_initDefault.projects || []) : []); var scopeProjects = _sc1[0]; var setScopeProjects = _sc1[1];
+  var _sc2 = useState(_initDefault ? (_initDefault.tags || []) : []); var scopeTags = _sc2[0]; var setScopeTags = _sc2[1];
+  var _sc3a = useState(_initDefault ? !!_initDefault.myCurrentStage : false); var filterMyCurrentStage = _sc3a[0]; var setFilterMyCurrentStage = _sc3a[1];
+  var _sc3b = useState(_initDefault ? !!_initDefault.myFutureStage : false); var filterMyFutureStage = _sc3b[0]; var setFilterMyFutureStage = _sc3b[1];
+  var _sc3c = useState(_initDefault ? !!_initDefault.myPriorStage : false); var filterMyPriorStage = _sc3c[0]; var setFilterMyPriorStage = _sc3c[1];
+
+  // Helper: get current scope state as a preset object
+  function getCurrentScopeState(name) {
+    return {
+      name: name,
+      projects: scopeProjects,
+      tags: scopeTags,
+      myCurrentStage: filterMyCurrentStage,
+      myFutureStage: filterMyFutureStage,
+      myPriorStage: filterMyPriorStage,
+    };
+  }
+
+  // Helper: apply a preset to scope state
+  function applyPreset(preset) {
+    setScopeProjects(preset.projects || []);
+    setScopeTags(preset.tags || []);
+    setFilterMyCurrentStage(!!preset.myCurrentStage);
+    setFilterMyFutureStage(!!preset.myFutureStage);
+    setFilterMyPriorStage(!!preset.myPriorStage);
+    setActivePresetName(preset.name);
+  }
+
+  // Helper: persist presets to localStorage
+  function persistPresets(presets, defName) {
+    try { localStorage.setItem('sce_scope_presets', JSON.stringify(presets)); } catch(e) {}
+    if (defName !== undefined) {
+      try {
+        if (defName) localStorage.setItem('sce_scope_default_preset', defName);
+        else localStorage.removeItem('sce_scope_default_preset');
+      } catch(e) {}
+    }
+  }
+
+  // Save preset (add or overwrite)
+  function handleSavePreset(name) {
+    if (!name || !name.trim()) return;
+    var preset = getCurrentScopeState(name.trim());
+    var updated = scopePresets.filter(function(p) { return p.name !== preset.name; });
+    updated.push(preset);
+    setScopePresets(updated);
+    setActivePresetName(preset.name);
+    persistPresets(updated);
+    setPresetSaveOpen(false);
+    setPresetNameInput('');
+    antd.message.success('Preset "' + preset.name + '" saved');
+  }
+
+  // Delete preset
+  function handleDeletePreset(name) {
+    var updated = scopePresets.filter(function(p) { return p.name !== name; });
+    setScopePresets(updated);
+    persistPresets(updated);
+    if (defaultPresetName === name) {
+      setDefaultPresetName(null);
+      persistPresets(updated, null);
+    }
+    if (activePresetName === name) setActivePresetName(null);
+    antd.message.success('Preset "' + name + '" deleted');
+  }
+
+  // Set/unset default preset
+  function handleToggleDefault(name) {
+    if (defaultPresetName === name) {
+      setDefaultPresetName(null);
+      persistPresets(scopePresets, null);
+      antd.message.info('Default cleared');
+    } else {
+      setDefaultPresetName(name);
+      persistPresets(scopePresets, name);
+      antd.message.success('"' + name + '" set as default');
+    }
+  }
+
+  // Clear active preset tracking when user manually changes filters
+  useEffect(function() {
+    if (!activePresetName) return;
+    var active = scopePresets.find(function(p) { return p.name === activePresetName; });
+    if (!active) return;
+    var same = JSON.stringify(active.projects || []) === JSON.stringify(scopeProjects)
+      && JSON.stringify(active.tags || []) === JSON.stringify(scopeTags)
+      && !!active.myCurrentStage === filterMyCurrentStage
+      && !!active.myFutureStage === filterMyFutureStage
+      && !!active.myPriorStage === filterMyPriorStage;
+    if (!same) setActivePresetName(null);
+  }, [scopeProjects, scopeTags, filterMyCurrentStage, filterMyFutureStage, filterMyPriorStage]);
   var _sc4 = useState(null); var scopeCurrentUser = _sc4[0]; var setScopeCurrentUser = _sc4[1];
   var _sidebarCollapsed = useState(function() { try { return localStorage.getItem('sce_sidebar_collapsed') === 'true'; } catch(e) { return false; } });
   var sidebarCollapsed = _sidebarCollapsed[0]; var setSidebarCollapsed = _sidebarCollapsed[1];
@@ -6911,53 +8045,112 @@ function App() {
                 style: { fontSize: 12 },
               }, 'Prior stage')
             ),
-            anyMyWorkCheckbox
-              ? h(Tooltip, { title: hasSavedScopeDefaults ? 'These checkboxes are saved as your default. Click to clear.' : 'Save current "Assigned to Me" checkboxes as your default when the app loads' },
+            h('span', { className: 'global-filter-divider' }),
+            // Presets dropdown
+            h(Select, {
+              placeholder: 'Saved views',
+              value: activePresetName || undefined,
+              onChange: function(val) {
+                if (!val) {
+                  setScopeProjects([]); setScopeTags([]); setFilterMyCurrentStage(false); setFilterMyFutureStage(false); setFilterMyPriorStage(false);
+                  setActivePresetName(null);
+                  return;
+                }
+                var preset = scopePresets.find(function(p) { return p.name === val; });
+                if (preset) applyPreset(preset);
+              },
+              allowClear: true,
+              style: { minWidth: 160 }, size: 'small',
+              options: scopePresets.map(function(p) {
+                return {
+                  label: (defaultPresetName === p.name ? '★ ' : '') + p.name,
+                  value: p.name,
+                };
+              }),
+              dropdownRender: function(menu) {
+                return h('div', null,
+                  menu,
+                  scopePresets.length > 0 ? h('div', { style: { borderTop: '1px solid #f0f0f0', padding: '4px 8px' } },
+                    h('div', { style: { fontSize: 11, color: '#8F8FA3', marginBottom: 2 } }, 'Right-click a view for options')
+                  ) : null
+                );
+              },
+              optionRender: function(option) {
+                var name = option.value;
+                var isDef = defaultPresetName === name;
+                return h('div', {
+                  style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' },
+                  onContextMenu: function(e) {
+                    e.preventDefault(); e.stopPropagation();
+                  },
+                },
+                  h('span', null, option.label),
+                  h('span', { style: { display: 'flex', gap: 4, marginLeft: 8 } },
+                    h(Tooltip, { title: isDef ? 'Remove as default' : 'Set as default (loads on startup)' },
+                      h('span', {
+                        style: { cursor: 'pointer', fontSize: 14, color: isDef ? '#FAAD14' : '#d9d9d9' },
+                        onClick: function(e) { e.stopPropagation(); handleToggleDefault(name); },
+                      }, '★')
+                    ),
+                    h(Tooltip, { title: 'Delete this view' },
+                      h('span', {
+                        style: { cursor: 'pointer', fontSize: 12, color: '#ff4d4f' },
+                        onClick: function(e) { e.stopPropagation(); handleDeletePreset(name); },
+                      }, '✕')
+                    )
+                  )
+                );
+              },
+            }),
+            // Save preset button
+            hasScopeFilters
+              ? h(Tooltip, { title: 'Save current scope as a named view' },
                   h(Button, {
                     type: 'link', size: 'small',
-                    style: { fontSize: 11, padding: '0 4px', color: hasSavedScopeDefaults ? '#8F8FA3' : '#4C36E6' },
-                    onClick: function() {
-                      if (hasSavedScopeDefaults) {
-                        try { localStorage.removeItem('sce_scope_defaults'); } catch(e) {}
-                        setHasSavedScopeDefaults(false);
-                        antd.message.success('Default scope cleared');
-                      } else {
-                        try {
-                          localStorage.setItem('sce_scope_defaults', JSON.stringify({
-                            myCurrentStage: filterMyCurrentStage,
-                            myFutureStage: filterMyFutureStage,
-                            myPriorStage: filterMyPriorStage,
-                          }));
-                        } catch(e) {}
-                        setHasSavedScopeDefaults(true);
-                        antd.message.success('Saved as your default scope');
-                      }
-                    },
-                  }, hasSavedScopeDefaults ? '★ Default saved' : '☆ Save as default')
+                    style: { fontSize: 12, padding: '0 4px' },
+                    onClick: function() { setPresetSaveOpen(true); setPresetNameInput(activePresetName || ''); },
+                  }, '+ Save view')
                 )
-              : hasSavedScopeDefaults
-                ? h(Tooltip, { title: 'You have saved scope defaults. They will apply on next page load.' },
-                    h(Tag, { color: 'purple', style: { fontSize: 11, cursor: 'pointer' }, onClick: function() {
-                      // Re-apply saved defaults
-                      try {
-                        var saved = JSON.parse(localStorage.getItem('sce_scope_defaults'));
-                        if (saved) {
-                          setFilterMyCurrentStage(!!saved.myCurrentStage);
-                          setFilterMyFutureStage(!!saved.myFutureStage);
-                          setFilterMyPriorStage(!!saved.myPriorStage);
-                        }
-                      } catch(e) {}
-                    } }, '★ Apply saved defaults')
-                  )
-                : null,
+              : null,
             hasScopeFilters
               ? h('span', { style: { marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 } },
                   h(Tag, { color: 'purple' }, scopedBundles.length + ' of ' + bundles.length + ' ' + terms.bundle.toLowerCase() + 's'),
                   h(Button, { type: 'link', size: 'small', onClick: function() {
                     setScopeProjects([]); setScopeTags([]); setFilterMyCurrentStage(false); setFilterMyFutureStage(false); setFilterMyPriorStage(false);
+                    setActivePresetName(null);
                   } }, 'Clear all')
                 )
               : null
+          ),
+          // Save preset modal
+          h(Modal, {
+            title: 'Save Scope View',
+            open: presetSaveOpen,
+            onCancel: function() { setPresetSaveOpen(false); setPresetNameInput(''); },
+            onOk: function() { handleSavePreset(presetNameInput); },
+            okText: scopePresets.some(function(p) { return p.name === presetNameInput.trim(); }) ? 'Overwrite' : 'Save',
+            okButtonProps: { disabled: !presetNameInput.trim() },
+            width: 400,
+          },
+            h('div', null,
+              h('div', { style: { marginBottom: 8, fontSize: 13, color: '#555' } }, 'Give this scope view a name. It will save the current project, tag, and assignment filters.'),
+              h(antd.Input, {
+                placeholder: 'e.g. "My Active Work" or "Project X Overview"',
+                value: presetNameInput,
+                onChange: function(e) { setPresetNameInput(e.target.value); },
+                onPressEnter: function() { handleSavePreset(presetNameInput); },
+                autoFocus: true,
+              }),
+              scopePresets.some(function(p) { return p.name === presetNameInput.trim(); })
+                ? h('div', { style: { marginTop: 8, fontSize: 12, color: '#FAAD14' } }, 'A view with this name already exists and will be overwritten.')
+                : null,
+              h('div', { style: { marginTop: 12, fontSize: 12, color: '#8F8FA3' } },
+                'Current scope: ',
+                scopeProjects.length ? scopeProjects.length + ' project(s), ' : '',
+                scopeTags.length ? scopeTags.length + ' tag(s), ' : '',
+                [filterMyCurrentStage && 'current', filterMyFutureStage && 'future', filterMyPriorStage && 'prior'].filter(Boolean).join(', ') || 'no assignment filter'
+              )
+            )
           ),
           activePage === 'metrics' && hasScopeFilters
             ? h(Alert, {

@@ -319,8 +319,46 @@ def get_bundle_gates(bundle_id: str):
 
 @app.patch("/api/bundles/{bundle_id}/stages/{stage_id}")
 def patch_bundle_stage(bundle_id: str, stage_id: str, body: dict):
-    """Reassign a stage owner. Body: {"assignee": {"id": "userId"}}"""
-    return gov_patch(f"/bundles/{bundle_id}/stages/{stage_id}", json_body=body)
+    """Reassign a stage owner. Body: {"assignee": {"id": "userId"}}
+
+    After the PATCH, re-reads the bundle from Domino to verify the
+    assignment actually persisted.  Returns the verified stage data
+    with a ``verified`` flag so the frontend knows the read-back
+    succeeded.
+    """
+    patch_resp = gov_patch(f"/bundles/{bundle_id}/stages/{stage_id}", json_body=body)
+
+    # ── Read-back verification ───────────────────────────────────
+    requested_id = (body.get("assignee") or {}).get("id") if body.get("assignee") else None
+    try:
+        bundle = gov_get(f"/bundles/{bundle_id}")
+        stages = bundle.get("stages") or []
+        matched = None
+        for s in stages:
+            sid = s.get("stageId") or (s.get("stage") or {}).get("id")
+            if sid == stage_id:
+                matched = s
+                break
+
+        if matched is not None:
+            actual_id = (matched.get("assignee") or {}).get("id") if matched.get("assignee") else None
+            if actual_id == requested_id:
+                patch_resp["verified"] = True
+            else:
+                logger.warning(
+                    f"Assignment verification mismatch for bundle={bundle_id} "
+                    f"stage={stage_id}: requested={requested_id}, actual={actual_id}"
+                )
+                patch_resp["verified"] = False
+                patch_resp["actualAssignee"] = matched.get("assignee")
+        else:
+            logger.warning(f"Verification: stage {stage_id} not found in bundle {bundle_id}")
+            patch_resp["verified"] = False
+    except Exception as e:
+        logger.warning(f"Assignment verification read-back failed: {e}")
+        patch_resp["verified"] = None  # indeterminate — PATCH succeeded but verify failed
+
+    return patch_resp
 
 
 # ── Attachment Overviews ──────────────────────────────────────────
