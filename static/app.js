@@ -92,6 +92,15 @@ function buildDataExplorerUrl(baseUrl, attachment) {
   return url;
 }
 
+function openDataExplorer(url, path, e) {
+  if (e) e.preventDefault();
+  window.open(url, '_blank', 'noopener,noreferrer');
+  antd.message.info({
+    content: 'Opening in Data Explorer. If the file doesn\u2019t auto-load, look for: ' + path,
+    duration: 6,
+  });
+}
+
 // ── Snapshot Staleness Detection ─────────────────────────────────
 // Compares snapshot versions across ALL attachments to detect outdated snapshots.
 // For each dataset (by datasetId/datasetName) and each NetApp volume (by volumeId/volumeName),
@@ -2420,16 +2429,16 @@ function QCTrackerExpandedRow(props) {
                           var name = r.identifier && r.identifier.name;
                           var label = fname || name || 'Unknown';
                           var deUrl = dataExplorerUrl && isDataExplorerFile(fname || name) ? buildDataExplorerUrl(dataExplorerUrl, r) : null;
+                          var dePath = deUrl ? buildDataExplorerPath(r) : null;
                           if (deUrl) {
                             return h('span', { style: { display: 'flex', alignItems: 'center', gap: 4 } },
                               h('a', {
                                 href: deUrl,
-                                target: '_blank',
-                                rel: 'noopener noreferrer',
-                                style: { fontWeight: 500, fontSize: 11, color: '#0070CC' },
-                                title: 'Open in Data Explorer',
+                                onClick: function(e) { openDataExplorer(deUrl, dePath, e); },
+                                style: { fontWeight: 500, fontSize: 11, color: '#0070CC', cursor: 'pointer' },
+                                title: 'Open in Data Explorer \u2014 ' + dePath,
                               }, label),
-                              h(Tooltip, { title: 'Open in Data Explorer' },
+                              h(Tooltip, { title: 'Open in Data Explorer \u2014 ' + dePath },
                                 h('span', { style: { fontSize: 12, cursor: 'pointer' } }, '\uD83D\uDCCA')
                               )
                             );
@@ -2736,16 +2745,16 @@ function AttachmentsDrawer(props) {
         var id = r.identifier || {};
         var fname = id.filename || id.name || '\u2013';
         var explorerLink = deUrl && isDataExplorerFile(fname) ? buildDataExplorerUrl(deUrl, r) : null;
+        var explorerPath = explorerLink ? buildDataExplorerPath(r) : null;
         if (explorerLink) {
           return h('span', { style: { display: 'flex', alignItems: 'center', gap: 4 } },
             h('a', {
               href: explorerLink,
-              target: '_blank',
-              rel: 'noopener noreferrer',
-              style: { fontWeight: 500, fontSize: 12, color: '#0070CC' },
-              title: 'Open in Data Explorer',
+              onClick: function(e) { openDataExplorer(explorerLink, explorerPath, e); },
+              style: { fontWeight: 500, fontSize: 12, color: '#0070CC', cursor: 'pointer' },
+              title: 'Open in Data Explorer \u2014 ' + explorerPath,
             }, fname),
-            h(Tooltip, { title: 'Open in Data Explorer' },
+            h(Tooltip, { title: 'Open in Data Explorer \u2014 ' + explorerPath },
               h('span', { style: { fontSize: 13, cursor: 'pointer' } }, '\uD83D\uDCCA')
             )
           );
