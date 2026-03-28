@@ -837,4 +837,40 @@ var MOCK_ATTACHMENTS = {
   ],
 };
 
+// ── Mock Risk Graph (CDISC standard lineage) ──────────────────────
 
+var MOCK_RISK_GRAPH = {
+  nodes: {
+    dm:    { id: 'dm',    label: 'DM (Demographics)', type: 'sdtm', bundleId: null, anchorRisk: null, anchorReason: '' },
+    ae:    { id: 'ae',    label: 'AE (Adverse Events)', type: 'sdtm', bundleId: null, anchorRisk: null, anchorReason: '' },
+    lb:    { id: 'lb',    label: 'LB (Laboratory)', type: 'sdtm', bundleId: null, anchorRisk: null, anchorReason: '' },
+    vs:    { id: 'vs',    label: 'VS (Vital Signs)', type: 'sdtm', bundleId: null, anchorRisk: null, anchorReason: '' },
+    cm:    { id: 'cm',    label: 'CM (Concomitant Meds)', type: 'sdtm', bundleId: null, anchorRisk: null, anchorReason: '' },
+    mh:    { id: 'mh',    label: 'MH (Medical History)', type: 'sdtm', bundleId: null, anchorRisk: null, anchorReason: '' },
+    adsl:  { id: 'adsl',  label: 'ADSL (Subject Level)', type: 'adam', bundleId: null, anchorRisk: null, anchorReason: '' },
+    adae:  { id: 'adae',  label: 'ADAE (Adverse Events)', type: 'adam', bundleId: null, anchorRisk: 'Medium', anchorReason: 'Safety analysis dataset — adverse event summaries' },
+    adlb:  { id: 'adlb',  label: 'ADLB (Laboratory)', type: 'adam', bundleId: null, anchorRisk: null, anchorReason: '' },
+    advs:  { id: 'advs',  label: 'ADVS (Vital Signs)', type: 'adam', bundleId: null, anchorRisk: null, anchorReason: '' },
+    adcm:  { id: 'adcm',  label: 'ADCM (Concomitant Meds)', type: 'adam', bundleId: null, anchorRisk: null, anchorReason: '' },
+    admh:  { id: 'admh',  label: 'ADMH (Medical History)', type: 'adam', bundleId: null, anchorRisk: null, anchorReason: '' },
+    adtte: { id: 'adtte', label: 'ADTTE (Time to Event)', type: 'adam', bundleId: null, anchorRisk: 'High', anchorReason: 'Primary efficacy endpoint — patient survival analysis' },
+    t_pop: { id: 't_pop', label: 'T_POP (Population Table)', type: 'tfl', bundleId: null, anchorRisk: null, anchorReason: '' },
+    t_ae:  { id: 't_ae',  label: 'T_AE_REL (AE Summary)', type: 'tfl', bundleId: null, anchorRisk: null, anchorReason: '' },
+  },
+  edges: {
+    'dm->adsl':    { id: 'dm->adsl',    source: 'dm',   target: 'adsl',  relationship: 'direct', columnScope: 'full',    columnDetail: 'Demographics feed ADSL baseline' },
+    'ae->adae':    { id: 'ae->adae',    source: 'ae',   target: 'adae',  relationship: 'direct', columnScope: 'full',    columnDetail: 'AE domain feeds ADAE' },
+    'lb->adlb':    { id: 'lb->adlb',    source: 'lb',   target: 'adlb',  relationship: 'direct', columnScope: 'full',    columnDetail: 'LB domain feeds ADLB' },
+    'vs->advs':    { id: 'vs->advs',    source: 'vs',   target: 'advs',  relationship: 'direct', columnScope: 'full',    columnDetail: 'VS domain feeds ADVS' },
+    'cm->adcm':    { id: 'cm->adcm',    source: 'cm',   target: 'adcm',  relationship: 'direct', columnScope: 'full',    columnDetail: 'CM domain feeds ADCM' },
+    'mh->admh':    { id: 'mh->admh',    source: 'mh',   target: 'admh',  relationship: 'direct', columnScope: 'full',    columnDetail: 'MH domain feeds ADMH' },
+    'adsl->adtte': { id: 'adsl->adtte', source: 'adsl', target: 'adtte', relationship: 'direct', columnScope: 'partial', columnDetail: 'Only baseline covariates (AGE, SEX, RACE) used in survival model' },
+    'adsl->adae':  { id: 'adsl->adae',  source: 'adsl', target: 'adae',  relationship: 'direct', columnScope: 'partial', columnDetail: 'Subject-level flags for treatment arm assignment' },
+    'adsl->adlb':  { id: 'adsl->adlb',  source: 'adsl', target: 'adlb',  relationship: 'direct', columnScope: 'partial', columnDetail: 'Subject identifiers and treatment flags' },
+    'adsl->advs':  { id: 'adsl->advs',  source: 'adsl', target: 'advs',  relationship: 'direct', columnScope: 'partial', columnDetail: 'Subject identifiers and treatment flags' },
+    'adsl->t_pop': { id: 'adsl->t_pop', source: 'adsl', target: 't_pop', relationship: 'direct', columnScope: 'full',    columnDetail: 'Population table derives from ADSL' },
+    'adae->t_ae':  { id: 'adae->t_ae',  source: 'adae', target: 't_ae',  relationship: 'direct', columnScope: 'full',    columnDetail: 'AE summary table derives from ADAE' },
+  },
+  source: 'manual',
+  lastUpdated: '2026-03-01T00:00:00Z',
+};

@@ -149,3 +149,21 @@
 ### D35: Mock Data Explorer URL in Dummy Mode
 **Decision**: In `loadMockData()`, set `dataExplorerUrl` to `'__mock_data_explorer__'` so attachment links for data-explorer-compatible files (`.csv`, `.parquet`, etc.) render visually in dummy mode. In live mode, the URL is discovered from the Domino Beta Apps API as before.
 **Rationale**: With `dataExplorerUrl` null, no data explorer links appeared in dummy mode, making the feature invisible during demos. The mock URL produces non-functional links (they navigate to a 404), but the links are visible and demonstrate the feature exists.
+
+## 2026-03-28: Graph-Based Risk Optimizer
+
+### D36: Three-Layer Risk Engine — Graph Can Only Upgrade, Never Downgrade
+**Decision**: Risk scoring uses a three-layer system: (1) Manual overrides (highest priority), (2) Graph propagation, (3) Keyword scoring (baseline). The graph layer can only upgrade a bundle's risk above what keywords assign — it can never lower risk. Keywords remain a conservative floor.
+**Rationale**: If graph configuration is incomplete or misconfigured, bundles without graph coverage silently fall back to keyword scoring. Preventing graph downgrades ensures that removing a graph edge or anchor can never reduce QC rigor below the keyword baseline, protecting against accidental under-classification.
+
+### D37: Attenuation Model — Multiplicative Edge Annotation
+**Decision**: Risk propagates upstream from anchor nodes through dependency edges. Each edge has a `relationship` (direct/indirect/reference_only) and `columnScope` (full/partial/unknown) that multiply to produce an attenuation factor. Partial column scope = 0.6, unknown = 0.8, reference_only relationship = 0.3, indirect = 0.7. Effective attenuation >= 0.7 inherits full anchor risk; >= 0.4 inherits one level below; < 0.4 produces no graph influence.
+**Rationale**: The known concern with graph-based risk is overclassification — a dataset like DM feeds both high-risk survival analysis and low-risk demographics. Edge annotation lets users specify "only AGE, SEX, RACE are used" (partial scope), which attenuates the inherited risk from High to Medium. Multiplicative attenuation naturally decays with distance: a 3-hop indirect path attenuates to ~34%, correctly minimizing influence. The 0.7/0.4 thresholds were chosen so that a single partial+direct edge (0.6) falls just below the full-inheritance threshold, producing one-level attenuation.
+
+### D38: Manual Graph Definition as Primary, Flows API as Progressive Enhancement
+**Decision**: Users build the dependency graph manually (add nodes, add edges, set anchors) or via CSV import. Domino Flows API integration is available as an optional auto-population feature but is not required. The app probes for FlowArtifact attachments to detect Flows availability.
+**Rationale**: No Domino Flows lineage API returns a ready-made dataset DAG. The governance API's `FlowArtifact` type and `executionWorkflowName`/`executionWorkflowVersion` filters can hint at workflow-level relationships, but don't provide column-level lineage. Manual definition ensures the feature works today on any Domino instance. CDISC auto-suggest (standard SDTM→ADaM relationships) reduces manual work for standard studies.
+
+### D39: CDISC Auto-Suggest — Naming Convention Only, Never Auto-Applied
+**Decision**: When dataset nodes match known CDISC naming patterns (e.g., ADSL, ADAE, DM), the system suggests standard dependency edges (e.g., DM→ADSL, AE→ADAE, all ADaM→ADSL). Suggestions require explicit user confirmation via a modal before being added to the graph.
+**Rationale**: Auto-applying would create incorrect graphs for non-standard naming conventions or studies that deviate from CDISC norms. Requiring confirmation ensures the graph reflects actual data flow, not assumptions.

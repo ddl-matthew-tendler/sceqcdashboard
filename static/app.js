@@ -4162,8 +4162,7 @@ function AssignmentRulesPage(props) {
     // Page header
     h('div', { className: 'page-header' },
       h('div', { style: { display: 'flex', alignItems: 'center', gap: 12 } },
-        h('h2', { style: { margin: 0 } }, 'Bulk Assignment Rules'),
-        onNavigate ? h(Button, { size: 'small', onClick: function() { onNavigate('stages'); } }, '\u2190 Stage Manager') : null
+        h('h2', { style: { margin: 0 } }, 'Bulk Assignment Rules')
       ),
       h('p', { className: 'page-subtitle' }, 'Define rules to bulk-assign team members to ' + B.toLowerCase() + ' stages')
     ),
@@ -4677,8 +4676,7 @@ function StageAssignmentsPage(props) {
     h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 } },
       h('div', null,
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 12 } },
-          h('h2', { style: { margin: 0, fontSize: 20, fontWeight: 600, color: '#2D2D3F' } }, 'Stage Manager'),
-          onNavigate ? h(Button, { size: 'small', onClick: function() { onNavigate('rules'); } }, 'Bulk Assignment Rules \u2192') : null
+          h('h2', { style: { margin: 0, fontSize: 20, fontWeight: 600, color: '#2D2D3F' } }, 'Stage Manager')
         ),
         h('div', { style: { color: '#8F8FA3', fontSize: 13, marginTop: 4 } },
           'View all stages across ' + B.toLowerCase() + 's. Identify unassigned work, reassign owners, and manage workload.'
