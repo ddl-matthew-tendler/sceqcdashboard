@@ -108,6 +108,7 @@ function openDataExplorer(url, path, e) {
 // lower version is flagged as stale.
 
 function computeSnapshotStaleness(allAttachments) {
+  console.log('[Staleness] computeSnapshotStaleness called with', allAttachments.length, 'attachments');
   // Phase 1: Build version index — find max version per source
   var datasetMaxVersions = {};   // key: datasetId || datasetName → { maxVersion, maxSnapshotTime, latestBundleId }
   var volumeMaxVersions = {};    // key: volumeId || volumeName → { maxVersion, maxSnapshotTime, latestBundleId }
@@ -182,6 +183,8 @@ function computeSnapshotStaleness(allAttachments) {
     }
   });
 
+  var staleCount = allAttachments.filter(function(a) { return a._staleness && a._staleness.isStale; }).length;
+  console.log('[Staleness] Result:', staleCount, 'stale of', allAttachments.length, '. DS keys:', Object.keys(datasetMaxVersions).length, 'Vol keys:', Object.keys(volumeMaxVersions).length);
   return { datasetMaxVersions: datasetMaxVersions, volumeMaxVersions: volumeMaxVersions };
 }
 
@@ -2199,306 +2202,6 @@ function StatusFlags(props) {
 }
 
 
-// ═══════════════════════════════════════════════════════════════
-//  COMPONENT: QC Tracker Expanded Row
-// ═══════════════════════════════════════════════════════════════
-function QCTrackerExpandedRow(props) {
-  var bundle = props.bundle;
-  var terms = props.terms || DEFAULT_TERMS;
-  var B = terms.bundle;
-  var P = terms.policy;
-  var dataExplorerUrl = props.dataExplorerUrl || null;
-  var stageNames = getBundleStageNames(bundle);
-  var currentIdx = deriveBundleStageIndex(bundle);
-  var isComplete = bundle.state === 'Complete';
-
-  var dominoUrl = getDominoBundleUrl(bundle);
-
-  // Format a timestamp
-  function fmtTime(ts) { return ts ? dayjs(ts).format('MMM D, YYYY h:mm A') : null; }
-  function fmtTimeAgo(ts) { return ts ? dayjs(ts).fromNow() : null; }
-
-  return h('div', { className: 'tracker-expanded' },
-    // Left column: stage timeline
-    h('div', { className: 'tracker-expanded-left' },
-      h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 } },
-        h('div', { className: 'tracker-section-title', style: { marginBottom: 0 } }, 'Stage Timeline'),
-        dominoUrl
-          ? h(Button, {
-              type: 'primary', size: 'small',
-              onClick: function() { window.open(dominoUrl, '_blank'); },
-              style: { fontSize: 11 },
-            }, '\u2197 View in Domino')
-          : null
-      ),
-      // #8: Stage legend
-      h('div', { className: 'tracker-timeline-legend' },
-        h('span', { className: 'tracker-timeline-legend-item' }, h('span', { className: 'tracker-timeline-dot completed', style: { width: 8, height: 8, display: 'inline-block', verticalAlign: 'middle', marginRight: 4 } }), 'Complete'),
-        h('span', { className: 'tracker-timeline-legend-item' }, h('span', { className: 'tracker-timeline-dot active', style: { width: 8, height: 8, display: 'inline-block', verticalAlign: 'middle', marginRight: 4, boxShadow: 'none' } }), 'Current'),
-        h('span', { className: 'tracker-timeline-legend-item' }, h('span', { className: 'tracker-timeline-dot pending', style: { width: 8, height: 8, display: 'inline-block', verticalAlign: 'middle', marginRight: 4 } }), 'Pending')
-      ),
-      stageNames.map(function(name, idx) {
-        var dotState;
-        if (isComplete || idx < currentIdx) dotState = 'completed';
-        else if (idx === currentIdx) dotState = 'active';
-        else dotState = 'pending';
-
-        var stageData = bundle.stages[idx] || {};
-        var assignee = stageData.assignee;
-        var assigneeName = assignee ? assignee.name : null;
-
-        // Project member options for reassignment (from live data)
-        var pmc = props.projectMembersCache || {};
-        var members = pmc[bundle.projectId] || [];
-        var memberOptions = members.map(function(m) {
-          return { label: (m.firstName || '') + ' ' + (m.lastName || '') + ' (' + m.userName + ')', value: m.id };
-        });
-
-        var gapInfo = API_GAPS.stageReassign;
-        var stageId = stageData.stageId || (stageData.stage && stageData.stage.id);
-
-        return h('div', { key: idx, className: 'tracker-timeline-item' },
-          h('div', { className: 'tracker-timeline-dot ' + dotState }),
-          idx < stageNames.length - 1
-            ? h('div', { className: 'tracker-timeline-line ' + dotState })
-            : null,
-          h('div', { className: 'tracker-timeline-content' },
-            h('div', { className: 'tracker-timeline-name' + (dotState === 'active' ? ' active' : '') }, name),
-            h('div', { className: 'tracker-timeline-meta' },
-              // Reassignment Select — calls PATCH /api/bundles/{bundleId}/stages/{stageId}
-              gapInfo.ready
-                ? h(Select, {
-                    size: 'small',
-                    placeholder: 'Assign...',
-                    value: assignee ? assignee.id : undefined,
-                    style: { minWidth: 160, fontSize: 11 },
-                    showSearch: true,
-                    allowClear: true,
-                    options: memberOptions,
-                    onChange: function(userId) {
-                      if (!stageId) { antd.message.error('Missing stage ID'); return; }
-                      var body = { assignee: userId ? { id: userId } : null };
-                      apiPatch('api/bundles/' + bundle.id + '/stages/' + stageId, body)
-                        .then(function(resp) {
-                          // Update local state: find the stage and update assignee
-                          if (resp && resp.assignee) {
-                            stageData.assignee = resp.assignee;
-                          } else if (!userId) {
-                            stageData.assignee = null;
-                          }
-                          // Store policyVersionId if returned
-                          if (resp && resp.stage && resp.stage.policyVersionId) {
-                            bundle._policyVersionId = resp.stage.policyVersionId;
-                          }
-                          // Check read-back verification from backend
-                          if (resp.verified === true) {
-                            antd.message.success('Stage reassigned — verified in Domino');
-                          } else if (resp.verified === false) {
-                            var actualName = resp.actualAssignee ? (resp.actualAssignee.name || resp.actualAssignee.id) : 'nobody';
-                            antd.notification.warning({
-                              message: 'Assignment may not have saved',
-                              description: 'Domino accepted the request but the read-back shows the stage is still assigned to ' + actualName + '. Try refreshing the page to see the current state.',
-                              duration: 10,
-                            });
-                          } else {
-                            antd.message.success('Stage reassigned (verification pending)');
-                          }
-                        })
-                        .catch(function(err) {
-                          var detail = err.message || String(err);
-                          var stageName = stageData.stage ? stageData.stage.name : stageId;
-                          var bundleName = bundle.name || bundle.id;
-                          antd.notification.error({
-                            message: 'Reassignment failed',
-                            description: 'Could not reassign "' + stageName + '" on ' + bundleName + '. ' + (detail.indexOf('403') !== -1 ? 'You may not have permission to reassign this stage.' : detail.indexOf('404') !== -1 ? 'This stage or deliverable may no longer exist. Try refreshing.' : 'Server returned: ' + detail),
-                            duration: 8,
-                          });
-                        });
-                    },
-                    optionFilterProp: 'label',
-                  })
-                : assigneeName
-                  ? h('span', { style: { fontSize: 12, color: '#2E2E38', fontWeight: 500 } }, assigneeName)
-                  : h('span', { style: { fontSize: 12, color: '#B0B0C0', fontStyle: 'italic' } }, 'Unassigned'),
-              h('span', { className: 'tracker-stage-badge ' + dotState },
-                dotState === 'completed' ? 'Done' : dotState === 'active' ? 'Current' : 'Pending'
-              )
-            )
-          )
-        );
-      }),
-      // #9: Metadata section with clear label
-      h('div', { className: 'tracker-metadata' },
-        h('div', { className: 'tracker-section-title', style: { marginBottom: 8 } }, 'Details'),
-        bundle.createdBy
-          ? h('div', { className: 'tracker-metadata-row' },
-              h('span', { className: 'tracker-metadata-label' }, 'Created by'),
-              h('span', { className: 'tracker-metadata-value' }, bundle.createdBy.name || bundle.createdBy.userName || 'Unknown'),
-              fmtTime(bundle.createdAt)
-                ? h('span', { className: 'tracker-metadata-time' }, fmtTime(bundle.createdAt))
-                : null
-            )
-          : null,
-        bundle.updatedAt
-          ? h('div', { className: 'tracker-metadata-row' },
-              h('span', { className: 'tracker-metadata-label' }, 'Last updated'),
-              h('span', { className: 'tracker-metadata-value' }, fmtTimeAgo(bundle.updatedAt)),
-              h('span', { className: 'tracker-metadata-time' }, fmtTime(bundle.updatedAt))
-            )
-          : null
-      )
-    ),
-    // Right column: tabbed content for findings, approvals, gates, attachments
-    h('div', { className: 'tracker-expanded-right' },
-      h(antd.Tabs, {
-        size: 'small',
-        defaultActiveKey: 'findings',
-        items: [
-          { key: 'findings', label: 'Findings' + (bundle._findings && bundle._findings.length > 0 ? ' (' + bundle._findings.length + ')' : ''),
-            children: bundle._findings && bundle._findings.length > 0
-              ? h('div', null,
-                  bundle._findings.slice(0, 8).map(function(f, i) {
-                    var findingUrl = f.id ? getDominoBundleUrl(bundle, { findingId: f.id }) : dominoUrl;
-                    return h('div', { key: i, className: 'tracker-finding-row' },
-                      h(Tag, { color: severityColor(f.severity), style: { color: '#fff', border: 'none', minWidth: 28, textAlign: 'center', fontSize: 11 } }, f.severity),
-                      findingUrl
-                        ? h('a', { href: findingUrl, target: '_blank', rel: 'noopener noreferrer', className: 'tracker-finding-name', style: { color: '#543FDE' }, title: 'View finding in Domino: ' + f.name }, f.name)
-                        : h('span', { className: 'tracker-finding-name', title: f.name }, f.name),
-                      findingStatusTag(f.status)
-                    );
-                  }),
-                  bundle._findings.length > 8
-                    ? h('div', { style: { fontSize: 12, color: '#8F8FA3', padding: '4px 0' } }, '+ ' + (bundle._findings.length - 8) + ' more')
-                    : null
-                )
-              : h('div', { className: 'tracker-empty-state' }, 'No findings recorded. Findings are created in Domino when QC issues are identified.')
-          },
-          { key: 'approvals', label: 'Approvals' + (bundle._approvals && bundle._approvals.length > 0 ? ' (' + bundle._approvals.length + ')' : ''),
-            children: bundle._approvals && bundle._approvals.length > 0
-              ? h('div', null,
-                  bundle._approvals.map(function(a, i) {
-                    return h('div', { key: i, className: 'tracker-approval-row' },
-                      h('span', { className: 'tracker-approval-dot', style: { background: approvalStatusColor(a.status) } }),
-                      h('span', { className: 'tracker-approval-name' }, a.name),
-                      a.approvers && a.approvers.length > 0
-                        ? h('span', { className: 'tracker-approval-actors' }, a.approvers.map(function(ap) { return ap.name; }).join(', '))
-                        : null,
-                      a.updatedAt
-                        ? h('span', { className: 'tracker-approval-time' }, fmtTimeAgo(a.updatedAt))
-                        : null
-                    );
-                  })
-                )
-              : h('div', { className: 'tracker-empty-state' }, 'No approvals configured for this stage.')
-          },
-          { key: 'gates', label: 'Gates' + (bundle._gates && bundle._gates.length > 0 ? ' (' + bundle._gates.length + ')' : ''),
-            children: bundle._gates && bundle._gates.length > 0
-              ? h('div', null,
-                  bundle._gates.map(function(g, i) {
-                    return h('div', { key: i, className: 'tracker-approval-row' },
-                      h(Tag, { color: g.isOpen ? 'success' : 'error', style: { fontSize: 11 } }, g.isOpen ? 'Open' : 'Closed'),
-                      h('span', { className: 'tracker-approval-name' }, g.name)
-                    );
-                  })
-                )
-              : h('div', { className: 'tracker-empty-state' }, 'No quality gates defined.')
-          },
-          { key: 'attachments', label: (function() {
-              var atLabel = 'Attachments';
-              if (bundle._attachments && bundle._attachments.length > 0) atLabel += ' (' + bundle._attachments.length + ')';
-              var inlineStale = countStaleAttachments(bundle);
-              if (inlineStale > 0) atLabel += ' \u26A0';
-              return atLabel;
-            })(),
-            children: bundle._attachments && bundle._attachments.length > 0
-              ? h('div', null,
-                  countStaleAttachments(bundle) > 0
-                    ? h(Alert, { type: 'warning', showIcon: true, style: { marginBottom: 8, fontSize: 11 }, message: countStaleAttachments(bundle) + ' snapshot' + (countStaleAttachments(bundle) > 1 ? 's' : '') + ' outdated \u2014 newer versions exist on other ' + B.toLowerCase() + 's' })
-                    : null,
-                  h(Table, {
-                    dataSource: bundle._attachments,
-                    rowKey: 'id',
-                    size: 'small',
-                    pagination: false,
-                    style: { fontSize: 11 },
-                    rowClassName: function(r) { return r._staleness && r._staleness.isStale ? 'stale-row' : ''; },
-                    columns: [
-                      { title: 'File', key: 'filename', ellipsis: true,
-                        render: function(_, r) {
-                          var fname = r.identifier && r.identifier.filename;
-                          var name = r.identifier && r.identifier.name;
-                          var label = fname || name || 'Unknown';
-                          var deUrl = dataExplorerUrl && isDataExplorerFile(fname || name) ? buildDataExplorerUrl(dataExplorerUrl, r) : null;
-                          var dePath = deUrl ? buildDataExplorerPath(r) : null;
-                          if (deUrl) {
-                            return h('span', { style: { display: 'flex', alignItems: 'center', gap: 4 } },
-                              h('a', {
-                                href: deUrl,
-                                onClick: function(e) { openDataExplorer(deUrl, dePath, e); },
-                                style: { fontWeight: 500, fontSize: 11, color: '#0070CC', cursor: 'pointer' },
-                                title: 'Open in Data Explorer \u2014 ' + dePath,
-                              }, label),
-                              h(Tooltip, { title: 'Open in Data Explorer \u2014 ' + dePath },
-                                h('span', { style: { fontSize: 12, cursor: 'pointer' } }, '\uD83D\uDCCA')
-                              )
-                            );
-                          }
-                          if (!dominoUrl) return h('span', { style: { fontWeight: 500, fontSize: 11 } }, label);
-                          return h('a', {
-                            href: dominoUrl,
-                            target: '_blank',
-                            rel: 'noopener noreferrer',
-                            style: { fontWeight: 500, fontSize: 11, color: '#543FDE' },
-                            title: 'View in Domino',
-                          }, label);
-                        }
-                      },
-                      { title: 'Type', dataIndex: 'type', key: 'type', width: 140,
-                        render: function(t) {
-                          var colors = { DatasetSnapshotFile: 'blue', Report: 'green', ModelVersion: 'purple', Endpoint: 'orange', FlowArtifact: 'cyan', NetAppVolumeSnapshotFile: 'default' };
-                          return h(Tag, { color: colors[t] || 'default', style: { fontSize: 10 } }, (t || '').replace(/([A-Z])/g, ' $1').trim());
-                        }
-                      },
-                      { title: 'Version', key: 'version', width: 90, align: 'center',
-                        render: function(_, r) {
-                          var ver = r.identifier && r.identifier.snapshotVersion;
-                          if (ver == null) return h('span', { style: { color: '#D1D1DB', fontSize: 10 } }, '\u2013');
-                          var s = r._staleness;
-                          if (s && s.isStale) {
-                            return h(Tooltip, { title: 'v' + s.currentVersion + ' attached \u2014 v' + s.latestVersion + ' available (' + s.sourceName + ')' },
-                              h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 3 } },
-                                h(Tag, { color: 'orange', style: { fontSize: 9, margin: 0 } }, 'v' + ver),
-                                h('span', { style: { color: '#D4380D', fontSize: 12 } }, '\u26A0')
-                              )
-                            );
-                          }
-                          if (s && !s.isStale && s.latestVersion > 1) {
-                            return h(Tag, { color: 'green', style: { fontSize: 9, margin: 0 } }, 'v' + ver);
-                          }
-                          return h(Tag, { style: { fontSize: 9, margin: 0 } }, 'v' + ver);
-                        }
-                      },
-                      { title: 'Added by', key: 'addedBy', width: 130,
-                        render: function(_, r) {
-                          var name = r.createdBy && (r.createdBy.name || r.createdBy.userName);
-                          return h('span', { style: { fontSize: 10 } }, name || '\u2013');
-                        }
-                      },
-                      { title: 'Added', key: 'addedAt', width: 100,
-                        render: function(_, r) {
-                          return r.createdAt ? h('span', { style: { fontSize: 10, color: '#8F8FA3' } }, dayjs(r.createdAt).format('MMM D, YYYY')) : '\u2013';
-                        }
-                      },
-                    ],
-                  })
-                )
-              : h('div', { className: 'tracker-empty-state' }, 'No attachments linked to this ' + B.toLowerCase() + '.')
-          },
-        ],
-      })
-    )
-  );
-}
 
 
 // ═══════════════════════════════════════════════════════════════
@@ -2746,16 +2449,18 @@ function AttachmentsDrawer(props) {
         var fname = id.filename || id.name || '\u2013';
         var explorerLink = deUrl && isDataExplorerFile(fname) ? buildDataExplorerUrl(deUrl, r) : null;
         var explorerPath = explorerLink ? buildDataExplorerPath(r) : null;
+        var deIcon = icons && icons.TableOutlined ? h(icons.TableOutlined) : null;
         if (explorerLink) {
-          return h('span', { style: { display: 'flex', alignItems: 'center', gap: 4 } },
-            h('a', {
-              href: explorerLink,
-              onClick: function(e) { openDataExplorer(explorerLink, explorerPath, e); },
-              style: { fontWeight: 500, fontSize: 12, color: '#0070CC', cursor: 'pointer' },
-              title: 'Open in Data Explorer \u2014 ' + explorerPath,
-            }, fname),
-            h(Tooltip, { title: 'Open in Data Explorer \u2014 ' + explorerPath },
-              h('span', { style: { fontSize: 13, cursor: 'pointer' } }, '\uD83D\uDCCA')
+          return h('span', { style: { display: 'flex', alignItems: 'center', gap: 6 } },
+            h(Tooltip, { title: 'Open in Data Explorer: ' + explorerPath },
+              h('a', {
+                href: explorerLink,
+                onClick: function(e) { openDataExplorer(explorerLink, explorerPath, e); },
+                style: { fontWeight: 500, fontSize: 12, color: '#0070CC', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 },
+              },
+                deIcon,
+                fname
+              )
             )
           );
         }
@@ -3419,7 +3124,6 @@ function QCTrackerPage(props) {
   var _fs5 = useState([]); var filterFlags = _fs5[0]; var setFilterFlags = _fs5[1];
   var _fs8 = useState(null); var filterStage = _fs8[0]; var setFilterStage = _fs8[1];
   var _fs6 = useState([]); var selectedRowKeys = _fs6[0]; var setSelectedRowKeys = _fs6[1];
-  var _fs7 = useState([]); var expandedRowKeys = _fs7[0]; var setExpandedRowKeys = _fs7[1];
   // Findings & attachments drawer state
   var _fd1 = useState(false); var findingsDrawerOpen = _fd1[0]; var setFindingsDrawerOpen = _fd1[1];
   var _fd2 = useState(null); var findingsDrawerBundle = _fd2[0]; var setFindingsDrawerBundle = _fd2[1];
@@ -3961,13 +3665,6 @@ function QCTrackerPage(props) {
               selectedRowKeys: selectedRowKeys,
               onChange: function(keys) { setSelectedRowKeys(keys); },
             },
-            expandable: {
-              expandedRowKeys: expandedRowKeys,
-              onExpandedRowsChange: function(keys) { setExpandedRowKeys(keys); },
-              expandedRowRender: function(record) {
-                return h(QCTrackerExpandedRow, { bundle: record, terms: terms, projectMembersCache: props.projectMembersCache, dataExplorerUrl: dataExplorerUrl });
-              },
-            },
           });
         })()
       ),
@@ -3998,11 +3695,15 @@ function DetailDrawer(props) {
   var terms = props.terms || DEFAULT_TERMS;
   var B = terms.bundle;
   var P = terms.policy;
+  var deUrl = props.dataExplorerUrl || null;
+  var projectMembersCache = props.projectMembersCache || {};
 
   if (!bundle) return null;
 
   var stageIdx = deriveBundleStageIndex(bundle);
   var dominoUrl = getDominoBundleUrl(bundle);
+  var stageNames = getBundleStageNames(bundle);
+  var isComplete = bundle.state === 'Complete';
 
   return h(Drawer, {
     title: bundle.name,
@@ -4032,26 +3733,116 @@ function DetailDrawer(props) {
         h('span', { className: 'detail-field-value' }, bundle.policyName || '\u2013')
       ),
       h('div', { className: 'detail-field' },
-        h('span', { className: 'detail-field-label' }, 'Current Stage'),
-        h('span', { className: 'detail-field-value' }, bundle.stage || '\u2013')
-      ),
-      h('div', { className: 'detail-field' },
-        h('span', { className: 'detail-field-label' }, 'Progress'),
-        h('span', { className: 'detail-field-value' },
-          h(Progress, { percent: getBundleProgress(bundle), size: 'small', strokeColor: '#543FDE' })
-        )
-      ),
-      bundle.stageAssignee && bundle.stageAssignee.name
-        ? h('div', { className: 'detail-field' },
-            h('span', { className: 'detail-field-label' }, 'Stage Owner'),
-            h('span', { className: 'detail-field-value' }, bundle.stageAssignee.name)
-          )
-        : null,
-      h('div', { className: 'detail-field' },
         h('span', { className: 'detail-field-label' }, 'Created'),
         h('span', { className: 'detail-field-value' }, bundle.createdAt ? dayjs(bundle.createdAt).format('MMM D, YYYY') : '\u2013')
-      )
+      ),
+      bundle.createdBy
+        ? h('div', { className: 'detail-field' },
+            h('span', { className: 'detail-field-label' }, 'Created by'),
+            h('span', { className: 'detail-field-value' }, bundle.createdBy.name || bundle.createdBy.userName || '\u2013')
+          )
+        : null,
+      bundle.updatedAt
+        ? h('div', { className: 'detail-field' },
+            h('span', { className: 'detail-field-label' }, 'Last updated'),
+            h('span', { className: 'detail-field-value' }, dayjs(bundle.updatedAt).fromNow())
+          )
+        : null
     ),
+
+    // Stage Timeline
+    stageNames.length > 0
+      ? h('div', { className: 'detail-section' },
+          h('div', { className: 'detail-section-title' }, 'Stage Timeline'),
+          h('div', { className: 'tracker-timeline-legend', style: { marginBottom: 8 } },
+            h('span', { className: 'tracker-timeline-legend-item' }, h('span', { className: 'tracker-timeline-dot completed', style: { width: 8, height: 8, display: 'inline-block', verticalAlign: 'middle', marginRight: 4 } }), 'Complete'),
+            h('span', { className: 'tracker-timeline-legend-item' }, h('span', { className: 'tracker-timeline-dot active', style: { width: 8, height: 8, display: 'inline-block', verticalAlign: 'middle', marginRight: 4, boxShadow: 'none' } }), 'Current'),
+            h('span', { className: 'tracker-timeline-legend-item' }, h('span', { className: 'tracker-timeline-dot pending', style: { width: 8, height: 8, display: 'inline-block', verticalAlign: 'middle', marginRight: 4 } }), 'Pending')
+          ),
+          stageNames.map(function(name, idx) {
+            var dotState;
+            if (isComplete || idx < stageIdx) dotState = 'completed';
+            else if (idx === stageIdx) dotState = 'active';
+            else dotState = 'pending';
+
+            var stageData = bundle.stages[idx] || {};
+            var assignee = stageData.assignee;
+            var assigneeName = assignee ? assignee.name : null;
+
+            var members = projectMembersCache[bundle.projectId] || [];
+            var memberOptions = members.map(function(m) {
+              return { label: (m.firstName || '') + ' ' + (m.lastName || '') + ' (' + m.userName + ')', value: m.id };
+            });
+
+            var gapInfo = API_GAPS.stageReassign;
+            var stageId = stageData.stageId || (stageData.stage && stageData.stage.id);
+
+            return h('div', { key: idx, className: 'tracker-timeline-item' },
+              h('div', { className: 'tracker-timeline-dot ' + dotState }),
+              idx < stageNames.length - 1
+                ? h('div', { className: 'tracker-timeline-line ' + dotState })
+                : null,
+              h('div', { className: 'tracker-timeline-content' },
+                h('div', { className: 'tracker-timeline-name' + (dotState === 'active' ? ' active' : '') }, name),
+                h('div', { className: 'tracker-timeline-meta' },
+                  gapInfo.ready
+                    ? h(Select, {
+                        size: 'small',
+                        placeholder: 'Assign...',
+                        value: assignee ? assignee.id : undefined,
+                        style: { minWidth: 160, fontSize: 11 },
+                        showSearch: true,
+                        allowClear: true,
+                        options: memberOptions,
+                        onChange: function(userId) {
+                          if (!stageId) { antd.message.error('Missing stage ID'); return; }
+                          var body = { assignee: userId ? { id: userId } : null };
+                          apiPatch('api/bundles/' + bundle.id + '/stages/' + stageId, body)
+                            .then(function(resp) {
+                              if (resp && resp.assignee) {
+                                stageData.assignee = resp.assignee;
+                              } else if (!userId) {
+                                stageData.assignee = null;
+                              }
+                              if (resp && resp.stage && resp.stage.policyVersionId) {
+                                bundle._policyVersionId = resp.stage.policyVersionId;
+                              }
+                              if (resp.verified === true) {
+                                antd.message.success('Stage reassigned \u2014 verified in Domino');
+                              } else if (resp.verified === false) {
+                                var actualName = resp.actualAssignee ? (resp.actualAssignee.name || resp.actualAssignee.id) : 'nobody';
+                                antd.notification.warning({
+                                  message: 'Assignment may not have saved',
+                                  description: 'Domino accepted the request but the read-back shows the stage is still assigned to ' + actualName + '. Try refreshing.',
+                                  duration: 10,
+                                });
+                              } else {
+                                antd.message.success('Stage reassigned (verification pending)');
+                              }
+                            })
+                            .catch(function(err) {
+                              var detail = err.message || String(err);
+                              antd.notification.error({
+                                message: 'Reassignment failed',
+                                description: 'Could not reassign stage. ' + detail,
+                                duration: 8,
+                              });
+                            });
+                        },
+                        optionFilterProp: 'label',
+                      })
+                    : assigneeName
+                      ? h('span', { style: { fontSize: 12, color: '#2E2E38', fontWeight: 500 } }, assigneeName)
+                      : h('span', { style: { fontSize: 12, color: '#B0B0C0', fontStyle: 'italic' } }, 'Unassigned'),
+                  h('span', { className: 'tracker-stage-badge ' + dotState },
+                    dotState === 'completed' ? 'Done' : dotState === 'active' ? 'Current' : 'Pending'
+                  )
+                )
+              )
+            );
+          })
+        )
+      : null,
 
     // Approvals
     bundle._approvals && bundle._approvals.length > 0
@@ -4105,6 +3896,50 @@ function DetailDrawer(props) {
               h('span', { className: 'detail-field-label' }, g.name),
               h('span', { className: 'detail-field-value' },
                 h(Tag, { color: g.isOpen ? 'success' : 'error' }, g.isOpen ? 'Open' : 'Closed')
+              )
+            );
+          })
+        )
+      : null,
+
+    // Attachments
+    bundle._attachments && bundle._attachments.length > 0
+      ? h('div', { className: 'detail-section' },
+          h('div', { className: 'detail-section-title' }, 'Attachments (' + bundle._attachments.length + ')'),
+          bundle._attachments.map(function(att, i) {
+            var id = att.identifier || {};
+            var fname = id.filename || id.name || 'Unnamed';
+            var typeLabels = { DatasetSnapshotFile: 'Dataset Snapshot', NetAppVolumeSnapshotFile: 'NetApp Volume', FlowArtifact: 'Flow Artifact', ModelVersion: 'Model Version' };
+            var typeColors = { DatasetSnapshotFile: 'blue', Report: 'green', ModelVersion: 'purple', Endpoint: 'orange', FlowArtifact: 'cyan', NetAppVolumeSnapshotFile: 'default' };
+            var typeLabel = typeLabels[att.type] || (att.type || '').replace(/([A-Z])/g, ' $1').trim();
+            var explorerLink = deUrl && isDataExplorerFile(fname) ? buildDataExplorerUrl(deUrl, att) : null;
+            var explorerPath = explorerLink ? buildDataExplorerPath(att) : null;
+            var deIcon2 = icons && icons.TableOutlined ? h(icons.TableOutlined, { style: { fontSize: 12, marginRight: 4 } }) : null;
+            var ver = id.snapshotVersion;
+            var staleness = att._staleness;
+
+            return h('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid #F5F5F8' } },
+              h(Tag, { color: typeColors[att.type] || 'default', style: { fontSize: 10, flexShrink: 0 } }, typeLabel),
+              h('div', { style: { flex: 1, minWidth: 0 } },
+                explorerLink
+                  ? h(Tooltip, { title: 'Open in Data Explorer: ' + explorerPath },
+                      h('a', {
+                        href: explorerLink,
+                        onClick: function(e) { openDataExplorer(explorerLink, explorerPath, e); },
+                        style: { fontSize: 13, color: '#0070CC', cursor: 'pointer', fontWeight: 500, display: 'inline-flex', alignItems: 'center' },
+                      }, deIcon2, fname)
+                    )
+                  : dominoUrl
+                    ? h('a', { href: dominoUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 13, color: '#543FDE', fontWeight: 500 } }, fname)
+                    : h('span', { style: { fontSize: 13, fontWeight: 500 } }, fname),
+                ver != null
+                  ? h('span', { style: { fontSize: 11, color: '#8F8FA3', marginLeft: 6 } },
+                      staleness && staleness.isStale
+                        ? h(Tooltip, { title: 'Outdated: v' + staleness.currentVersion + ' attached, v' + staleness.latestVersion + ' available' },
+                            h('span', { style: { color: '#D4380D' } }, 'v' + ver + ' \u26A0'))
+                        : 'v' + ver
+                    )
+                  : null
               )
             );
           })
@@ -8618,6 +8453,8 @@ function App() {
         visible: drawerOpen,
         onClose: function() { setDrawerOpen(false); },
         terms: terms,
+        dataExplorerUrl: dataExplorerUrl,
+        projectMembersCache: projectMembersCache,
       })
     )
   );
