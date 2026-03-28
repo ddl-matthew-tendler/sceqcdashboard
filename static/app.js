@@ -108,7 +108,6 @@ function openDataExplorer(url, path, e) {
 // lower version is flagged as stale.
 
 function computeSnapshotStaleness(allAttachments) {
-  console.log('[Staleness] computeSnapshotStaleness called with', allAttachments.length, 'attachments');
   // Phase 1: Build version index — find max version per source
   var datasetMaxVersions = {};   // key: datasetId || datasetName → { maxVersion, maxSnapshotTime, latestBundleId }
   var volumeMaxVersions = {};    // key: volumeId || volumeName → { maxVersion, maxSnapshotTime, latestBundleId }
@@ -183,8 +182,6 @@ function computeSnapshotStaleness(allAttachments) {
     }
   });
 
-  var staleCount = allAttachments.filter(function(a) { return a._staleness && a._staleness.isStale; }).length;
-  console.log('[Staleness] Result:', staleCount, 'stale of', allAttachments.length, '. DS keys:', Object.keys(datasetMaxVersions).length, 'Vol keys:', Object.keys(volumeMaxVersions).length);
   return { datasetMaxVersions: datasetMaxVersions, volumeMaxVersions: volumeMaxVersions };
 }
 
@@ -2275,7 +2272,12 @@ function BulkActionBar(props) {
     if (validTargets.length === 0) return;
 
     setBulkLoading(true);
-    var body = { assignee: { id: bulkAssignee } };
+    var bulkMember = null;
+    Object.keys(pmc).some(function(pid) {
+      bulkMember = (pmc[pid] || []).find(function(m) { return m.id === bulkAssignee; });
+      return !!bulkMember;
+    });
+    var body = { assignee: { id: bulkAssignee, userName: bulkMember ? bulkMember.userName : undefined } };
     var promises = validTargets.map(function(t) {
       return apiPatch('api/bundles/' + t.bundleId + '/stages/' + t.stageId, body)
         .then(function(resp) {
@@ -3359,7 +3361,8 @@ function QCTrackerPage(props) {
             onClick: function(e) { e.stopPropagation(); },
             onChange: function(userId) {
               if (!currentStageId) { antd.message.error('Missing stage ID'); return; }
-              var body = { assignee: userId ? { id: userId } : null };
+              var memberMatch = userId ? members.find(function(mm) { return mm.id === userId; }) : null;
+              var body = { assignee: userId ? { id: userId, userName: memberMatch ? memberMatch.userName : undefined } : null };
               apiPatch('api/bundles/' + record.id + '/stages/' + currentStageId, body)
                 .then(function(resp) {
                   // Update local state with full assignee info
@@ -3698,6 +3701,10 @@ function DetailDrawer(props) {
   var deUrl = props.dataExplorerUrl || null;
   var projectMembersCache = props.projectMembersCache || {};
 
+  var _view = useState('stage-timeline');
+  var activeView = _view[0];
+  var setActiveView = _view[1];
+
   if (!bundle) return null;
 
   var stageIdx = deriveBundleStageIndex(bundle);
@@ -3705,246 +3712,228 @@ function DetailDrawer(props) {
   var stageNames = getBundleStageNames(bundle);
   var isComplete = bundle.state === 'Complete';
 
+  // Counts for dropdown labels
+  var findingsCount = bundle._findings ? bundle._findings.length : 0;
+  var approvalsCount = bundle._approvals ? bundle._approvals.length : 0;
+  var gatesCount = bundle._gates ? bundle._gates.length : 0;
+  var attachCount = bundle._attachments ? bundle._attachments.length : 0;
+  var staleCount = countStaleAttachments(bundle);
+
+  var viewOptions = [
+    { value: 'stage-timeline', label: 'Stage Timeline' },
+    { value: 'overview', label: B + ' Overview' },
+    { value: 'findings', label: 'Findings' + (findingsCount > 0 ? ' (' + findingsCount + ')' : '') },
+    { value: 'approvals', label: 'Approvals' + (approvalsCount > 0 ? ' (' + approvalsCount + ')' : '') },
+    { value: 'gates', label: 'Gates' + (gatesCount > 0 ? ' (' + gatesCount + ')' : '') },
+    { value: 'attachments', label: 'Attachments' + (attachCount > 0 ? ' (' + attachCount + ')' : '') + (staleCount > 0 ? ' \u26A0' : '') },
+  ];
+
+  // ── View: Stage Timeline ────────────────────────────────────
+  function renderStageTimeline() {
+    if (stageNames.length === 0) return h(Empty, { description: 'No stages defined' });
+    return h('div', null,
+      h('div', { className: 'tracker-timeline-legend', style: { marginBottom: 12 } },
+        h('span', { className: 'tracker-timeline-legend-item' }, h('span', { className: 'tracker-timeline-dot completed', style: { width: 8, height: 8, display: 'inline-block', verticalAlign: 'middle', marginRight: 4 } }), 'Complete'),
+        h('span', { className: 'tracker-timeline-legend-item' }, h('span', { className: 'tracker-timeline-dot active', style: { width: 8, height: 8, display: 'inline-block', verticalAlign: 'middle', marginRight: 4, boxShadow: 'none' } }), 'Current'),
+        h('span', { className: 'tracker-timeline-legend-item' }, h('span', { className: 'tracker-timeline-dot pending', style: { width: 8, height: 8, display: 'inline-block', verticalAlign: 'middle', marginRight: 4 } }), 'Pending')
+      ),
+      stageNames.map(function(name, idx) {
+        var dotState;
+        if (isComplete || idx < stageIdx) dotState = 'completed';
+        else if (idx === stageIdx) dotState = 'active';
+        else dotState = 'pending';
+        var stageData = bundle.stages[idx] || {};
+        var assignee = stageData.assignee;
+        var assigneeName = assignee ? assignee.name : null;
+        var members = projectMembersCache[bundle.projectId] || [];
+        var memberOptions = members.map(function(m) {
+          return { label: (m.firstName || '') + ' ' + (m.lastName || '') + ' (' + m.userName + ')', value: m.id };
+        });
+        var gapInfo = API_GAPS.stageReassign;
+        var stageId = stageData.stageId || (stageData.stage && stageData.stage.id);
+        return h('div', { key: idx, className: 'tracker-timeline-item' },
+          h('div', { className: 'tracker-timeline-dot ' + dotState }),
+          idx < stageNames.length - 1 ? h('div', { className: 'tracker-timeline-line ' + dotState }) : null,
+          h('div', { className: 'tracker-timeline-content' },
+            h('div', { className: 'tracker-timeline-name' + (dotState === 'active' ? ' active' : '') }, name),
+            h('div', { className: 'tracker-timeline-meta' },
+              gapInfo.ready
+                ? h(Select, {
+                    size: 'small', placeholder: 'Assign...', value: assignee ? assignee.id : undefined,
+                    style: { minWidth: 160, fontSize: 11 }, showSearch: true, allowClear: true, options: memberOptions,
+                    onChange: function(userId) {
+                      if (!stageId) { antd.message.error('Missing stage ID'); return; }
+                      var memberObj = userId ? members.find(function(m) { return m.id === userId; }) : null;
+                      apiPatch('api/bundles/' + bundle.id + '/stages/' + stageId, { assignee: userId ? { id: userId, userName: memberObj ? memberObj.userName : undefined } : null })
+                        .then(function(resp) {
+                          if (resp && resp.assignee) { stageData.assignee = resp.assignee; } else if (!userId) { stageData.assignee = null; }
+                          if (resp && resp.stage && resp.stage.policyVersionId) { bundle._policyVersionId = resp.stage.policyVersionId; }
+                          if (resp.verified === true) { antd.message.success('Stage reassigned \u2014 verified'); }
+                          else if (resp.verified === false) { antd.notification.warning({ message: 'Assignment may not have saved', description: 'Read-back mismatch. Try refreshing.', duration: 10 }); }
+                          else { antd.message.success('Stage reassigned'); }
+                        })
+                        .catch(function(err) { antd.notification.error({ message: 'Reassignment failed', description: err.message || String(err), duration: 8 }); });
+                    },
+                    optionFilterProp: 'label',
+                  })
+                : assigneeName
+                  ? h('span', { style: { fontSize: 12, color: '#2E2E38', fontWeight: 500 } }, assigneeName)
+                  : h('span', { style: { fontSize: 12, color: '#B0B0C0', fontStyle: 'italic' } }, 'Unassigned'),
+              h('span', { className: 'tracker-stage-badge ' + dotState }, dotState === 'completed' ? 'Done' : dotState === 'active' ? 'Current' : 'Pending')
+            )
+          )
+        );
+      })
+    );
+  }
+
+  // ── View: Overview ──────────────────────────────────────────
+  function renderOverview() {
+    return h('div', null,
+      h('div', { className: 'detail-field' }, h('span', { className: 'detail-field-label' }, 'State'), h('span', { className: 'detail-field-value' }, h(Tag, { color: stateColor(bundle.state) }, bundle.state))),
+      h('div', { className: 'detail-field' }, h('span', { className: 'detail-field-label' }, 'Project'), h('span', { className: 'detail-field-value' }, bundle.projectName || '\u2013')),
+      h('div', { className: 'detail-field' }, h('span', { className: 'detail-field-label' }, P), h('span', { className: 'detail-field-value' }, bundle.policyName || '\u2013')),
+      h('div', { className: 'detail-field' }, h('span', { className: 'detail-field-label' }, 'Current Stage'), h('span', { className: 'detail-field-value' }, bundle.stage || '\u2013')),
+      h('div', { className: 'detail-field' }, h('span', { className: 'detail-field-label' }, 'Progress'), h('span', { className: 'detail-field-value' }, h(Progress, { percent: getBundleProgress(bundle), size: 'small', strokeColor: '#543FDE' }))),
+      bundle.stageAssignee && bundle.stageAssignee.name
+        ? h('div', { className: 'detail-field' }, h('span', { className: 'detail-field-label' }, 'Stage Owner'), h('span', { className: 'detail-field-value' }, bundle.stageAssignee.name))
+        : null,
+      h('div', { className: 'detail-field' }, h('span', { className: 'detail-field-label' }, 'Created'), h('span', { className: 'detail-field-value' }, bundle.createdAt ? dayjs(bundle.createdAt).format('MMM D, YYYY') : '\u2013')),
+      bundle.createdBy
+        ? h('div', { className: 'detail-field' }, h('span', { className: 'detail-field-label' }, 'Created by'), h('span', { className: 'detail-field-value' }, bundle.createdBy.name || bundle.createdBy.userName || '\u2013'))
+        : null,
+      bundle.updatedAt
+        ? h('div', { className: 'detail-field' }, h('span', { className: 'detail-field-label' }, 'Last updated'), h('span', { className: 'detail-field-value' }, dayjs(bundle.updatedAt).fromNow()))
+        : null
+    );
+  }
+
+  // ── View: Findings ──────────────────────────────────────────
+  function renderFindings() {
+    if (findingsCount === 0) return h(Empty, { description: 'No findings recorded.' });
+    var fpUrl = getDominoBundleUrl(bundle, { findingsPage: true });
+    return h('div', null,
+      fpUrl ? h('div', { style: { marginBottom: 12, textAlign: 'right' } }, h('a', { href: fpUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 11, color: '#543FDE' } }, 'View all in Domino \u2197')) : null,
+      bundle._findings.map(function(f, i) {
+        var fUrl = f.id ? getDominoBundleUrl(bundle, { findingId: f.id }) : null;
+        return h('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid #F5F5F8' } },
+          h(Tag, { color: severityColor(f.severity), style: { color: '#fff', border: 'none', minWidth: 28, textAlign: 'center' } }, f.severity),
+          fUrl
+            ? h('a', { href: fUrl, target: '_blank', rel: 'noopener noreferrer', style: { flex: 1, fontSize: 13, color: '#543FDE', textDecoration: 'none' }, title: 'View finding in Domino' }, f.name)
+            : h('span', { style: { flex: 1, fontSize: 13 } }, f.name),
+          findingStatusTag(f.status)
+        );
+      })
+    );
+  }
+
+  // ── View: Approvals ─────────────────────────────────────────
+  function renderApprovals() {
+    if (approvalsCount === 0) return h(Empty, { description: 'No approvals configured.' });
+    return h('div', null,
+      bundle._approvals.map(function(a, i) {
+        return h('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: '1px solid #F5F5F8' } },
+          h('span', { style: { background: approvalStatusColor(a.status), width: 10, height: 10, borderRadius: '50%', flexShrink: 0 } }),
+          h('div', { style: { flex: 1, minWidth: 0 } },
+            h('div', { style: { fontWeight: 500, fontSize: 13 } }, a.name),
+            h('div', { style: { fontSize: 12, color: '#8F8FA3', marginTop: 2 } }, approvalStatusLabel(a.status)),
+            a.approvers && a.approvers.length > 0
+              ? h('div', { style: { fontSize: 11, color: '#65657B', marginTop: 2 } }, a.approvers.map(function(ap) { return ap.name; }).join(', '))
+              : null
+          ),
+          a.updatedAt ? h('span', { style: { fontSize: 11, color: '#B0B0C0', flexShrink: 0 } }, dayjs(a.updatedAt).fromNow()) : null
+        );
+      })
+    );
+  }
+
+  // ── View: Gates ─────────────────────────────────────────────
+  function renderGates() {
+    if (gatesCount === 0) return h(Empty, { description: 'No quality gates defined.' });
+    return h('div', null,
+      bundle._gates.map(function(g, i) {
+        return h('div', { key: i, className: 'detail-field', style: { padding: '8px 0', borderBottom: '1px solid #F5F5F8' } },
+          h('span', { className: 'detail-field-label' }, g.name),
+          h('span', { className: 'detail-field-value' }, h(Tag, { color: g.isOpen ? 'success' : 'error' }, g.isOpen ? 'Open' : 'Closed'))
+        );
+      })
+    );
+  }
+
+  // ── View: Attachments ───────────────────────────────────────
+  function renderAttachments() {
+    if (attachCount === 0) return h(Empty, { description: 'No attachments linked.' });
+    return h('div', null,
+      staleCount > 0 ? h(Alert, { type: 'warning', showIcon: true, style: { marginBottom: 12, fontSize: 12 }, message: staleCount + ' snapshot' + (staleCount > 1 ? 's' : '') + ' may be outdated' }) : null,
+      bundle._attachments.map(function(att, i) {
+        var id = att.identifier || {};
+        var fname = id.filename || id.name || 'Unnamed';
+        var typeLabels = { DatasetSnapshotFile: 'Dataset Snapshot', NetAppVolumeSnapshotFile: 'NetApp Volume', FlowArtifact: 'Flow Artifact', ModelVersion: 'Model Version' };
+        var typeColors = { DatasetSnapshotFile: 'blue', Report: 'green', ModelVersion: 'purple', Endpoint: 'orange', FlowArtifact: 'cyan', NetAppVolumeSnapshotFile: 'default' };
+        var typeLabel = typeLabels[att.type] || (att.type || '').replace(/([A-Z])/g, ' $1').trim();
+        var explorerLink = deUrl && isDataExplorerFile(fname) ? buildDataExplorerUrl(deUrl, att) : null;
+        var explorerPath = explorerLink ? buildDataExplorerPath(att) : null;
+        var ver = id.snapshotVersion;
+        var staleness = att._staleness;
+        return h('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid #F5F5F8' } },
+          h(Tag, { color: typeColors[att.type] || 'default', style: { fontSize: 10, flexShrink: 0 } }, typeLabel),
+          h('div', { style: { flex: 1, minWidth: 0 } },
+            explorerLink
+              ? h(Tooltip, { title: 'Open in Data Explorer: ' + explorerPath },
+                  h('a', { href: explorerLink, onClick: function(e) { openDataExplorer(explorerLink, explorerPath, e); }, style: { fontSize: 13, color: '#0070CC', cursor: 'pointer', fontWeight: 500 } }, fname))
+              : dominoUrl
+                ? h('a', { href: dominoUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 13, color: '#543FDE', fontWeight: 500 } }, fname)
+                : h('span', { style: { fontSize: 13, fontWeight: 500 } }, fname),
+            ver != null
+              ? h('span', { style: { fontSize: 11, color: '#8F8FA3', marginLeft: 6 } },
+                  staleness && staleness.isStale
+                    ? h(Tooltip, { title: 'Outdated: v' + staleness.currentVersion + ' attached, v' + staleness.latestVersion + ' available' }, h('span', { style: { color: '#D4380D' } }, 'v' + ver + ' \u26A0'))
+                    : 'v' + ver)
+              : null
+          ),
+          att.createdBy ? h('span', { style: { fontSize: 11, color: '#B0B0C0', flexShrink: 0 } }, att.createdBy.name || att.createdBy.userName) : null
+        );
+      })
+    );
+  }
+
+  // ── Render active view ──────────────────────────────────────
+  function renderActiveView() {
+    switch (activeView) {
+      case 'stage-timeline': return renderStageTimeline();
+      case 'overview': return renderOverview();
+      case 'findings': return renderFindings();
+      case 'approvals': return renderApprovals();
+      case 'gates': return renderGates();
+      case 'attachments': return renderAttachments();
+      default: return renderStageTimeline();
+    }
+  }
+
   return h(Drawer, {
-    title: bundle.name,
+    title: h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2 } },
+      h('span', null, bundle.name),
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 } },
+        h(Tag, { color: stateColor(bundle.state), style: { fontSize: 11, margin: 0 } }, bundle.state),
+        h('span', { style: { fontSize: 12, color: '#8F8FA3', fontWeight: 400 } }, bundle.projectName || '')
+      )
+    ),
     open: visible,
     onClose: onClose,
     width: 480,
+    styles: { body: { padding: 0, display: 'flex', flexDirection: 'column', height: '100%' } },
     extra: dominoUrl
-      ? h(Button, {
-          type: 'primary', size: 'small',
-          onClick: function() { window.open(dominoUrl, '_blank'); },
-        }, '\u2197 View in Domino')
+      ? h(Button, { type: 'primary', size: 'small', onClick: function() { window.open(dominoUrl, '_blank'); } }, '\u2197 View in Domino')
       : null,
   },
-    // Overview
-    h('div', { className: 'detail-section' },
-      h('div', { className: 'detail-section-title' }, B + ' Overview'),
-      h('div', { className: 'detail-field' },
-        h('span', { className: 'detail-field-label' }, 'State'),
-        h('span', { className: 'detail-field-value' }, h(Tag, { color: stateColor(bundle.state) }, bundle.state))
-      ),
-      h('div', { className: 'detail-field' },
-        h('span', { className: 'detail-field-label' }, 'Project'),
-        h('span', { className: 'detail-field-value' }, bundle.projectName || '\u2013')
-      ),
-      h('div', { className: 'detail-field' },
-        h('span', { className: 'detail-field-label' }, P),
-        h('span', { className: 'detail-field-value' }, bundle.policyName || '\u2013')
-      ),
-      h('div', { className: 'detail-field' },
-        h('span', { className: 'detail-field-label' }, 'Created'),
-        h('span', { className: 'detail-field-value' }, bundle.createdAt ? dayjs(bundle.createdAt).format('MMM D, YYYY') : '\u2013')
-      ),
-      bundle.createdBy
-        ? h('div', { className: 'detail-field' },
-            h('span', { className: 'detail-field-label' }, 'Created by'),
-            h('span', { className: 'detail-field-value' }, bundle.createdBy.name || bundle.createdBy.userName || '\u2013')
-          )
-        : null,
-      bundle.updatedAt
-        ? h('div', { className: 'detail-field' },
-            h('span', { className: 'detail-field-label' }, 'Last updated'),
-            h('span', { className: 'detail-field-value' }, dayjs(bundle.updatedAt).fromNow())
-          )
-        : null
+    // View selector dropdown
+    h('div', { style: { padding: '12px 24px', borderBottom: '1px solid #E0E0E0', flexShrink: 0 } },
+      h(Select, { value: activeView, onChange: function(v) { setActiveView(v); }, options: viewOptions, style: { width: '100%' }, size: 'middle' })
     ),
-
-    // Stage Timeline
-    stageNames.length > 0
-      ? h('div', { className: 'detail-section' },
-          h('div', { className: 'detail-section-title' }, 'Stage Timeline'),
-          h('div', { className: 'tracker-timeline-legend', style: { marginBottom: 8 } },
-            h('span', { className: 'tracker-timeline-legend-item' }, h('span', { className: 'tracker-timeline-dot completed', style: { width: 8, height: 8, display: 'inline-block', verticalAlign: 'middle', marginRight: 4 } }), 'Complete'),
-            h('span', { className: 'tracker-timeline-legend-item' }, h('span', { className: 'tracker-timeline-dot active', style: { width: 8, height: 8, display: 'inline-block', verticalAlign: 'middle', marginRight: 4, boxShadow: 'none' } }), 'Current'),
-            h('span', { className: 'tracker-timeline-legend-item' }, h('span', { className: 'tracker-timeline-dot pending', style: { width: 8, height: 8, display: 'inline-block', verticalAlign: 'middle', marginRight: 4 } }), 'Pending')
-          ),
-          stageNames.map(function(name, idx) {
-            var dotState;
-            if (isComplete || idx < stageIdx) dotState = 'completed';
-            else if (idx === stageIdx) dotState = 'active';
-            else dotState = 'pending';
-
-            var stageData = bundle.stages[idx] || {};
-            var assignee = stageData.assignee;
-            var assigneeName = assignee ? assignee.name : null;
-
-            var members = projectMembersCache[bundle.projectId] || [];
-            var memberOptions = members.map(function(m) {
-              return { label: (m.firstName || '') + ' ' + (m.lastName || '') + ' (' + m.userName + ')', value: m.id };
-            });
-
-            var gapInfo = API_GAPS.stageReassign;
-            var stageId = stageData.stageId || (stageData.stage && stageData.stage.id);
-
-            return h('div', { key: idx, className: 'tracker-timeline-item' },
-              h('div', { className: 'tracker-timeline-dot ' + dotState }),
-              idx < stageNames.length - 1
-                ? h('div', { className: 'tracker-timeline-line ' + dotState })
-                : null,
-              h('div', { className: 'tracker-timeline-content' },
-                h('div', { className: 'tracker-timeline-name' + (dotState === 'active' ? ' active' : '') }, name),
-                h('div', { className: 'tracker-timeline-meta' },
-                  gapInfo.ready
-                    ? h(Select, {
-                        size: 'small',
-                        placeholder: 'Assign...',
-                        value: assignee ? assignee.id : undefined,
-                        style: { minWidth: 160, fontSize: 11 },
-                        showSearch: true,
-                        allowClear: true,
-                        options: memberOptions,
-                        onChange: function(userId) {
-                          if (!stageId) { antd.message.error('Missing stage ID'); return; }
-                          var body = { assignee: userId ? { id: userId } : null };
-                          apiPatch('api/bundles/' + bundle.id + '/stages/' + stageId, body)
-                            .then(function(resp) {
-                              if (resp && resp.assignee) {
-                                stageData.assignee = resp.assignee;
-                              } else if (!userId) {
-                                stageData.assignee = null;
-                              }
-                              if (resp && resp.stage && resp.stage.policyVersionId) {
-                                bundle._policyVersionId = resp.stage.policyVersionId;
-                              }
-                              if (resp.verified === true) {
-                                antd.message.success('Stage reassigned \u2014 verified in Domino');
-                              } else if (resp.verified === false) {
-                                var actualName = resp.actualAssignee ? (resp.actualAssignee.name || resp.actualAssignee.id) : 'nobody';
-                                antd.notification.warning({
-                                  message: 'Assignment may not have saved',
-                                  description: 'Domino accepted the request but the read-back shows the stage is still assigned to ' + actualName + '. Try refreshing.',
-                                  duration: 10,
-                                });
-                              } else {
-                                antd.message.success('Stage reassigned (verification pending)');
-                              }
-                            })
-                            .catch(function(err) {
-                              var detail = err.message || String(err);
-                              antd.notification.error({
-                                message: 'Reassignment failed',
-                                description: 'Could not reassign stage. ' + detail,
-                                duration: 8,
-                              });
-                            });
-                        },
-                        optionFilterProp: 'label',
-                      })
-                    : assigneeName
-                      ? h('span', { style: { fontSize: 12, color: '#2E2E38', fontWeight: 500 } }, assigneeName)
-                      : h('span', { style: { fontSize: 12, color: '#B0B0C0', fontStyle: 'italic' } }, 'Unassigned'),
-                  h('span', { className: 'tracker-stage-badge ' + dotState },
-                    dotState === 'completed' ? 'Done' : dotState === 'active' ? 'Current' : 'Pending'
-                  )
-                )
-              )
-            );
-          })
-        )
-      : null,
-
-    // Approvals
-    bundle._approvals && bundle._approvals.length > 0
-      ? h('div', { className: 'detail-section' },
-          h('div', { className: 'detail-section-title' }, 'Approvals (' + bundle._approvals.length + ')'),
-          bundle._approvals.map(function(a, i) {
-            return h('div', { key: i, className: 'approval-item', style: { padding: '8px 0' } },
-              h('div', { className: 'approval-dot ' + (a.status || '').toLowerCase().replace(/\s+/g, '').replace('pending', 'pending').replace('approved', 'approved').replace('conditionallyapproved', 'conditional') }),
-              h('div', { className: 'approval-info' },
-                h('div', { className: 'approval-name' }, a.name),
-                h('div', { className: 'approval-meta' }, approvalStatusLabel(a.status))
-              )
-            );
-          })
-        )
-      : null,
-
-    // Findings summary
-    bundle._findings && bundle._findings.length > 0
-      ? h('div', { className: 'detail-section' },
-          h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' } },
-            h('div', { className: 'detail-section-title' }, 'Findings (' + bundle._findings.length + ')'),
-            (function() {
-              var fpUrl = getDominoBundleUrl(bundle, { findingsPage: true });
-              return fpUrl ? h('a', { href: fpUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 11, color: '#543FDE' } }, 'View all in Domino \u2197') : null;
-            })()
-          ),
-          bundle._findings.slice(0, 5).map(function(f, i) {
-            var fUrl = f.id ? getDominoBundleUrl(bundle, { findingId: f.id }) : null;
-            return h('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid #F5F5F8' } },
-              h(Tag, { color: severityColor(f.severity), style: { color: '#fff', border: 'none', minWidth: 28, textAlign: 'center' } }, f.severity),
-              fUrl
-                ? h('a', { href: fUrl, target: '_blank', rel: 'noopener noreferrer', style: { flex: 1, fontSize: 13, color: '#543FDE', textDecoration: 'none' }, title: 'View finding in Domino' }, f.name)
-                : h('span', { style: { flex: 1, fontSize: 13 } }, f.name),
-              findingStatusTag(f.status)
-            );
-          }),
-          bundle._findings.length > 5
-            ? h('div', { style: { fontSize: 12, color: '#8F8FA3', padding: '8px 0' } },
-                '+ ' + (bundle._findings.length - 5) + ' more findings')
-            : null
-        )
-      : null,
-
-    // Gates
-    bundle._gates && bundle._gates.length > 0
-      ? h('div', { className: 'detail-section' },
-          h('div', { className: 'detail-section-title' }, 'Gates (' + bundle._gates.length + ')'),
-          bundle._gates.map(function(g, i) {
-            return h('div', { key: i, className: 'detail-field' },
-              h('span', { className: 'detail-field-label' }, g.name),
-              h('span', { className: 'detail-field-value' },
-                h(Tag, { color: g.isOpen ? 'success' : 'error' }, g.isOpen ? 'Open' : 'Closed')
-              )
-            );
-          })
-        )
-      : null,
-
-    // Attachments
-    bundle._attachments && bundle._attachments.length > 0
-      ? h('div', { className: 'detail-section' },
-          h('div', { className: 'detail-section-title' }, 'Attachments (' + bundle._attachments.length + ')'),
-          bundle._attachments.map(function(att, i) {
-            var id = att.identifier || {};
-            var fname = id.filename || id.name || 'Unnamed';
-            var typeLabels = { DatasetSnapshotFile: 'Dataset Snapshot', NetAppVolumeSnapshotFile: 'NetApp Volume', FlowArtifact: 'Flow Artifact', ModelVersion: 'Model Version' };
-            var typeColors = { DatasetSnapshotFile: 'blue', Report: 'green', ModelVersion: 'purple', Endpoint: 'orange', FlowArtifact: 'cyan', NetAppVolumeSnapshotFile: 'default' };
-            var typeLabel = typeLabels[att.type] || (att.type || '').replace(/([A-Z])/g, ' $1').trim();
-            var explorerLink = deUrl && isDataExplorerFile(fname) ? buildDataExplorerUrl(deUrl, att) : null;
-            var explorerPath = explorerLink ? buildDataExplorerPath(att) : null;
-            var deIcon2 = icons && icons.TableOutlined ? h(icons.TableOutlined, { style: { fontSize: 12, marginRight: 4 } }) : null;
-            var ver = id.snapshotVersion;
-            var staleness = att._staleness;
-
-            return h('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid #F5F5F8' } },
-              h(Tag, { color: typeColors[att.type] || 'default', style: { fontSize: 10, flexShrink: 0 } }, typeLabel),
-              h('div', { style: { flex: 1, minWidth: 0 } },
-                explorerLink
-                  ? h(Tooltip, { title: 'Open in Data Explorer: ' + explorerPath },
-                      h('a', {
-                        href: explorerLink,
-                        onClick: function(e) { openDataExplorer(explorerLink, explorerPath, e); },
-                        style: { fontSize: 13, color: '#0070CC', cursor: 'pointer', fontWeight: 500, display: 'inline-flex', alignItems: 'center' },
-                      }, deIcon2, fname)
-                    )
-                  : dominoUrl
-                    ? h('a', { href: dominoUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 13, color: '#543FDE', fontWeight: 500 } }, fname)
-                    : h('span', { style: { fontSize: 13, fontWeight: 500 } }, fname),
-                ver != null
-                  ? h('span', { style: { fontSize: 11, color: '#8F8FA3', marginLeft: 6 } },
-                      staleness && staleness.isStale
-                        ? h(Tooltip, { title: 'Outdated: v' + staleness.currentVersion + ' attached, v' + staleness.latestVersion + ' available' },
-                            h('span', { style: { color: '#D4380D' } }, 'v' + ver + ' \u26A0'))
-                        : 'v' + ver
-                    )
-                  : null
-              )
-            );
-          })
-        )
-      : null
+    // Active view content
+    h('div', { style: { padding: '16px 24px', flex: 1, overflow: 'auto' } },
+      renderActiveView()
+    )
   );
 }
 
@@ -4576,7 +4565,12 @@ function StageAssignmentsPage(props) {
     // Find the selected stage rows and call PATCH for each
     var selectedStages = allStages.filter(function(r) { return selectedRowKeys.indexOf(r.key) >= 0; });
     var promises = selectedStages.map(function(row) {
-      return apiPatch('api/bundles/' + row.bundleId + '/stages/' + row.stageId, { assignee: { id: reassignTarget } })
+      var reassignMember = null;
+      Object.keys(projectMembersCache).some(function(pid) {
+        reassignMember = (projectMembersCache[pid] || []).find(function(m) { return m.userName === reassignTarget; });
+        return !!reassignMember;
+      });
+      return apiPatch('api/bundles/' + row.bundleId + '/stages/' + row.stageId, { assignee: { id: reassignMember ? reassignMember.id : reassignTarget, userName: reassignTarget } })
         .then(function(resp) {
           if (resp && resp.verified === false) {
             var actualName = resp.actualAssignee ? (resp.actualAssignee.name || resp.actualAssignee.id) : 'nobody';
@@ -8425,13 +8419,6 @@ function App() {
               )
             )
           ),
-          activePage === 'metrics' && hasScopeFilters
-            ? h(Alert, {
-                type: 'info', showIcon: true,
-                message: 'Team Metrics are scoped to the current filter. Some team members may have work outside this scope.',
-                style: { marginBottom: 12 },
-              })
-            : null,
           loading && bundles.length === 0
             ? h('div', { className: 'page-container' },
                 h(antd.Skeleton, { active: true, title: { width: '30%' }, paragraph: { rows: 0 }, style: { marginBottom: 16 } }),
