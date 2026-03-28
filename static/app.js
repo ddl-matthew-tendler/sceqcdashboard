@@ -2394,64 +2394,95 @@ function QCTrackerExpandedRow(props) {
                 )
               : h('div', { className: 'tracker-empty-state' }, 'No quality gates defined.')
           },
-          { key: 'attachments', label: 'Attachments' + (bundle._attachments && bundle._attachments.length > 0 ? ' (' + bundle._attachments.length + ')' : ''),
+          { key: 'attachments', label: (function() {
+              var atLabel = 'Attachments';
+              if (bundle._attachments && bundle._attachments.length > 0) atLabel += ' (' + bundle._attachments.length + ')';
+              var inlineStale = countStaleAttachments(bundle);
+              if (inlineStale > 0) atLabel += ' \u26A0';
+              return atLabel;
+            })(),
             children: bundle._attachments && bundle._attachments.length > 0
-              ? h(Table, {
-                  dataSource: bundle._attachments,
-                  rowKey: 'id',
-                  size: 'small',
-                  pagination: false,
-                  style: { fontSize: 11 },
-                  columns: [
-                    { title: 'File', key: 'filename', ellipsis: true,
-                      render: function(_, r) {
-                        var fname = r.identifier && r.identifier.filename;
-                        var name = r.identifier && r.identifier.name;
-                        var label = fname || name || 'Unknown';
-                        var deUrl = dataExplorerUrl && isDataExplorerFile(fname || name) ? buildDataExplorerUrl(dataExplorerUrl, r) : null;
-                        if (deUrl) {
-                          return h('span', { style: { display: 'flex', alignItems: 'center', gap: 4 } },
-                            h('a', {
-                              href: deUrl,
-                              target: '_blank',
-                              rel: 'noopener noreferrer',
-                              style: { fontWeight: 500, fontSize: 11, color: '#0070CC' },
-                              title: 'Open in Data Explorer',
-                            }, label),
-                            h(Tooltip, { title: 'Open in Data Explorer' },
-                              h('span', { style: { fontSize: 12, cursor: 'pointer' } }, '\uD83D\uDCCA')
-                            )
-                          );
+              ? h('div', null,
+                  countStaleAttachments(bundle) > 0
+                    ? h(Alert, { type: 'warning', showIcon: true, style: { marginBottom: 8, fontSize: 11 }, message: countStaleAttachments(bundle) + ' snapshot' + (countStaleAttachments(bundle) > 1 ? 's' : '') + ' outdated \u2014 newer versions exist on other ' + B.toLowerCase() + 's' })
+                    : null,
+                  h(Table, {
+                    dataSource: bundle._attachments,
+                    rowKey: 'id',
+                    size: 'small',
+                    pagination: false,
+                    style: { fontSize: 11 },
+                    rowClassName: function(r) { return r._staleness && r._staleness.isStale ? 'stale-row' : ''; },
+                    columns: [
+                      { title: 'File', key: 'filename', ellipsis: true,
+                        render: function(_, r) {
+                          var fname = r.identifier && r.identifier.filename;
+                          var name = r.identifier && r.identifier.name;
+                          var label = fname || name || 'Unknown';
+                          var deUrl = dataExplorerUrl && isDataExplorerFile(fname || name) ? buildDataExplorerUrl(dataExplorerUrl, r) : null;
+                          if (deUrl) {
+                            return h('span', { style: { display: 'flex', alignItems: 'center', gap: 4 } },
+                              h('a', {
+                                href: deUrl,
+                                target: '_blank',
+                                rel: 'noopener noreferrer',
+                                style: { fontWeight: 500, fontSize: 11, color: '#0070CC' },
+                                title: 'Open in Data Explorer',
+                              }, label),
+                              h(Tooltip, { title: 'Open in Data Explorer' },
+                                h('span', { style: { fontSize: 12, cursor: 'pointer' } }, '\uD83D\uDCCA')
+                              )
+                            );
+                          }
+                          if (!dominoUrl) return h('span', { style: { fontWeight: 500, fontSize: 11 } }, label);
+                          return h('a', {
+                            href: dominoUrl,
+                            target: '_blank',
+                            rel: 'noopener noreferrer',
+                            style: { fontWeight: 500, fontSize: 11, color: '#543FDE' },
+                            title: 'View in Domino',
+                          }, label);
                         }
-                        if (!dominoUrl) return h('span', { style: { fontWeight: 500, fontSize: 11 } }, label);
-                        return h('a', {
-                          href: dominoUrl,
-                          target: '_blank',
-                          rel: 'noopener noreferrer',
-                          style: { fontWeight: 500, fontSize: 11, color: '#543FDE' },
-                          title: 'View in Domino',
-                        }, label);
-                      }
-                    },
-                    { title: 'Type', dataIndex: 'type', key: 'type', width: 140,
-                      render: function(t) {
-                        var colors = { DatasetSnapshotFile: 'blue', Report: 'green', ModelVersion: 'purple', Endpoint: 'orange', FlowArtifact: 'cyan', NetAppVolumeSnapshotFile: 'default' };
-                        return h(Tag, { color: colors[t] || 'default', style: { fontSize: 10 } }, (t || '').replace(/([A-Z])/g, ' $1').trim());
-                      }
-                    },
-                    { title: 'Added by', key: 'addedBy', width: 130,
-                      render: function(_, r) {
-                        var name = r.createdBy && (r.createdBy.name || r.createdBy.userName);
-                        return h('span', { style: { fontSize: 10 } }, name || '\u2013');
-                      }
-                    },
-                    { title: 'Added', key: 'addedAt', width: 100,
-                      render: function(_, r) {
-                        return r.createdAt ? h('span', { style: { fontSize: 10, color: '#8F8FA3' } }, dayjs(r.createdAt).format('MMM D, YYYY')) : '\u2013';
-                      }
-                    },
-                  ],
-                })
+                      },
+                      { title: 'Type', dataIndex: 'type', key: 'type', width: 140,
+                        render: function(t) {
+                          var colors = { DatasetSnapshotFile: 'blue', Report: 'green', ModelVersion: 'purple', Endpoint: 'orange', FlowArtifact: 'cyan', NetAppVolumeSnapshotFile: 'default' };
+                          return h(Tag, { color: colors[t] || 'default', style: { fontSize: 10 } }, (t || '').replace(/([A-Z])/g, ' $1').trim());
+                        }
+                      },
+                      { title: 'Version', key: 'version', width: 90, align: 'center',
+                        render: function(_, r) {
+                          var ver = r.identifier && r.identifier.snapshotVersion;
+                          if (ver == null) return h('span', { style: { color: '#D1D1DB', fontSize: 10 } }, '\u2013');
+                          var s = r._staleness;
+                          if (s && s.isStale) {
+                            return h(Tooltip, { title: 'v' + s.currentVersion + ' attached \u2014 v' + s.latestVersion + ' available (' + s.sourceName + ')' },
+                              h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 3 } },
+                                h(Tag, { color: 'orange', style: { fontSize: 9, margin: 0 } }, 'v' + ver),
+                                h('span', { style: { color: '#D4380D', fontSize: 12 } }, '\u26A0')
+                              )
+                            );
+                          }
+                          if (s && !s.isStale && s.latestVersion > 1) {
+                            return h(Tag, { color: 'green', style: { fontSize: 9, margin: 0 } }, 'v' + ver);
+                          }
+                          return h(Tag, { style: { fontSize: 9, margin: 0 } }, 'v' + ver);
+                        }
+                      },
+                      { title: 'Added by', key: 'addedBy', width: 130,
+                        render: function(_, r) {
+                          var name = r.createdBy && (r.createdBy.name || r.createdBy.userName);
+                          return h('span', { style: { fontSize: 10 } }, name || '\u2013');
+                        }
+                      },
+                      { title: 'Added', key: 'addedAt', width: 100,
+                        render: function(_, r) {
+                          return r.createdAt ? h('span', { style: { fontSize: 10, color: '#8F8FA3' } }, dayjs(r.createdAt).format('MMM D, YYYY')) : '\u2013';
+                        }
+                      },
+                    ],
+                  })
+                )
               : h('div', { className: 'tracker-empty-state' }, 'No attachments linked to this ' + B.toLowerCase() + '.')
           },
         ],
@@ -3680,15 +3711,35 @@ function QCTrackerPage(props) {
       ],
       onFilter: function(v, r) { return r.state === v; },
       render: function(s) { return h(Tag, { color: stateColor(s), style: { fontSize: 11 } }, s); } },
-    { title: h(Tooltip, { title: 'Attachments' }, icons && icons.PaperClipOutlined ? h(icons.PaperClipOutlined, { style: { fontSize: 14, color: '#8F8FA3' } }) : 'Att'), key: 'attachments', width: 50, align: 'center',
+    { title: h(Tooltip, { title: 'Attachments (\u26A0 = outdated snapshots)' }, icons && icons.PaperClipOutlined ? h(icons.PaperClipOutlined, { style: { fontSize: 14, color: '#8F8FA3' } }) : 'Att'), key: 'attachments', width: 60, align: 'center',
       sorter: function(a, b) { return (a._attachments || []).length - (b._attachments || []).length; },
+      filters: [
+        { text: 'Has Stale Snapshots', value: 'stale' },
+      ],
+      onFilter: function(v, r) {
+        if (v === 'stale') return countStaleAttachments(r) > 0;
+        return true;
+      },
       render: function(_, record) {
         var count = (record._attachments || []).length;
         if (count === 0) return h('span', { style: { color: '#D1D1DB', fontSize: 11 } }, '\u2013');
+        var stale = countStaleAttachments(record);
+        var clickHandler = function(e) { e.stopPropagation(); setAttachDrawerBundle(record); setAttachDrawerOpen(true); };
+        if (stale > 0) {
+          return h(Tooltip, { title: count + ' attachment' + (count > 1 ? 's' : '') + ' \u2014 ' + stale + ' outdated snapshot' + (stale > 1 ? 's' : '') + '. Click to review.' },
+            h('span', {
+              style: { display: 'inline-flex', alignItems: 'center', gap: 2, cursor: 'pointer' },
+              onClick: clickHandler,
+            },
+              h('span', { style: { color: '#543FDE', fontSize: 12, fontWeight: 600 } }, count),
+              h('span', { style: { color: '#D4380D', fontSize: 12 } }, '\u26A0')
+            )
+          );
+        }
         return h(Tooltip, { title: 'Click to view ' + count + ' attachment' + (count > 1 ? 's' : '') },
           h('span', {
             style: { color: '#543FDE', fontSize: 12, fontWeight: 600, cursor: 'pointer' },
-            onClick: function(e) { e.stopPropagation(); setAttachDrawerBundle(record); setAttachDrawerOpen(true); },
+            onClick: clickHandler,
           }, count)
         );
       }
@@ -3921,6 +3972,7 @@ function QCTrackerPage(props) {
         onClose: function() { setAttachDrawerOpen(false); },
         bundle: attachDrawerBundle,
         dataExplorerUrl: dataExplorerUrl,
+        terms: terms,
       })
     )
   );

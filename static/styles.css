@@ -1059,3 +1059,7 @@ body {
 /* ── Assignment Rules ──────────────────────────────── */
 .rules-preview-skip { opacity: 0.45; }
 .page-subtitle { color: #65657B; font-size: 13px; margin-top: 2px; }
+
+/* ── Snapshot Staleness ──────────────────────────────── */
+.stale-row td { background: #FFF7E6 !important; }
+.stale-row:hover td { background: #FFF1CC !important; }

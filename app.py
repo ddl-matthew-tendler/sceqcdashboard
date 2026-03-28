@@ -369,6 +369,81 @@ def list_attachment_overviews(limit: int = 200, offset: int = 0):
     return gov_get("/attachment-overviews", params=params)
 
 
+# ── Dataset & Volume Snapshot Versions (Staleness Check) ─────────
+
+@app.get("/api/datasets/{dataset_id}/snapshots")
+def list_dataset_snapshots(dataset_id: str, limit: int = 5, sort: str = "-version"):
+    """Fetch snapshots for a dataset to check for newer versions.
+    Tries multiple known Domino dataset API paths."""
+    host = get_domino_host()
+    if not host:
+        raise HTTPException(status_code=503, detail="DOMINO_API_HOST not set")
+    headers = get_auth_headers()
+
+    endpoints = [
+        f"{host}/v4/datasetrw/datasets/{dataset_id}/snapshots",
+        f"{host}/api/datasetrw/v1/datasets/{dataset_id}/snapshots",
+        f"{host}/v4/datasets/{dataset_id}/snapshots",
+    ]
+
+    for url in endpoints:
+        try:
+            resp = requests.get(
+                url, headers=headers,
+                params={"limit": limit, "sort": sort},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                # Normalize response shape
+                if isinstance(data, list):
+                    return {"data": data}
+                if isinstance(data, dict) and "data" not in data:
+                    items = data.get("snapshots", data.get("items", []))
+                    return {"data": items}
+                return data
+        except Exception:
+            continue
+
+    return {"data": [], "error": "No dataset snapshot endpoint responded"}
+
+
+@app.get("/api/volumes/{volume_id}/snapshots")
+def list_volume_snapshots(volume_id: str, limit: int = 5, sort: str = "-version"):
+    """Fetch snapshots for a NetApp volume to check for newer versions.
+    Tries multiple known Domino volume/storage API paths."""
+    host = get_domino_host()
+    if not host:
+        raise HTTPException(status_code=503, detail="DOMINO_API_HOST not set")
+    headers = get_auth_headers()
+
+    endpoints = [
+        f"{host}/api/storage/v1/volumes/{volume_id}/snapshots",
+        f"{host}/v4/storage/volumes/{volume_id}/snapshots",
+        f"{host}/api/netapp/v1/volumes/{volume_id}/snapshots",
+    ]
+
+    for url in endpoints:
+        try:
+            resp = requests.get(
+                url, headers=headers,
+                params={"limit": limit, "sort": sort},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if isinstance(data, list):
+                    return {"data": data}
+                if isinstance(data, dict) and "data" not in data:
+                    items = data.get("snapshots", data.get("items", []))
+                    return {"data": items}
+                return data
+        except Exception:
+            continue
+
+    return {"data": [], "error": "No volume snapshot endpoint responded"}
+
+
 # ── Create Bundle ─────────────────────────────────────────────────
 
 @app.post("/api/bundles")
