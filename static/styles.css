@@ -1063,3 +1063,36 @@ body {
 /* ── Snapshot Staleness ──────────────────────────────── */
 .stale-row td { background: #FFF7E6 !important; }
 .stale-row:hover td { background: #FFF1CC !important; }
+
+/* ── Selected Row Highlight (#5) ─────────────────────── */
+.ant-table-tbody > tr.selected-row > td {
+  background: #F5F3FF !important;
+  border-color: #E0DBFF !important;
+}
+.ant-table-tbody > tr.selected-row:hover > td {
+  background: #EDE7FB !important;
+}
+
+/* ── Detail View Native Select (#6) ──────────────────── */
+.detail-view-select {
+  width: 100%;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 12px;
+  border: 1px solid #E0E0E0;
+  border-radius: 6px;
+  background: #fff;
+  color: #2E2E38;
+  cursor: pointer;
+  outline: none;
+  appearance: auto;
+  transition: border-color 0.15s;
+}
+.detail-view-select:focus {
+  border-color: #543FDE;
+  box-shadow: 0 0 0 2px rgba(84, 63, 222, 0.15);
+}
+.detail-view-select:hover {
+  border-color: #543FDE;
+}
+

@@ -3104,6 +3104,7 @@ function QCTrackerPage(props) {
   var loading = props.loading;
   var terms = props.terms || DEFAULT_TERMS;
   var onSelectBundle = props.onSelectBundle;
+  var selectedBundle = props.selectedBundle;
   var B = terms.bundle;
   var P = terms.policy;
   var dataExplorerUrl = props.dataExplorerUrl || null;
@@ -3135,6 +3136,7 @@ function QCTrackerPage(props) {
   var _cw = useState({}); var colWidths = _cw[0]; var setColWidths = _cw[1];
   // Hidden columns state
   var _hc = useState(['policy']); var hiddenCols = _hc[0]; var setHiddenCols = _hc[1];
+
   // Derive filter options from scoped bundles (project/tag scope handled at App level)
   var policyOptions = useMemo(function() {
     var names = {};
@@ -3668,6 +3670,9 @@ function QCTrackerPage(props) {
               selectedRowKeys: selectedRowKeys,
               onChange: function(keys) { setSelectedRowKeys(keys); },
             },
+            rowClassName: function(record) {
+              return selectedBundle && (record.id || record.name) === (selectedBundle.id || selectedBundle.name) ? 'selected-row' : '';
+            },
           });
         })()
       ),
@@ -3704,6 +3709,10 @@ function DetailDrawer(props) {
   var _view = useState('stage-timeline');
   var activeView = _view[0];
   var setActiveView = _view[1];
+
+  // Always reset to Stage Timeline when a new bundle is selected
+  var bundleId = bundle ? (bundle.id || bundle.name) : null;
+  useEffect(function() { setActiveView('stage-timeline'); }, [bundleId]);
 
   if (!bundle) return null;
 
@@ -3926,9 +3935,15 @@ function DetailDrawer(props) {
       ? h(Button, { type: 'primary', size: 'small', onClick: function() { window.open(dominoUrl, '_blank'); } }, '\u2197 View in Domino')
       : null,
   },
-    // View selector dropdown
+    // View selector dropdown (native select — lightweight, Data Explorer style)
     h('div', { style: { padding: '12px 24px', borderBottom: '1px solid #E0E0E0', flexShrink: 0 } },
-      h(Select, { value: activeView, onChange: function(v) { setActiveView(v); }, options: viewOptions, style: { width: '100%' }, size: 'middle' })
+      h('select', {
+        className: 'detail-view-select',
+        value: activeView,
+        onChange: function(e) { setActiveView(e.target.value); },
+      }, viewOptions.map(function(opt) {
+        return h('option', { key: opt.value, value: opt.value }, opt.label);
+      }))
     ),
     // Active view content
     h('div', { style: { padding: '16px 24px', flex: 1, overflow: 'auto' } },
@@ -8224,7 +8239,7 @@ function App() {
     // All other pages get scopedBundles
     switch (activePage) {
       case 'tracker':
-        return h(QCTrackerPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms, projectMembersCache: projectMembersCache, dataExplorerUrl: dataExplorerUrl, connected: connected, policies: livePolicies, onRefresh: function() { if (connected) fetchLiveData(); } });
+        return h(QCTrackerPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, selectedBundle: selectedBundle, terms: terms, projectMembersCache: projectMembersCache, dataExplorerUrl: dataExplorerUrl, connected: connected, policies: livePolicies, onRefresh: function() { if (connected) fetchLiveData(); } });
       case 'rules':
         return h(AssignmentRulesPage, { bundles: bundles, setBundles: setBundles, assignmentRules: assignmentRules, setAssignmentRules: setAssignmentRules, terms: terms, projectMembersCache: projectMembersCache, livePolicies: livePolicies, onNavigate: setActivePage });
       case 'milestones':
