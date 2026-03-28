@@ -92,6 +92,130 @@ function buildDataExplorerUrl(baseUrl, attachment) {
   return url;
 }
 
+// ── Snapshot Staleness Detection ─────────────────────────────────
+// Compares snapshot versions across ALL attachments to detect outdated snapshots.
+// For each dataset (by datasetId/datasetName) and each NetApp volume (by volumeId/volumeName),
+// finds the maximum snapshotVersion seen across all bundles. Any attachment with a
+// lower version is flagged as stale.
+
+function computeSnapshotStaleness(allAttachments) {
+  // Phase 1: Build version index — find max version per source
+  var datasetMaxVersions = {};   // key: datasetId || datasetName → { maxVersion, maxSnapshotTime, latestBundleId }
+  var volumeMaxVersions = {};    // key: volumeId || volumeName → { maxVersion, maxSnapshotTime, latestBundleId }
+
+  allAttachments.forEach(function(a) {
+    var id = a.identifier || {};
+    var ver = id.snapshotVersion;
+    if (ver == null) return;
+
+    if (a.type === 'DatasetSnapshotFile') {
+      var dsKey = id.datasetId || id.datasetName;
+      if (!dsKey) return;
+      var cur = datasetMaxVersions[dsKey];
+      if (!cur || ver > cur.maxVersion) {
+        datasetMaxVersions[dsKey] = {
+          maxVersion: ver,
+          maxSnapshotTime: id.snapshotCreationTime,
+          latestBundleId: a.bundle ? a.bundle.id : a._bundleId,
+          sourceName: id.datasetName || dsKey,
+        };
+      }
+    }
+
+    if (a.type === 'NetAppVolumeSnapshotFile') {
+      var volKey = id.volumeId || id.volumeName;
+      if (!volKey) return;
+      var cur = volumeMaxVersions[volKey];
+      if (!cur || ver > cur.maxVersion) {
+        volumeMaxVersions[volKey] = {
+          maxVersion: ver,
+          maxSnapshotTime: id.snapshotCreationTime,
+          latestBundleId: a.bundle ? a.bundle.id : a._bundleId,
+          sourceName: id.volumeName || volKey,
+        };
+      }
+    }
+  });
+
+  // Phase 2: Annotate each attachment with staleness info
+  allAttachments.forEach(function(a) {
+    var id = a.identifier || {};
+    var ver = id.snapshotVersion;
+    if (ver == null) { a._staleness = null; return; }
+
+    var index = null;
+    if (a.type === 'DatasetSnapshotFile') {
+      var dsKey = id.datasetId || id.datasetName;
+      index = dsKey ? datasetMaxVersions[dsKey] : null;
+    } else if (a.type === 'NetAppVolumeSnapshotFile') {
+      var volKey = id.volumeId || id.volumeName;
+      index = volKey ? volumeMaxVersions[volKey] : null;
+    }
+
+    if (!index) { a._staleness = null; return; }
+
+    if (ver < index.maxVersion) {
+      a._staleness = {
+        isStale: true,
+        currentVersion: ver,
+        latestVersion: index.maxVersion,
+        latestSnapshotTime: index.maxSnapshotTime,
+        versionsBehind: index.maxVersion - ver,
+        sourceName: index.sourceName,
+      };
+    } else {
+      a._staleness = {
+        isStale: false,
+        currentVersion: ver,
+        latestVersion: index.maxVersion,
+        sourceName: index.sourceName,
+      };
+    }
+  });
+
+  return { datasetMaxVersions: datasetMaxVersions, volumeMaxVersions: volumeMaxVersions };
+}
+
+// Update staleness index with live data from Domino (latest known snapshot versions)
+function mergeRemoteStaleness(allAttachments, remoteVersions) {
+  // remoteVersions: { datasets: { datasetId: { latestVersion, latestSnapshotTime } }, volumes: { volumeId: { latestVersion, latestSnapshotTime } } }
+  if (!remoteVersions) return;
+  allAttachments.forEach(function(a) {
+    if (!a._staleness) return;
+    var id = a.identifier || {};
+    var ver = id.snapshotVersion;
+    if (ver == null) return;
+
+    var remote = null;
+    if (a.type === 'DatasetSnapshotFile') {
+      var dsKey = id.datasetId || id.datasetName;
+      remote = dsKey && remoteVersions.datasets ? remoteVersions.datasets[dsKey] : null;
+    } else if (a.type === 'NetAppVolumeSnapshotFile') {
+      var volKey = id.volumeId || id.volumeName;
+      remote = volKey && remoteVersions.volumes ? remoteVersions.volumes[volKey] : null;
+    }
+
+    if (remote && remote.latestVersion > a._staleness.latestVersion) {
+      a._staleness.isStale = ver < remote.latestVersion;
+      a._staleness.latestVersion = remote.latestVersion;
+      a._staleness.latestSnapshotTime = remote.latestSnapshotTime;
+      a._staleness.versionsBehind = remote.latestVersion - ver;
+      a._staleness.remoteChecked = true;
+    }
+  });
+}
+
+// Count stale attachments for a bundle
+function countStaleAttachments(bundle) {
+  var attachments = bundle._attachments || [];
+  var count = 0;
+  for (var i = 0; i < attachments.length; i++) {
+    if (attachments[i]._staleness && attachments[i]._staleness.isStale) count++;
+  }
+  return count;
+}
+
+
 // ── API_GAPS: Write actions pending Domino API availability ────────
 var API_GAPS = {
   stageReassign: {
@@ -2565,6 +2689,7 @@ function AttachmentsDrawer(props) {
   var deUrl = props.dataExplorerUrl || null;
   var attachments = bundle ? (bundle._attachments || []) : [];
   var dominoUrl = bundle ? getDominoBundleUrl(bundle) : null;
+  var staleCount = bundle ? countStaleAttachments(bundle) : 0;
 
   var columns = [
     { title: 'Type', dataIndex: 'type', key: 'type', width: 150,
@@ -2604,12 +2729,43 @@ function AttachmentsDrawer(props) {
         }, fname);
       }
     },
-    { title: 'Created', key: 'createdAt', width: 120,
+    { title: 'Version', key: 'version', width: 110, align: 'center',
+      render: function(_, r) {
+        var id = r.identifier || {};
+        var ver = id.snapshotVersion;
+        if (ver == null) return h('span', { style: { color: '#D1D1DB', fontSize: 11 } }, '\u2013');
+        var s = r._staleness;
+        if (s && s.isStale) {
+          var timeStr = '';
+          if (s.latestSnapshotTime) {
+            var ts = typeof s.latestSnapshotTime === 'number'
+              ? dayjs(s.latestSnapshotTime)
+              : dayjs(s.latestSnapshotTime);
+            timeStr = ' (created ' + ts.format('MMM D, YYYY') + ')';
+          }
+          var tipText = 'Outdated: v' + s.currentVersion + ' attached, but v' + s.latestVersion + ' is available' + timeStr + '. Source: ' + (s.sourceName || 'unknown') + '.';
+          return h(Tooltip, { title: tipText, overlayStyle: { maxWidth: 340 } },
+            h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } },
+              h(Tag, { color: 'orange', style: { fontSize: 10, margin: 0 } }, 'v' + ver),
+              h('span', { style: { color: '#D4380D', fontSize: 14, cursor: 'help' } }, '\u26A0')
+            )
+          );
+        }
+        // Current version — show green
+        if (s && !s.isStale && s.latestVersion > 1) {
+          return h(Tooltip, { title: 'Current version (latest known: v' + s.latestVersion + ')' },
+            h(Tag, { color: 'green', style: { fontSize: 10, margin: 0 } }, 'v' + ver)
+          );
+        }
+        return h(Tag, { style: { fontSize: 10, margin: 0 } }, 'v' + ver);
+      }
+    },
+    { title: 'Created', key: 'createdAt', width: 100,
       render: function(_, r) {
         return r.createdAt ? h('span', { style: { fontSize: 12 } }, dayjs(r.createdAt).format('MMM D, YYYY')) : '\u2013';
       }
     },
-    { title: 'Created By', key: 'createdBy', width: 130,
+    { title: 'Created By', key: 'createdBy', width: 120,
       render: function(_, r) {
         var name = r.createdBy ? (r.createdBy.name || r.createdBy.userName) : null;
         return h('span', { style: { fontSize: 12 } }, name || '\u2013');
@@ -2617,25 +2773,51 @@ function AttachmentsDrawer(props) {
     },
   ];
 
+  // Build drawer title with staleness alert banner
+  var drawerTitle = bundle ? 'Attachments: ' + bundle.name : 'Attachments';
+
+  var drawerChildren = [];
+
+  // Staleness alert banner
+  if (staleCount > 0) {
+    drawerChildren.push(
+      h(Alert, {
+        key: 'stale-alert',
+        type: 'warning',
+        showIcon: true,
+        style: { marginBottom: 12, fontSize: 12 },
+        message: staleCount + ' snapshot' + (staleCount > 1 ? 's' : '') + ' may be outdated',
+        description: 'Newer snapshot versions were found attached to other ' + (props.terms ? props.terms.bundle.toLowerCase() + 's' : 'deliverables') + '. Review the Version column for details.',
+      })
+    );
+  }
+
+  // Table or empty state
+  if (attachments.length > 0) {
+    drawerChildren.push(
+      h(Table, {
+        key: 'attach-table',
+        dataSource: attachments,
+        rowKey: function(r, i) { return r.id || i; },
+        size: 'small',
+        pagination: attachments.length > 10 ? { pageSize: 10 } : false,
+        columns: columns,
+        rowClassName: function(r) { return r._staleness && r._staleness.isStale ? 'stale-row' : ''; },
+      })
+    );
+  } else {
+    drawerChildren.push(h(Empty, { key: 'empty', description: 'No attachments linked' }));
+  }
+
   return h(Drawer, {
-    title: bundle ? 'Attachments: ' + bundle.name : 'Attachments',
+    title: drawerTitle,
     open: visible,
     onClose: onClose,
-    width: 640,
+    width: 720,
     extra: dominoUrl
       ? h(Button, { type: 'primary', size: 'small', onClick: function() { window.open(dominoUrl, '_blank'); }, style: { fontSize: 11 } }, '\u2197 View in Domino')
       : null,
-  },
-    attachments.length > 0
-      ? h(Table, {
-          dataSource: attachments,
-          rowKey: function(r, i) { return r.id || i; },
-          size: 'small',
-          pagination: attachments.length > 10 ? { pageSize: 10 } : false,
-          columns: columns,
-        })
-      : h(Empty, { description: 'No attachments linked' })
-  );
+  }, drawerChildren);
 }
 
 
@@ -3254,7 +3436,12 @@ function QCTrackerPage(props) {
           || (b.policyName || '').toLowerCase().indexOf(q) >= 0
           || (b.stage || '').toLowerCase().indexOf(q) >= 0
           || (b.state || '').toLowerCase().indexOf(q) >= 0
-          || (b.stageAssignee && b.stageAssignee.name || '').toLowerCase().indexOf(q) >= 0;
+          || (b.stageAssignee && b.stageAssignee.name || '').toLowerCase().indexOf(q) >= 0
+          || (b._attachments || []).some(function(att) {
+               var fname = att.identifier && att.identifier.filename || '';
+               var aname = att.identifier && att.identifier.name || '';
+               return fname.toLowerCase().indexOf(q) >= 0 || aname.toLowerCase().indexOf(q) >= 0;
+             });
         if (!match) return false;
       }
       if (filterPolicies.length > 0 && filterPolicies.indexOf(b.policyName) < 0) return false;
@@ -7861,6 +8048,13 @@ function App() {
         }
         return copy;
       });
+      // Compute snapshot staleness across mock attachments
+      var allMockAttach = [];
+      mockEnriched.forEach(function(b) {
+        (b._attachments || []).forEach(function(a) { a._bundleId = b.id; allMockAttach.push(a); });
+      });
+      computeSnapshotStaleness(allMockAttach);
+
       setBundles(mockEnriched);
     } else {
       setBundles([]);
@@ -8010,6 +8204,16 @@ function App() {
         return enrichedBundles;
       })
       .then(function(enrichedBundles) {
+        // Compute snapshot staleness across all attachments
+        var allAttach = [];
+        enrichedBundles.forEach(function(b) {
+          (b._attachments || []).forEach(function(a) { a._bundleId = b.id; allAttach.push(a); });
+        });
+        computeSnapshotStaleness(allAttach);
+
+        // Fire optional live staleness check (non-blocking)
+        checkRemoteStaleness(allAttach, enrichedBundles);
+
         setBundles(enrichedBundles);
         setLoading(false);
       })
@@ -8017,6 +8221,76 @@ function App() {
         console.error('Failed to fetch live data, falling back to dummy data:', err);
         setUseDummy(true);
         loadMockData();
+      });
+  }
+
+  // Check Domino for latest snapshot versions (async, non-blocking)
+  function checkRemoteStaleness(allAttach, currentBundles) {
+    // Collect unique dataset IDs and volume IDs that need checking
+    var datasetIds = {};
+    var volumeIds = {};
+    allAttach.forEach(function(a) {
+      var id = a.identifier || {};
+      if (a.type === 'DatasetSnapshotFile' && id.datasetId) {
+        datasetIds[id.datasetId] = true;
+      }
+      if (a.type === 'NetAppVolumeSnapshotFile' && id.volumeId) {
+        volumeIds[id.volumeId] = true;
+      }
+    });
+
+    var dsKeys = Object.keys(datasetIds);
+    var volKeys = Object.keys(volumeIds);
+    if (dsKeys.length === 0 && volKeys.length === 0) return;
+
+    // Fetch latest snapshot version for each dataset
+    var dsPromises = dsKeys.map(function(dsId) {
+      return apiGet('api/datasets/' + dsId + '/snapshots?limit=1&sort=-version')
+        .then(function(resp) {
+          var snapshots = resp.data || (Array.isArray(resp) ? resp : []);
+          if (snapshots.length > 0) {
+            return { id: dsId, latestVersion: snapshots[0].version || snapshots[0].snapshotVersion, latestSnapshotTime: snapshots[0].createdAt || snapshots[0].snapshotCreationTime };
+          }
+          return null;
+        })
+        .catch(function() { return null; });
+    });
+
+    // Fetch latest snapshot version for each NetApp volume
+    var volPromises = volKeys.map(function(volId) {
+      return apiGet('api/volumes/' + volId + '/snapshots?limit=1&sort=-version')
+        .then(function(resp) {
+          var snapshots = resp.data || (Array.isArray(resp) ? resp : []);
+          if (snapshots.length > 0) {
+            return { id: volId, latestVersion: snapshots[0].version || snapshots[0].snapshotVersion, latestSnapshotTime: snapshots[0].createdAt || snapshots[0].snapshotCreationTime };
+          }
+          return null;
+        })
+        .catch(function() { return null; });
+    });
+
+    Promise.all([Promise.all(dsPromises), Promise.all(volPromises)])
+      .then(function(results) {
+        var dsResults = results[0];
+        var volResults = results[1];
+        var remoteVersions = { datasets: {}, volumes: {} };
+        var hasData = false;
+
+        dsResults.forEach(function(r) {
+          if (r) { remoteVersions.datasets[r.id] = r; hasData = true; }
+        });
+        volResults.forEach(function(r) {
+          if (r) { remoteVersions.volumes[r.id] = r; hasData = true; }
+        });
+
+        if (hasData) {
+          mergeRemoteStaleness(allAttach, remoteVersions);
+          // Trigger re-render by updating bundles reference
+          setBundles(currentBundles.slice());
+        }
+      })
+      .catch(function(err) {
+        console.log('Remote staleness check failed (non-critical):', err.message || err);
       });
   }
 
