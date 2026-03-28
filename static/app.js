@@ -6021,11 +6021,33 @@ function RiskOptimizerPage(props) {
     },
     { title: 'Why', key: 'reason', ellipsis: true,
       render: function(_, r) {
+        if (r._risk.source === 'graph' && r._risk.graphDetail) {
+          var detail = r._risk.graphDetail;
+          var anchorNames = detail.anchorNodes.map(function(a) { return a.id.toUpperCase(); }).join(', ');
+          return h('span', { style: { display: 'flex', alignItems: 'center', gap: 4 } },
+            h(Tag, { color: 'purple', style: { fontSize: 10, cursor: 'pointer' }, onClick: function() { setGraphDrawerBundle(r); } }, 'Graph'),
+            h(Tooltip, {
+              title: h('div', null,
+                h('div', { style: { marginBottom: 4 } }, 'Graph propagation from: ', h('strong', null, anchorNames)),
+                detail.propagationPaths[0] ? h('div', null, 'Path: ', detail.propagationPaths[0].path.join(' \u2192 ')) : null,
+                h('div', null, 'Keywords alone: ', detail.keywordRisk),
+                h('div', { style: { marginTop: 4, fontSize: 11 } }, 'Click "Graph" tag for full details')
+              ),
+              placement: 'topLeft', overlayStyle: { maxWidth: 400 },
+            },
+              h('span', { style: { fontSize: 12, color: '#65657B', cursor: 'help' } },
+                detail.isAnchor ? 'Anchor: ' + detail.anchorNodes[0].reason : 'via ' + anchorNames
+              )
+            )
+          );
+        }
         return h(Tooltip, { title: r._risk.reason, placement: 'topLeft', overlayStyle: { maxWidth: 400 } },
           h('span', { style: { fontSize: 12, color: '#65657B', cursor: 'help' } },
             r._risk.matches && r._risk.matches.length > 0
               ? r._risk.matches.slice(0, 3).join(', ') + (r._risk.matches.length > 3 ? ' +' + (r._risk.matches.length - 3) + ' more' : '')
-              : r._risk.source === 'manual' ? r._risk.reason : 'No keyword matches'
+              : r._risk.source === 'manual' ? r._risk.reason
+              : r._risk.graphDetail ? 'Keywords (' + r._risk.level + '), graph agrees'
+              : 'No keyword matches'
           )
         );
       },
@@ -7051,6 +7073,80 @@ function RiskOptimizerPage(props) {
           '\u24D8 Human judgment always takes precedence over the algorithm. Your override will persist until you clear it.'
         )
       ) : null
+    ),
+
+    // ── Risk Because Drawer ──
+    h(antd.Drawer, {
+      title: graphDrawerBundle ? 'Risk Analysis: ' + graphDrawerBundle.name : 'Risk Analysis',
+      open: !!graphDrawerBundle,
+      onClose: function() { setGraphDrawerBundle(null); },
+      width: 520,
+    },
+      graphDrawerBundle && graphDrawerBundle._risk.graphDetail ? (function() {
+        var detail = graphDrawerBundle._risk.graphDetail;
+        return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 16 } },
+          // Summary
+          h('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
+            h(Tag, { color: graphDrawerBundle._risk.level === 'High' ? 'red' : graphDrawerBundle._risk.level === 'Medium' ? 'gold' : 'green',
+              style: { fontSize: 14, padding: '4px 12px' } }, graphDrawerBundle._risk.level + ' Risk'),
+            h(Tag, { color: 'purple' }, 'Source: Graph Propagation'),
+            detail.isAnchor ? h(Tag, { color: 'geekblue' }, 'Anchor Point') : null
+          ),
+
+          // Keyword baseline
+          h('div', { className: 'panel', style: { padding: 12 } },
+            h('div', { style: { fontSize: 12, fontWeight: 600, marginBottom: 6, color: '#2E2E38' } }, 'Keyword Baseline'),
+            h('div', { style: { fontSize: 12, color: '#65657B' } },
+              'Keywords alone classify this as: ',
+              h(Tag, { color: detail.keywordRisk === 'High' ? 'red' : detail.keywordRisk === 'Medium' ? 'gold' : detail.keywordRisk === 'Low' ? 'green' : 'default' }, detail.keywordRisk),
+              graphDrawerBundle._risk.matches && graphDrawerBundle._risk.matches.length > 0
+                ? h('span', null, ' (matched: ' + graphDrawerBundle._risk.matches.join(', ') + ')')
+                : null
+            )
+          ),
+
+          // Anchor nodes
+          h('div', { className: 'panel', style: { padding: 12 } },
+            h('div', { style: { fontSize: 12, fontWeight: 600, marginBottom: 6, color: '#2E2E38' } }, 'Risk Anchor' + (detail.anchorNodes.length > 1 ? 's' : '')),
+            detail.anchorNodes.map(function(anchor) {
+              return h('div', { key: anchor.id, style: { display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' } },
+                h(Tag, { color: anchor.risk === 'High' ? 'red' : anchor.risk === 'Medium' ? 'gold' : 'green' }, anchor.risk),
+                h('strong', null, anchor.id.toUpperCase()),
+                h('span', { style: { fontSize: 12, color: '#65657B' } }, anchor.reason)
+              );
+            })
+          ),
+
+          // Propagation paths
+          detail.propagationPaths.length > 0 ? h('div', { className: 'panel', style: { padding: 12 } },
+            h('div', { style: { fontSize: 12, fontWeight: 600, marginBottom: 6, color: '#2E2E38' } }, 'Propagation Paths'),
+            detail.propagationPaths.map(function(p, i) {
+              return h('div', { key: i, style: { padding: '6px 0', borderBottom: i < detail.propagationPaths.length - 1 ? '1px solid #F0F0F0' : 'none' } },
+                h('div', { style: { fontSize: 13, fontFamily: 'monospace' } },
+                  p.path.map(function(nodeId) { return nodeId.toUpperCase(); }).join(' \u2192 ')
+                ),
+                h('div', { style: { fontSize: 11, color: '#8F8FA3', marginTop: 2 } },
+                  'From ', h('strong', null, p.sourceRisk), ' anchor, attenuated to ',
+                  h(Tag, { color: p.attenuatedRisk === 'High' ? 'red' : p.attenuatedRisk === 'Medium' ? 'gold' : 'green', style: { fontSize: 10 } }, p.attenuatedRisk),
+                  ' (', (p.totalAttenuation * 100).toFixed(0), '% strength)'
+                )
+              );
+            })
+          ) : null,
+
+          // Resolution
+          h('div', { style: { fontSize: 11, color: '#8F8FA3', background: '#F8F8FC', padding: 10, borderRadius: 6 } },
+            detail.resolution === 'graph_upgrade'
+              ? 'Graph propagation upgraded this from ' + detail.keywordRisk + ' (keywords) to ' + detail.effectiveGraphRisk + ' (graph). Graph can only raise risk, never lower it.'
+              : 'Graph propagation agrees with keyword classification. No upgrade applied.'
+          ),
+
+          // Override button
+          h(Button, { block: true, onClick: function() { handleOpenOverride(graphDrawerBundle); setGraphDrawerBundle(null); } },
+            'Override This Risk Assessment'
+          )
+        );
+      })() : graphDrawerBundle ? h('div', { style: { color: '#8F8FA3' } }, 'No graph detail available for this bundle.') : null
     ),
 
     // ── Config Tab ──
