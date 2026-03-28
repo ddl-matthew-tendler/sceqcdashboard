@@ -544,18 +544,22 @@ def get_data_explorer_url():
         )
         if resp.status_code == 200:
             apps = resp.json()
-            app_list = apps if isinstance(apps, list) else apps.get("data", apps.get("apps", []))
+            app_list = apps if isinstance(apps, list) else apps.get("items", apps.get("data", apps.get("apps", [])))
             for a in app_list:
                 name = (a.get("name") or "").lower()
                 if "data explorer" in name or "data_explorer" in name or "dataexplorer" in name:
-                    # Try to get the running URL
-                    app_url = a.get("runningAppUrl") or a.get("url") or a.get("vanityUrl")
-                    if not app_url:
-                        # Construct from app ID
-                        app_id = a.get("id") or a.get("_id")
-                        if app_id:
-                            ext_host = (_external_host_cache.get("host") or host).rstrip("/")
-                            app_url = f"{ext_host}/apps/{app_id}/"
+                    # Build the public-facing URL from the vanity slug
+                    ext_host = (_external_host_cache.get("host") or host).rstrip("/")
+                    vanity = a.get("vanityUrl")
+                    if vanity:
+                        app_url = f"{ext_host}/apps/{vanity}/"
+                    else:
+                        # Fallback: use the url field or construct from app ID
+                        app_url = a.get("url")
+                        if not app_url:
+                            app_id = a.get("id") or a.get("_id")
+                            if app_id:
+                                app_url = f"{ext_host}/apps/{app_id}/"
                     if app_url:
                         _data_explorer_cache["url"] = app_url
                         _data_explorer_cache["probed"] = True
@@ -595,6 +599,57 @@ def get_terminology():
     except Exception:
         pass
     return defaults
+
+
+# ── Flows / Lineage ──────────────────────────────────────────────
+
+@app.get("/api/flows/status")
+def flows_status():
+    """Check if Domino Flows (workflow orchestration) is available."""
+    try:
+        # Check for FlowArtifact attachments as a signal that Flows is in use
+        result = gov_get("/attachment-overviews", params={"limit": 1, "type": "FlowArtifact"})
+        has_flows = isinstance(result, dict) and len(result.get("data", result.get("overviews", []))) > 0
+        return {"available": has_flows, "source": "attachment-overviews"}
+    except Exception:
+        return {"available": False, "source": "probe_failed"}
+
+
+@app.get("/api/flows/artifacts")
+def list_flow_artifacts(
+    workflow_name: str = "",
+    workflow_version: str = "",
+    limit: int = 200,
+):
+    """List FlowArtifact attachments, which can imply dataset lineage."""
+    params = {"limit": limit, "type": "FlowArtifact"}
+    if workflow_name:
+        params["identifier.executionWorkflowName"] = workflow_name
+    if workflow_version:
+        params["identifier.executionWorkflowVersion"] = workflow_version
+    return gov_get("/attachment-overviews", params=params)
+
+
+@app.get("/api/project-dependencies")
+def project_dependencies(owner: str = "", project: str = ""):
+    """Proxy to Domino's project dependency graph endpoint."""
+    host = get_domino_host()
+    if not host:
+        raise HTTPException(status_code=503, detail="DOMINO_API_HOST not set")
+    params = {}
+    if owner:
+        params["ownerUsername"] = owner
+    if project:
+        params["projectName"] = project
+    url = f"{host}/gateway/projects/dependency-graph"
+    headers = get_auth_headers()
+    try:
+        resp = requests.get(url, headers=headers, params=params, timeout=15)
+        if resp.status_code == 200:
+            return resp.json()
+        return {"error": f"Status {resp.status_code}", "detail": resp.text[:500]}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # ── Debug ─────────────────────────────────────────────────────────

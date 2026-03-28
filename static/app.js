@@ -5427,6 +5427,7 @@ function RiskOptimizerPage(props) {
   var bundles = props.bundles || [];
   var livePolicies = props.livePolicies || [];
   var terms = props.terms || DEFAULT_TERMS;
+  var isDummy = props.useDummy || false;
   var B = capFirst(terms.bundle);
   var P = capFirst(terms.policy);
 
@@ -5533,6 +5534,14 @@ function RiskOptimizerPage(props) {
   useEffect(function() {
     try { localStorage.setItem('sce_risk_graph_enabled', graphEnabled ? 'true' : 'false'); } catch(e) {}
   }, [graphEnabled]);
+
+  // Load mock graph in dummy mode if no graph exists
+  useEffect(function() {
+    if (isDummy && !riskGraph && typeof MOCK_RISK_GRAPH !== 'undefined') {
+      setRiskGraph(JSON.parse(JSON.stringify(MOCK_RISK_GRAPH)));
+      setGraphEnabled(true);
+    }
+  }, [isDummy]);
 
   // ── Risk Scoring Engine (Three-Layer) ──
   // Layer 2: Keyword scoring (baseline)
@@ -8069,7 +8078,7 @@ function App() {
       case 'automation':
         return h(AutomationRulesPage, { bundles: bundles, automationRules: automationRules, setAutomationRules: setAutomationRules, automationHistory: automationHistory, setAutomationHistory: setAutomationHistory, terms: terms, projectMembersCache: projectMembersCache });
       case 'risk':
-        return h(RiskOptimizerPage, { bundles: bundles, livePolicies: livePolicies, terms: terms });
+        return h(RiskOptimizerPage, { bundles: bundles, livePolicies: livePolicies, terms: terms, useDummy: useDummy });
       default:
         return h(DashboardPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms });
     }
