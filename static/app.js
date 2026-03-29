@@ -4719,6 +4719,53 @@ function StageAssignmentsPage(props) {
   var futureUnassigned = allStages.filter(function(r) { return r.status === 'Future' && !r.assigneeName; }).length;
   var currentUnassigned = allStages.filter(function(r) { return r.status === 'Current' && !r.assigneeName; }).length;
 
+  // Coverage gaps: group by Project → QC Plan → Stage, compute unassigned counts
+  var coverageGaps = useMemo(function() {
+    // Only look at non-completed stages
+    var active = allStages.filter(function(r) { return r.status !== 'Completed'; });
+    var groups = {};
+    active.forEach(function(r) {
+      var gKey = r.projectId + '|||' + r.policyName + '|||' + r.stageName;
+      if (!groups[gKey]) {
+        groups[gKey] = {
+          projectId: r.projectId,
+          projectName: r.projectName,
+          policyName: r.policyName,
+          stageName: r.stageName,
+          total: 0,
+          unassigned: 0,
+          currentUnassigned: 0,
+          futureUnassigned: 0,
+        };
+      }
+      groups[gKey].total++;
+      if (!r.assigneeName) {
+        groups[gKey].unassigned++;
+        if (r.status === 'Current') groups[gKey].currentUnassigned++;
+        if (r.status === 'Future') groups[gKey].futureUnassigned++;
+      }
+    });
+    // Convert to array, sort by severity (most unassigned first)
+    return Object.keys(groups).map(function(k) { return groups[k]; })
+      .sort(function(a, b) {
+        // Current unassigned first, then total unassigned desc, then project name
+        if (b.currentUnassigned !== a.currentUnassigned) return b.currentUnassigned - a.currentUnassigned;
+        if (b.unassigned !== a.unassigned) return b.unassigned - a.unassigned;
+        return a.projectName.localeCompare(b.projectName);
+      });
+  }, [allStages]);
+
+  var gapRows = coverageGaps.filter(function(g) { return g.unassigned > 0; });
+  var totalGapCount = gapRows.reduce(function(s, g) { return s + g.unassigned; }, 0);
+
+  function applyGapFilter(gap) {
+    setFilterProjects([gap.projectId]);
+    setFilterPolicies([gap.policyName]);
+    setSearchText(gap.stageName);
+    setFilterAssignee('__unassigned__');
+    setFilterStatus([]);
+  }
+
   function clearFilters() {
     setSearchText(''); setFilterStatus([]); setFilterAssignee(null); setFilterProjects([]); setFilterPolicies([]);
   }
@@ -4990,6 +5037,152 @@ function StageAssignmentsPage(props) {
         active: filterAssignee === '__unassigned__' && filterStatus.length === 1 && filterStatus[0] === 'Current',
       })
     ),
+
+    // Coverage Gaps panel
+    totalGapCount > 0
+      ? h('div', {
+          style: {
+            marginBottom: 16,
+            border: '1px solid #f0f0f0',
+            borderRadius: 8,
+            background: '#fff',
+            overflow: 'hidden',
+          }
+        },
+        // Panel header - always visible
+        h('div', {
+          style: {
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '10px 16px',
+            cursor: 'pointer',
+            background: gapsPanelOpen ? '#fafafa' : '#fff',
+            borderBottom: gapsPanelOpen ? '1px solid #f0f0f0' : 'none',
+            transition: 'background 0.2s',
+          },
+          onClick: function() { setGapsPanelOpen(!gapsPanelOpen); },
+        },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+            h('span', { style: { fontSize: 13, fontWeight: 600, color: '#2D2D3F' } }, 'Coverage Gaps'),
+            h(Tag, { color: 'red', style: { fontSize: 11, marginLeft: 4 } },
+              totalGapCount + ' unassigned stage' + (totalGapCount !== 1 ? 's' : '')
+            ),
+            h('span', { style: { fontSize: 12, color: '#8F8FA3' } },
+              'across ' + gapRows.length + ' group' + (gapRows.length !== 1 ? 's' : '')
+            )
+          ),
+          h('span', {
+            style: { fontSize: 11, color: '#8F8FA3', transition: 'transform 0.2s', display: 'inline-block', transform: gapsPanelOpen ? 'rotate(180deg)' : 'rotate(0deg)' }
+          }, '\u25B2')
+        ),
+        // Panel body - collapsible
+        gapsPanelOpen
+          ? h('div', { style: { padding: 0, maxHeight: 280, overflowY: 'auto' } },
+              h(Table, {
+                dataSource: gapRows,
+                rowKey: function(r) { return r.projectId + r.policyName + r.stageName; },
+                size: 'small',
+                pagination: false,
+                showHeader: true,
+                onRow: function(record) {
+                  return {
+                    onClick: function() { applyGapFilter(record); },
+                    style: { cursor: 'pointer' },
+                  };
+                },
+                columns: [
+                  {
+                    title: 'Project',
+                    dataIndex: 'projectName',
+                    key: 'projectName',
+                    width: 180,
+                    ellipsis: true,
+                    sorter: function(a, b) { return a.projectName.localeCompare(b.projectName); },
+                  },
+                  {
+                    title: P,
+                    dataIndex: 'policyName',
+                    key: 'policyName',
+                    width: 200,
+                    ellipsis: true,
+                    sorter: function(a, b) { return a.policyName.localeCompare(b.policyName); },
+                  },
+                  {
+                    title: 'Stage',
+                    dataIndex: 'stageName',
+                    key: 'stageName',
+                    width: 160,
+                    sorter: function(a, b) { return a.stageName.localeCompare(b.stageName); },
+                  },
+                  {
+                    title: 'Unassigned',
+                    dataIndex: 'unassigned',
+                    key: 'unassigned',
+                    width: 100,
+                    align: 'center',
+                    defaultSortOrder: 'descend',
+                    sorter: function(a, b) { return a.unassigned - b.unassigned; },
+                    render: function(val, row) {
+                      var severity = row.currentUnassigned > 0 ? 'red' : row.unassigned >= 3 ? 'orange' : 'gold';
+                      return h(Tag, { color: severity, style: { fontWeight: 600, minWidth: 28, textAlign: 'center' } }, String(val));
+                    },
+                  },
+                  {
+                    title: 'Total',
+                    dataIndex: 'total',
+                    key: 'total',
+                    width: 70,
+                    align: 'center',
+                    sorter: function(a, b) { return a.total - b.total; },
+                  },
+                  {
+                    title: 'Coverage',
+                    key: 'coverage',
+                    width: 120,
+                    sorter: function(a, b) {
+                      var ca = a.total ? (a.total - a.unassigned) / a.total : 1;
+                      var cb = b.total ? (b.total - b.unassigned) / b.total : 1;
+                      return ca - cb;
+                    },
+                    render: function(_, row) {
+                      var pct = row.total ? Math.round(((row.total - row.unassigned) / row.total) * 100) : 100;
+                      var color = pct >= 80 ? '#52c41a' : pct >= 50 ? '#faad14' : '#ff4d4f';
+                      return h('div', { style: { display: 'flex', alignItems: 'center', gap: 6 } },
+                        h('div', { style: { flex: 1, height: 6, borderRadius: 3, background: '#f0f0f0', overflow: 'hidden' } },
+                          h('div', { style: { width: pct + '%', height: '100%', borderRadius: 3, background: color, transition: 'width 0.3s' } })
+                        ),
+                        h('span', { style: { fontSize: 11, color: '#65657B', minWidth: 32 } }, pct + '%')
+                      );
+                    },
+                  },
+                  {
+                    title: 'Breakdown',
+                    key: 'breakdown',
+                    width: 140,
+                    render: function(_, row) {
+                      var parts = [];
+                      if (row.currentUnassigned > 0) parts.push(h(Tag, { key: 'cur', color: 'red', style: { fontSize: 10 } }, row.currentUnassigned + ' current'));
+                      if (row.futureUnassigned > 0) parts.push(h(Tag, { key: 'fut', color: 'blue', style: { fontSize: 10 } }, row.futureUnassigned + ' future'));
+                      return h('span', { style: { display: 'flex', gap: 4 } }, parts);
+                    },
+                  },
+                ],
+              })
+            )
+          : null
+      )
+      : h('div', {
+          style: {
+            marginBottom: 16,
+            padding: '12px 16px',
+            border: '1px solid #d9f7be',
+            borderRadius: 8,
+            background: '#f6ffed',
+            display: 'flex', alignItems: 'center', gap: 8,
+          }
+        },
+          h('span', { style: { color: '#52c41a', fontSize: 14, fontWeight: 600 } }, '\u2713'),
+          h('span', { style: { fontSize: 13, color: '#389e0d' } }, 'All active stages have assignees')
+        ),
 
     // Search + clear filters
     h('div', { style: { display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' } },
