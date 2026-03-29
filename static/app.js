@@ -3444,10 +3444,23 @@ function QCTrackerPage(props) {
         }
         var gapInfo = API_GAPS.stageReassign;
         var assigneeId = currentStageAssignee ? currentStageAssignee.id : undefined;
-        // Resolve assignee display name: look up from members cache first, then fall back to name field
+        // Resolve assignee display name: look up from members cache first, then fall back to name/userName field
         var assigneeName = null;
+        var memberMatch = null;
         if (assigneeId) {
-          var memberMatch = members.find(function(m) { return m.id === assigneeId; });
+          memberMatch = members.find(function(m) { return m.id === assigneeId; });
+          // Fallback: match by userName if ID match fails (governance vs v4 ID mismatch)
+          if (!memberMatch && currentStageAssignee) {
+            var saName = currentStageAssignee.name || currentStageAssignee.userName;
+            if (saName) {
+              memberMatch = members.find(function(m) { return m.userName === saName; });
+              if (memberMatch) {
+                console.info('[Assignee] ID mismatch resolved via userName for', record.name, ':', assigneeId, '→', memberMatch.id, '(' + saName + ')');
+                // Update the assigneeId so the Select value matches the option
+                assigneeId = memberMatch.id;
+              }
+            }
+          }
           if (memberMatch) assigneeName = fmtMember(memberMatch);
         }
         if (!assigneeName && currentStageAssignee) {
@@ -3455,11 +3468,16 @@ function QCTrackerPage(props) {
           var full = ((sa.firstName || '') + ' ' + (sa.lastName || '')).trim();
           assigneeName = full ? full + ' (' + (sa.name || sa.userName || '') + ')' : (sa.name || sa.userName || null);
         }
+        if (!assigneeName && assigneeId && !window._assigneeWarnedIds) window._assigneeWarnedIds = {};
+        if (!assigneeName && assigneeId && !window._assigneeWarnedIds[assigneeId]) {
+          window._assigneeWarnedIds[assigneeId] = true;
+          console.warn('[Assignee] Could not resolve name for assignee ID', assigneeId, '- sample bundle:', record.name, '- assignee:', JSON.stringify(currentStageAssignee), '- members count:', members.length, '- projectId:', record.projectId);
+        }
 
         if (gapInfo.ready && memberOpts.length > 0) {
           // If assignee ID exists but isn't in the member list, add a placeholder option so the Select shows a name, not an ID
           if (assigneeId && !memberOpts.some(function(o) { return o.value === assigneeId; })) {
-            memberOpts.unshift({ label: assigneeName || 'Unknown user', value: assigneeId });
+            memberOpts.unshift({ label: assigneeName || 'Unknown user (' + (currentStageAssignee && (currentStageAssignee.name || currentStageAssignee.id) || '?') + ')', value: assigneeId });
           }
           return h(Select, {
             size: 'small',
@@ -3512,7 +3530,9 @@ function QCTrackerPage(props) {
                       } else if (resp && resp.assignee) {
                         newAssignee = resp.assignee;
                       } else {
-                        newAssignee = { id: userId };
+                        // Preserve userName from the selected option label so re-renders don't show "Unknown user"
+                        var selectedOpt = memberOpts.find(function(o) { return o.value === userId; });
+                        newAssignee = { id: userId, name: selectedOpt ? selectedOpt.label : userId };
                       }
                     }
                     record.stageAssignee = newAssignee;
@@ -3881,6 +3901,19 @@ function DetailDrawer(props) {
         var memberOptions = members.map(function(m) {
           return { label: (m.firstName || '') + ' ' + (m.lastName || '') + ' (' + m.userName + ')', value: m.id };
         });
+        // Resolve assignee: try ID match, then userName match against members
+        var resolvedAssigneeId = assignee ? assignee.id : undefined;
+        if (resolvedAssigneeId && !memberOptions.some(function(o) { return o.value === resolvedAssigneeId; })) {
+          var saName = assignee && (assignee.name || assignee.userName);
+          var userNameMatch = saName ? members.find(function(m) { return m.userName === saName; }) : null;
+          if (userNameMatch) {
+            resolvedAssigneeId = userNameMatch.id;
+          } else {
+            // Add placeholder option so the Select shows a name instead of nothing
+            var fallbackLabel = saName || ('Unknown (' + (resolvedAssigneeId || '?') + ')');
+            memberOptions.unshift({ label: fallbackLabel, value: resolvedAssigneeId });
+          }
+        }
         var gapInfo = API_GAPS.stageReassign;
         var stageId = stageData.stageId || (stageData.stage && stageData.stage.id);
         return h('div', { key: idx, className: 'tracker-timeline-item' },
@@ -3891,7 +3924,7 @@ function DetailDrawer(props) {
             h('div', { className: 'tracker-timeline-meta' },
               gapInfo.ready
                 ? h(Select, {
-                    size: 'small', placeholder: 'Assign...', value: assignee ? assignee.id : undefined,
+                    size: 'small', placeholder: 'Assign...', value: resolvedAssigneeId || undefined,
                     style: { minWidth: 160, fontSize: 11 }, showSearch: true, allowClear: true, options: memberOptions,
                     onChange: function(userId) {
                       if (!stageId) { antd.message.error('Missing stage ID'); return; }
@@ -4601,6 +4634,9 @@ function StageAssignmentsPage(props) {
   var _fs7 = useState(false); var reassignModalOpen = _fs7[0]; var setReassignModalOpen = _fs7[1];
   var _fs8 = useState(undefined); var reassignTarget = _fs8[0]; var setReassignTarget = _fs8[1];
   var _fs9 = useState(true); var gapsPanelOpen = _fs9[0]; var setGapsPanelOpen = _fs9[1];
+  var _fs10 = useState(null); var gapAssignRow = _fs10[0]; var setGapAssignRow = _fs10[1];
+  var _fs11 = useState(undefined); var gapAssignTarget = _fs11[0]; var setGapAssignTarget = _fs11[1];
+  var _fs12 = useState(false); var gapAssigning = _fs12[0]; var setGapAssigning = _fs12[1];
 
   // Flatten all stages across all bundles into rows
   var allStages = useMemo(function() {
@@ -4715,7 +4751,7 @@ function StageAssignmentsPage(props) {
   }, [allStages, searchText, filterStatus, filterAssignee, filterProjects, filterPolicies]);
 
   // Stats
-  var totalUnassigned = allStages.filter(function(r) { return !r.assigneeName; }).length;
+  var totalUnassigned = allStages.filter(function(r) { return r.status !== 'Completed' && !r.assigneeName; }).length;
   var futureUnassigned = allStages.filter(function(r) { return r.status === 'Future' && !r.assigneeName; }).length;
   var currentUnassigned = allStages.filter(function(r) { return r.status === 'Current' && !r.assigneeName; }).length;
 
@@ -4768,6 +4804,50 @@ function StageAssignmentsPage(props) {
 
   function clearFilters() {
     setSearchText(''); setFilterStatus([]); setFilterAssignee(null); setFilterProjects([]); setFilterPolicies([]);
+  }
+
+  // Get unassigned stages matching a coverage gap row
+  function getGapStages(gap) {
+    return allStages.filter(function(r) {
+      return r.projectId === gap.projectId && r.policyName === gap.policyName && r.stageName === gap.stageName && !r.assigneeName && r.status !== 'Completed';
+    });
+  }
+
+  // Assign all unassigned stages in a gap row to a user
+  function handleGapAssign() {
+    if (!gapAssignRow || !gapAssignTarget) return;
+    var stages = getGapStages(gapAssignRow);
+    if (stages.length === 0) return;
+    setGapAssigning(true);
+    var reassignMember = null;
+    Object.keys(projectMembersCache).some(function(pid) {
+      reassignMember = (projectMembersCache[pid] || []).find(function(m) { return m.userName === gapAssignTarget; });
+      return !!reassignMember;
+    });
+    var promises = stages.map(function(row) {
+      return apiPatch('api/bundles/' + row.bundleId + '/stages/' + row.stageId, { assignee: { id: reassignMember ? reassignMember.id : gapAssignTarget, userName: gapAssignTarget } })
+        .then(function(resp) {
+          return { ok: true, verified: resp && resp.verified, bundleName: row.bundleName };
+        })
+        .catch(function(err) {
+          return { ok: false, bundleName: row.bundleName, error: err.message || String(err) };
+        });
+    });
+    Promise.all(promises).then(function(results) {
+      var ok = results.filter(function(r) { return r.ok; });
+      var fail = results.filter(function(r) { return !r.ok; });
+      if (fail.length === 0) {
+        antd.message.success('Assigned ' + ok.length + ' stage' + (ok.length !== 1 ? 's' : '') + ' to ' + gapAssignTarget);
+      } else if (ok.length > 0) {
+        antd.notification.warning({ message: ok.length + ' assigned, ' + fail.length + ' failed', duration: 8 });
+      } else {
+        antd.notification.error({ message: 'All ' + fail.length + ' assignments failed', duration: 8 });
+      }
+      setGapAssigning(false);
+      setGapAssignRow(null);
+      setGapAssignTarget(undefined);
+      if (props.onRefresh) props.onRefresh();
+    });
   }
 
   var hasActiveFilters = searchText || filterStatus.length > 0 || filterAssignee || filterProjects.length > 0 || filterPolicies.length > 0;
@@ -5083,6 +5163,7 @@ function StageAssignmentsPage(props) {
                 size: 'small',
                 pagination: false,
                 showHeader: true,
+                scroll: { x: 900 },
                 onRow: function(record) {
                   return {
                     onClick: function() { applyGapFilter(record); },
@@ -5123,19 +5204,23 @@ function StageAssignmentsPage(props) {
                     sorter: function(a, b) { return a.unassigned - b.unassigned; },
                     render: function(val, row) {
                       var severity = row.currentUnassigned > 0 ? 'red' : row.unassigned >= 3 ? 'orange' : 'gold';
-                      return h(Tag, { color: severity, style: { fontWeight: 600, minWidth: 28, textAlign: 'center' } }, String(val));
+                      return h(Tooltip, { title: 'Click to assign' },
+                        h(Tag, {
+                          color: severity,
+                          style: { fontWeight: 600, minWidth: 28, textAlign: 'center', cursor: 'pointer' },
+                          onClick: function(e) {
+                            e.stopPropagation();
+                            setGapAssignRow(row);
+                            setGapAssignTarget(undefined);
+                          },
+                        }, String(val))
+                      );
                     },
                   },
                   {
-                    title: 'Total',
-                    dataIndex: 'total',
-                    key: 'total',
-                    width: 70,
-                    align: 'center',
-                    sorter: function(a, b) { return a.total - b.total; },
-                  },
-                  {
-                    title: 'Coverage',
+                    title: h(Tooltip, { title: 'Percentage of deliverables in this stage group that have an assignee' },
+                      h('span', { style: { borderBottom: '1px dashed #8F8FA3', cursor: 'help' } }, 'Coverage')
+                    ),
                     key: 'coverage',
                     width: 120,
                     sorter: function(a, b) {
@@ -5240,6 +5325,53 @@ function StageAssignmentsPage(props) {
       h('div', { style: { fontSize: 12, color: '#8F8FA3' } },
         'This will reassign ' + selectedRowKeys.length + ' stage' + (selectedRowKeys.length !== 1 ? 's' : '') + ' to the selected team member.'
       )
+    ),
+
+    // Gap Assign Modal — opened by clicking unassigned count in coverage gaps
+    h(Modal, {
+      title: gapAssignRow
+        ? 'Assign ' + gapAssignRow.unassigned + ' Unassigned — ' + gapAssignRow.stageName
+        : 'Assign Stages',
+      open: !!gapAssignRow,
+      onOk: handleGapAssign,
+      onCancel: function() { setGapAssignRow(null); setGapAssignTarget(undefined); },
+      okText: gapAssigning ? 'Assigning...' : 'Assign All',
+      okButtonProps: { disabled: !gapAssignTarget || gapAssigning },
+      width: 520,
+    },
+      gapAssignRow ? h('div', null,
+        h('div', { style: { marginBottom: 12, fontSize: 13, color: '#65657B' } },
+          h('span', { style: { fontWeight: 500 } }, gapAssignRow.projectName),
+          ' \u2192 ',
+          h('span', { style: { fontWeight: 500 } }, gapAssignRow.policyName),
+          ' \u2192 ',
+          h('span', { style: { fontWeight: 500 } }, gapAssignRow.stageName)
+        ),
+        h('div', { style: { marginBottom: 12 } },
+          h('div', { style: { fontSize: 12, color: '#8F8FA3', marginBottom: 8 } },
+            gapAssignRow.unassigned + ' deliverable' + (gapAssignRow.unassigned !== 1 ? 's' : '') + ' need an assignee for this stage'
+            + (gapAssignRow.currentUnassigned > 0 ? ' (' + gapAssignRow.currentUnassigned + ' current, ' + gapAssignRow.futureUnassigned + ' upcoming)' : '')
+          ),
+          h('div', { style: { maxHeight: 140, overflowY: 'auto', marginBottom: 12, padding: '8px 12px', background: '#fafafa', borderRadius: 6, fontSize: 12 } },
+            getGapStages(gapAssignRow).map(function(s) {
+              return h('div', { key: s.key, style: { display: 'flex', justifyContent: 'space-between', padding: '2px 0' } },
+                h('span', null, s.bundleName),
+                h(Tag, { color: s.status === 'Current' ? 'red' : 'blue', style: { fontSize: 10 } }, s.status)
+              );
+            })
+          )
+        ),
+        h('div', { style: { marginBottom: 4, fontWeight: 500, fontSize: 12, color: '#65657B' } }, 'Assign to'),
+        h(Select, {
+          placeholder: 'Select a team member...',
+          value: gapAssignTarget,
+          onChange: setGapAssignTarget,
+          options: allMemberOptions,
+          showSearch: true,
+          optionFilterProp: 'label',
+          style: { width: '100%' },
+        })
+      ) : null
     )
   );
 }
@@ -8457,8 +8589,74 @@ function App() {
         // Store project members cache
         var membersCache = {};
         collabResults.forEach(function(r) { membersCache[r.pid] = r.members; });
-        setProjectMembersCache(membersCache);
 
+        // Resolve unknown assignees: find assignee IDs that have empty names AND aren't in the members cache
+        var unknownIds = {};
+        enrichedBundles.forEach(function(b) {
+          var sa = b.stageAssignee;
+          if (sa && sa.id && !sa.name) {
+            // Check if this ID is in the project's members cache
+            var members = membersCache[b.projectId] || [];
+            var found = members.some(function(m) { return m.id === sa.id; });
+            if (!found) unknownIds[sa.id] = true;
+          }
+          // Also check stage-level assignees
+          (b.stages || []).forEach(function(s) {
+            var a = s.assignee;
+            if (a && a.id && !a.name) {
+              var members2 = membersCache[b.projectId] || [];
+              if (!members2.some(function(m) { return m.id === a.id; })) unknownIds[a.id] = true;
+            }
+          });
+        });
+
+        var unkKeys = Object.keys(unknownIds);
+        if (unkKeys.length > 0) {
+          console.info('[Assignee] Resolving', unkKeys.length, 'unknown assignee ID(s) via /api/users bulk fetch...');
+          return apiGet('api/users').then(function(allUsers) {
+            var userList = Array.isArray(allUsers) ? allUsers : [];
+            // Build lookup maps: by id and by userName
+            var byId = {};
+            var byUserName = {};
+            userList.forEach(function(u) {
+              if (u.id) byId[u.id] = u;
+              if (u.userName) byUserName[u.userName] = u;
+            });
+            console.info('[Assignee] Fetched', userList.length, 'users. Looking up', unkKeys.length, 'unknown IDs...');
+            var resolved = 0;
+            // Patch assignee names in bundles and add resolved users to members caches
+            enrichedBundles.forEach(function(b) {
+              function patchAssignee(a) {
+                if (!a || !a.id || a.name) return;
+                var u = byId[a.id] || byUserName[a.id]; // try ID match, then userName match
+                if (u) {
+                  a.name = u.userName || '';
+                  a.firstName = u.firstName || '';
+                  a.lastName = u.lastName || '';
+                  // Add to members cache so dropdowns work
+                  var members = membersCache[b.projectId] || [];
+                  if (!members.some(function(m) { return m.id === a.id; })) {
+                    members.push({ id: a.id, userName: u.userName, firstName: u.firstName, lastName: u.lastName });
+                  }
+                  resolved++;
+                } else {
+                  console.warn('[Assignee] User ID not found in global users list:', a.id);
+                }
+              }
+              patchAssignee(b.stageAssignee);
+              (b.stages || []).forEach(function(s) { patchAssignee(s.assignee); });
+            });
+            console.info('[Assignee] Resolved', resolved, 'assignee(s) from global user list');
+            setProjectMembersCache(membersCache);
+            return enrichedBundles;
+          }).catch(function(err) {
+            console.warn('[Assignee] Global users fetch failed, continuing with unknown assignees:', err);
+            setProjectMembersCache(membersCache);
+            return enrichedBundles;
+          });
+        }
+
+        setProjectMembersCache(membersCache);
         return enrichedBundles;
       })
       .then(function(enrichedBundles) {

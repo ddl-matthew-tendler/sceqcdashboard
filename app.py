@@ -292,7 +292,19 @@ def list_bundles(
         params["search"] = search
     if state:
         params["state"] = [state]
-    return gov_get("/bundles", params=params)
+    result = gov_get("/bundles", params=params)
+    # Debug: log assignee data shapes to diagnose "Unknown user" issues
+    bundles = result.get("data", []) if isinstance(result, dict) else []
+    for b in bundles[:5]:  # Sample first 5
+        sa = b.get("stageAssignee")
+        if sa and sa.get("id"):
+            logger.info(
+                f"[Assignee Debug] bundle={b.get('name', '?')} "
+                f"stageAssignee keys={list(sa.keys())} "
+                f"id={sa.get('id', '')[:12]}... name={sa.get('name', '<missing>')} "
+                f"userName={sa.get('userName', '<missing>')}"
+            )
+    return result
 
 
 @app.get("/api/bundles/{bundle_id}")
@@ -491,6 +503,7 @@ def list_users():
     return v4_get("/users")
 
 
+
 # ── Projects ──────────────────────────────────────────────────────
 
 @app.get("/api/projects")
@@ -503,7 +516,18 @@ def list_projects(limit: int = 50, offset: int = 0):
 
 @app.get("/api/projects/{project_id}/collaborators")
 def list_project_collaborators(project_id: str):
-    return v4_get(f"/projects/{project_id}/collaborators")
+    result = v4_get(f"/projects/{project_id}/collaborators")
+    # Debug: log collaborator IDs to compare with governance assignee IDs
+    members = result if isinstance(result, list) else []
+    if members:
+        sample = members[:3]
+        logger.info(
+            f"[Collaborators Debug] project={project_id[:12]}... "
+            f"count={len(members)} "
+            f"sample_ids={[m.get('id', '?')[:12] + '...' for m in sample]} "
+            f"sample_userNames={[m.get('userName', '?') for m in sample]}"
+        )
+    return result
 
 
 # ── Jobs / Runs (Automation) ───────────────────────────────────────

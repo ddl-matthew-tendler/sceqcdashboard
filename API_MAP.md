@@ -7,6 +7,7 @@ All API calls made by the frontend, routed through the FastAPI backend proxy.
 | Endpoint | Backend Route | Upstream API | Payload | Response Shape |
 |----------|--------------|--------------|---------|----------------|
 | `GET /api/users/self` | `app.py:get_current_user` | `GET /v4/users/self` | — | `{ id, userName, firstName, lastName, fullName, email }` |
+| `GET /api/users` | `app.py:list_users` | `GET /v4/users` | — | `[{ id, userName, firstName, lastName, fullName, email }]` — used for unknown assignee resolution |
 | `GET /api/bundles?limit=200` | `app.py:list_bundles` | `GET /api/governance/v1/bundles` | `?limit=200` | `{ data: [{ id, name, policyId, policyName, projectId, projectName, projectOwner, stage, stages: [{ stageId, stage: { id, name }, assignee }], state, createdAt, createdBy }] }` |
 | `GET /api/bundles/{id}/approvals` | `app.py:get_bundle_approvals` | `GET /api/governance/v1/bundles/{id}/approvals` | — | `[{ id, status, approver, ... }]` |
 | `GET /api/bundles/{id}/findings?limit=200` | `app.py:get_bundle_findings` | `GET /api/governance/v1/bundles/{id}/findings` | `?limit=200` | `{ data: [{ id, name, severity, status }] }` |
@@ -36,6 +37,12 @@ Phase 2 — All fire simultaneously (single Promise.all):
      - GET /api/bundles/{id}/approvals
      - GET /api/bundles/{id}/findings?limit=200
      - GET /api/bundles/{id}/gates
+
+Phase 2.5 — Unknown assignee resolution (conditional):
+   If any stageAssignee has an ID but empty name AND is not in the collaborators cache:
+     - GET /api/users → fetch global user list
+     - Match unknown IDs against global users by id or userName
+     - Patch resolved names into bundle data + members cache
 ```
 
 **Note on project owners (D16)**: The `/v4/projects/{id}/collaborators` endpoint returns only explicitly added collaborators, not the project owner. The app extracts the owner from the `/v4/projects` response and merges them into the collaborator list if not already present. This ensures all assignee dropdowns include the project owner.
