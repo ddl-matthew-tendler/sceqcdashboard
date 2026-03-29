@@ -441,6 +441,8 @@ function TopNav(props) {
   var useDummy = props.useDummy;
   var onToggleDummy = props.onToggleDummy;
   var connected = props.connected;
+  var debugMode = props.debugMode;
+  var onToggleDebug = props.onToggleDebug;
   // Only show whitelabel badge if terms differ from defaults
   var isWhitelabeled = terms.bundle !== DEFAULT_TERMS.bundle || terms.policy !== DEFAULT_TERMS.policy;
   var B = capFirst(terms.bundle);
@@ -467,6 +469,16 @@ function TopNav(props) {
             })
           )
         : null,
+      h('div', { className: 'dummy-data-toggle' },
+        h(Tooltip, { title: 'Show detailed error info for debugging API issues' },
+          h('span', { className: 'top-nav-env', style: debugMode ? { color: '#CCB718' } : {} }, 'Debug')
+        ),
+        h(Switch, {
+          checked: debugMode,
+          onChange: onToggleDebug,
+          size: 'small',
+        })
+      ),
       h('span', { className: 'top-nav-env' }, 'SCE QC Dashboard')
     )
   );
@@ -3848,6 +3860,7 @@ function DetailDrawer(props) {
   var deUrl = props.dataExplorerUrl || null;
   var projectMembersCache = props.projectMembersCache || {};
   var initialView = props.initialView || null;
+  var debugMode = props.debugMode || false;
 
   var _view = useState('stage-timeline');
   var activeView = _view[0];
@@ -3933,9 +3946,27 @@ function DetailDrawer(props) {
                         .then(function(resp) {
                           if (resp && resp.assignee) { stageData.assignee = resp.assignee; } else if (!userId) { stageData.assignee = null; }
                           if (resp && resp.stage && resp.stage.policyVersionId) { bundle._policyVersionId = resp.stage.policyVersionId; }
-                          if (resp.verified === true) { antd.message.success('Stage reassigned \u2014 verified'); }
-                          else if (resp.verified === false) { antd.notification.warning({ message: 'Assignment may not have saved', description: 'Read-back mismatch. Try refreshing.', duration: 10 }); }
-                          else { antd.message.success('Stage reassigned'); }
+                          if (resp.verified === true) {
+                            antd.message.success('Stage reassigned — verified');
+                          } else if (resp.verified === false) {
+                            var dbg = resp._debug || {};
+                            var attempts = dbg.attempts || [];
+                            var lastAttempt = attempts[attempts.length - 1] || {};
+                            var desc = 'Read-back mismatch after ' + attempts.length + ' attempts.\n' +
+                              'Requested: ' + (dbg.requestedId || 'unassign') + '\n' +
+                              'Got back: ' + (lastAttempt.actualId || 'null') + '\n' +
+                              'Stage: ' + (dbg.stageId || '?');
+                            if (debugMode) {
+                              desc += '\n\nDebug:\n' + JSON.stringify(dbg, null, 2);
+                            }
+                            antd.notification.warning({
+                              message: 'Assignment may not have saved',
+                              description: h('pre', { style: { fontSize: 11, whiteSpace: 'pre-wrap', margin: 0, maxHeight: 300, overflow: 'auto' } }, desc),
+                              duration: debugMode ? 0 : 15,
+                            });
+                          } else {
+                            antd.message.success('Stage reassigned');
+                          }
                         })
                         .catch(function(err) { antd.notification.error({ message: 'Reassignment failed', description: parseServerError(err.message || String(err)), duration: 8 }); });
                     },
@@ -6963,13 +6994,6 @@ function RiskOptimizerPage(props) {
 
     // ── Overview Tab ──
     !showWizard && activeTab === 'overview' ? h('div', null,
-      // Summary cards row
-      h('div', { className: 'stats-row' },
-        h(StatCard, { label: 'Total ' + B + 's', value: scoredBundles.length, color: 'primary' }),
-        h(StatCard, { label: 'High Risk', value: summary.high, color: 'danger', sub: 'Need most rigorous QC' }),
-        h(StatCard, { label: 'Medium Risk', value: summary.medium, color: 'warning', sub: 'Code review + spot check' }),
-        h(StatCard, { label: 'Low Risk', value: summary.low, color: 'success', sub: 'Output crosscheck sufficient' })
-      ),
 
       // Calibration cards
       h('div', { className: 'panel-header', style: { marginBottom: 12 } },
@@ -7942,6 +7966,8 @@ function App() {
   var _s10 = useState([]); var assignmentRules = _s10[0]; var setAssignmentRules = _s10[1];
   var _s11 = useState([]); var automationRules = _s11[0]; var setAutomationRules = _s11[1];
   var _s12 = useState([]); var automationHistory = _s12[0]; var setAutomationHistory = _s12[1];
+  var _dbg = useState(function() { try { return localStorage.getItem('sce_debug_mode') === 'true'; } catch(e) { return false; } }); var debugMode = _dbg[0]; var setDebugMode = _dbg[1];
+  var toggleDebugMode = useCallback(function(v) { setDebugMode(v); try { localStorage.setItem('sce_debug_mode', v ? 'true' : 'false'); } catch(e) {} }, []);
 
   // ── Live data state ──────────────────────────────────────────
   var _cu = useState(null); var currentUser = _cu[0]; var setCurrentUser = _cu[1];
@@ -8620,7 +8646,7 @@ function App() {
 
   return h(ConfigProvider, { theme: dominoTheme },
     h('div', null,
-      h(TopNav, { terms: terms, useDummy: useDummy, onToggleDummy: handleToggleDummy, connected: connected }),
+      h(TopNav, { terms: terms, useDummy: useDummy, onToggleDummy: handleToggleDummy, connected: connected, debugMode: debugMode, onToggleDebug: toggleDebugMode }),
       h('div', { className: 'app-layout' },
         h(Sidebar, { active: activePage, collapsed: sidebarCollapsed, onToggleCollapse: function() {
           setSidebarCollapsed(function(c) {
@@ -8864,6 +8890,7 @@ function App() {
         dataExplorerUrl: dataExplorerUrl,
         projectMembersCache: projectMembersCache,
         initialView: drawerInitialView,
+        debugMode: debugMode,
       })
     )
   );

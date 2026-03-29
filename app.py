@@ -335,46 +335,87 @@ def patch_bundle_stage(bundle_id: str, stage_id: str, body: dict):
     """Reassign a stage owner. Body: {"assignee": {"id": "userId"}}
 
     After the PATCH, re-reads the bundle from Domino to verify the
-    assignment actually persisted.  Returns the verified stage data
-    with a ``verified`` flag so the frontend knows the read-back
-    succeeded.
+    assignment actually persisted.  Retries read-back up to 3 times
+    with increasing delays to handle eventual consistency.
+    Returns the verified stage data with a ``verified`` flag and
+    ``_debug`` dict so the frontend can surface details.
     """
     patch_resp = gov_patch(f"/bundles/{bundle_id}/stages/{stage_id}", json_body=body)
 
-    # ── Read-back verification ───────────────────────────────────
-    # Brief delay before read-back: Domino's API has eventual consistency,
-    # so an immediate GET after PATCH may return stale assignee data.
-    time.sleep(0.5)
-
     requested_id = (body.get("assignee") or {}).get("id") if body.get("assignee") else None
-    try:
-        bundle = gov_get(f"/bundles/{bundle_id}")
-        stages = bundle.get("stages") or []
-        matched = None
-        for s in stages:
-            sid = s.get("stageId") or (s.get("stage") or {}).get("id")
-            if sid == stage_id:
-                matched = s
-                break
+    debug = {
+        "bundleId": bundle_id,
+        "stageId": stage_id,
+        "requestedId": requested_id,
+        "patchStatus": "ok",
+        "patchRespKeys": list(patch_resp.keys()) if isinstance(patch_resp, dict) else str(type(patch_resp)),
+        "patchAssigneeInResp": (patch_resp.get("assignee") or {}).get("id") if isinstance(patch_resp, dict) else None,
+        "attempts": [],
+    }
 
-        if matched is not None:
-            actual_id = (matched.get("assignee") or {}).get("id") if matched.get("assignee") else None
-            if actual_id == requested_id:
-                patch_resp["verified"] = True
+    # ── Read-back verification with retry ────────────────────────
+    # Domino's API has eventual consistency — retry up to 3 times
+    # with increasing delays (0.5s, 1.5s, 3s) before declaring mismatch.
+    delays = [0.5, 1.5, 3.0]
+    verified = None  # None = indeterminate
+
+    for attempt_num, delay in enumerate(delays, 1):
+        time.sleep(delay)
+        attempt_info = {"attempt": attempt_num, "delay": delay}
+        try:
+            bundle = gov_get(f"/bundles/{bundle_id}")
+            stages = bundle.get("stages") or []
+            all_stage_ids = []
+            matched = None
+            for s in stages:
+                sid = s.get("stageId") or (s.get("stage") or {}).get("id")
+                all_stage_ids.append(sid)
+                if sid == stage_id:
+                    matched = s
+                    break
+
+            if matched is not None:
+                actual_id = (matched.get("assignee") or {}).get("id") if matched.get("assignee") else None
+                attempt_info["actualId"] = actual_id
+                attempt_info["matched"] = True
+                if actual_id == requested_id:
+                    verified = True
+                    debug["attempts"].append(attempt_info)
+                    break
+                else:
+                    attempt_info["reason"] = "id_mismatch"
             else:
-                logger.warning(
-                    f"Assignment verification mismatch for bundle={bundle_id} "
-                    f"stage={stage_id}: requested={requested_id}, actual={actual_id}"
-                )
-                patch_resp["verified"] = False
-                patch_resp["actualAssignee"] = matched.get("assignee")
-        else:
-            logger.warning(f"Verification: stage {stage_id} not found in bundle {bundle_id}")
-            patch_resp["verified"] = False
-    except Exception as e:
-        logger.warning(f"Assignment verification read-back failed: {e}")
-        patch_resp["verified"] = None  # indeterminate — PATCH succeeded but verify failed
+                attempt_info["matched"] = False
+                attempt_info["reason"] = "stage_not_found"
+                attempt_info["availableStageIds"] = all_stage_ids
 
+            debug["attempts"].append(attempt_info)
+
+        except Exception as e:
+            attempt_info["reason"] = "read_back_error"
+            attempt_info["error"] = str(e)
+            debug["attempts"].append(attempt_info)
+            logger.warning(f"Assignment verification attempt {attempt_num} failed: {e}")
+
+    if verified is True:
+        patch_resp["verified"] = True
+    elif verified is None and all(a.get("reason") == "read_back_error" for a in debug["attempts"]):
+        # All attempts failed with errors — indeterminate
+        logger.warning(f"Assignment verification: all read-back attempts failed for bundle={bundle_id} stage={stage_id}")
+        patch_resp["verified"] = None
+    else:
+        # Final attempt still mismatched
+        last = debug["attempts"][-1] if debug["attempts"] else {}
+        logger.warning(
+            f"Assignment verification mismatch after {len(delays)} attempts for "
+            f"bundle={bundle_id} stage={stage_id}: requested={requested_id}, "
+            f"actual={last.get('actualId', 'unknown')}"
+        )
+        patch_resp["verified"] = False
+        if matched is not None:
+            patch_resp["actualAssignee"] = matched.get("assignee")
+
+    patch_resp["_debug"] = debug
     return patch_resp
 
 
