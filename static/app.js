@@ -3236,6 +3236,7 @@ function QCTrackerPage(props) {
   var policies = props.policies || [];
   var projects = props.projects || [];
   var onRefresh = props.onRefresh;
+  var debugMode = props.debugMode || false;
 
   // Force re-render counter (used after inline reassignment)
   var _rerender = useState(0); var setRerenderKey = _rerender[1];
@@ -3521,16 +3522,28 @@ function QCTrackerPage(props) {
                         });
                       }
                     }
+                    var dbg = resp._debug || {};
+                    var attempts = dbg.attempts || [];
+                    var lastAttempt = attempts[attempts.length - 1] || {};
+                    var isUnassign = dbg.isUnassign;
+                    var descParts = [];
+                    if (isUnassign) {
+                      descParts.push(h('p', null, 'Tried to unassign but Domino did not clear the assignee. The stage is still assigned to ' + (actualName || 'someone') + '.'));
+                      descParts.push(h('p', { style: { marginTop: 6, fontSize: 12, color: '#65657B' } }, 'Domino\'s governance API may not support unassignment via PATCH. You may need to unassign directly in Domino.'));
+                    } else {
+                      descParts.push(h('p', null, actualName
+                        ? 'Domino accepted the request but the stage is still assigned to ' + actualName + '.'
+                        : 'Domino accepted the request but did not persist the change.'));
+                      descParts.push(h('p', { style: { marginTop: 6, fontSize: 12, color: '#65657B' } }, 'Common causes: the assignee is not a collaborator on this project, or the ' + B.toLowerCase() + ' is in a state that prevents changes.'));
+                      descParts.push(h('p', { style: { marginTop: 4, fontSize: 12, fontWeight: 500 } }, 'Fix: Verify the assignee is a project collaborator in Domino.'));
+                    }
+                    if (debugMode) {
+                      descParts.push(h('pre', { style: { fontSize: 10, whiteSpace: 'pre-wrap', margin: '8px 0 0', maxHeight: 250, overflow: 'auto', background: '#f5f5f5', padding: 8, borderRadius: 4 } }, JSON.stringify(dbg, null, 2)));
+                    }
                     antd.notification.warning({
-                      message: 'Assignment did not save in Domino',
-                      description: h('div', null,
-                        h('p', null, actualName
-                          ? 'Domino accepted the request but the stage is still assigned to ' + actualName + '.'
-                          : 'Domino accepted the request but did not persist the change.'),
-                        h('p', { style: { marginTop: 6, fontSize: 12, color: '#65657B' } }, 'Common causes: the assignee is not a collaborator on this project, or the ' + B.toLowerCase() + ' is in a state that prevents changes.'),
-                        h('p', { style: { marginTop: 4, fontSize: 12, fontWeight: 500 } }, 'Fix: Verify the assignee is a project collaborator in Domino.')
-                      ),
-                      duration: 12,
+                      message: isUnassign ? 'Unassign not supported by Domino' : 'Assignment did not save in Domino',
+                      description: h('div', null, descParts),
+                      duration: debugMode ? 0 : 12,
                     });
                   } else {
                     // Only update local state after verification succeeds or is indeterminate
@@ -8620,7 +8633,7 @@ function App() {
     // All other pages get scopedBundles
     switch (activePage) {
       case 'tracker':
-        return h(QCTrackerPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, selectedBundle: selectedBundle, terms: terms, projectMembersCache: projectMembersCache, dataExplorerUrl: dataExplorerUrl, connected: connected, policies: livePolicies, onRefresh: function() { if (connected) fetchLiveData(); } });
+        return h(QCTrackerPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, selectedBundle: selectedBundle, terms: terms, projectMembersCache: projectMembersCache, dataExplorerUrl: dataExplorerUrl, connected: connected, policies: livePolicies, debugMode: debugMode, onRefresh: function() { if (connected) fetchLiveData(); } });
       case 'rules':
         return h(AssignmentRulesPage, { bundles: bundles, setBundles: setBundles, assignmentRules: assignmentRules, setAssignmentRules: setAssignmentRules, terms: terms, projectMembersCache: projectMembersCache, livePolicies: livePolicies, onNavigate: setActivePage });
       case 'milestones':

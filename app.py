@@ -339,19 +339,68 @@ def patch_bundle_stage(bundle_id: str, stage_id: str, body: dict):
     with increasing delays to handle eventual consistency.
     Returns the verified stage data with a ``verified`` flag and
     ``_debug`` dict so the frontend can surface details.
-    """
-    patch_resp = gov_patch(f"/bundles/{bundle_id}/stages/{stage_id}", json_body=body)
 
+    For unassignment (assignee is null), tries multiple payload formats
+    since the Domino governance API may reject {assignee: null} silently.
+    """
     requested_id = (body.get("assignee") or {}).get("id") if body.get("assignee") else None
+    is_unassign = body.get("assignee") is None or requested_id is None
+
+    # For unassignment, try multiple payload formats since Domino's
+    # undocumented API may only accept certain shapes for clearing.
+    unassign_formats_tried = []
+    if is_unassign:
+        unassign_payloads = [
+            ("assignee_null", {"assignee": None}),
+            ("assignee_empty_obj", {"assignee": {}}),
+            ("assignee_id_empty", {"assignee": {"id": ""}}),
+            ("assignee_id_null", {"assignee": {"id": None}}),
+        ]
+        patch_resp = None
+        for fmt_name, payload in unassign_payloads:
+            try:
+                patch_resp = gov_patch(f"/bundles/{bundle_id}/stages/{stage_id}", json_body=payload)
+                unassign_formats_tried.append({"format": fmt_name, "status": "ok", "payload": str(payload)})
+                logger.info(f"Unassign PATCH with format={fmt_name} returned 200")
+                # Quick check if this format actually cleared the assignee
+                time.sleep(0.5)
+                quick_check = gov_get(f"/bundles/{bundle_id}")
+                for s in (quick_check.get("stages") or []):
+                    sid = s.get("stageId") or (s.get("stage") or {}).get("id")
+                    if sid == stage_id:
+                        actual = (s.get("assignee") or {}).get("id") if s.get("assignee") else None
+                        unassign_formats_tried[-1]["readBackAssignee"] = actual
+                        if actual is None:
+                            unassign_formats_tried[-1]["worked"] = True
+                            logger.info(f"Unassign format={fmt_name} WORKED — stage is now unassigned")
+                        else:
+                            unassign_formats_tried[-1]["worked"] = False
+                            logger.warning(f"Unassign format={fmt_name} did NOT work — still assigned to {actual}")
+                        break
+                # If this format worked, stop trying others
+                if unassign_formats_tried[-1].get("worked"):
+                    break
+            except Exception as e:
+                unassign_formats_tried.append({"format": fmt_name, "status": "error", "error": str(e)})
+                logger.warning(f"Unassign format={fmt_name} raised: {e}")
+
+        if patch_resp is None:
+            patch_resp = {}
+    else:
+        patch_resp = gov_patch(f"/bundles/{bundle_id}/stages/{stage_id}", json_body=body)
+
     debug = {
         "bundleId": bundle_id,
         "stageId": stage_id,
         "requestedId": requested_id,
+        "isUnassign": is_unassign,
         "patchStatus": "ok",
         "patchRespKeys": list(patch_resp.keys()) if isinstance(patch_resp, dict) else str(type(patch_resp)),
         "patchAssigneeInResp": (patch_resp.get("assignee") or {}).get("id") if isinstance(patch_resp, dict) else None,
         "attempts": [],
     }
+    if unassign_formats_tried:
+        debug["unassignFormatsTried"] = unassign_formats_tried
 
     # ── Read-back verification with retry ────────────────────────
     # Domino's API has eventual consistency — retry up to 3 times
