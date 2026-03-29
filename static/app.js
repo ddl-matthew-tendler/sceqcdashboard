@@ -2896,13 +2896,16 @@ function CSVUploadDrawer(props) {
     return errors;
   }, [step, mapping, defaultPolicy, defaultProject, csvRows, previewRows]);
 
-  // Upload function — 1-by-1 with concurrency control (dry-run in dummy mode)
+  // Upload function — 1-by-1 with concurrency control
   function startUpload() {
+    if (!connected) {
+      antd.message.warning('Cannot upload in dummy mode. Connect to a Domino instance first.');
+      return;
+    }
     var validRows = previewRows.filter(function(r) { return r._valid; });
     if (validRows.length === 0) { antd.message.error('No valid rows to upload.'); return; }
-    var isDryRun = !connected;
     setStep(3);
-    setProgress({ done: 0, total: validRows.length, errors: [], dryRun: isDryRun });
+    setProgress({ done: 0, total: validRows.length, errors: [] });
 
     var idx = 0;
     var errors = [];
@@ -2913,19 +2916,11 @@ function CSVUploadDrawer(props) {
         if (idx === validRows.length) {
           setStep(4);
           setProgress(function(p) { return Object.assign({}, p, { errors: errors }); });
-          if (!isDryRun && onComplete) onComplete();
+          if (onComplete) onComplete();
         }
         return;
       }
       var row = validRows[idx++];
-      if (isDryRun) {
-        // Simulate a short delay for dry-run
-        setTimeout(function() {
-          setProgress(function(p) { return Object.assign({}, p, { done: p.done + 1 }); });
-          uploadNext();
-        }, 150);
-        return;
-      }
       var body = { name: row.name.trim(), policyId: row.policyId, projectId: row.projectId };
       apiPost('api/bundles', body)
         .then(function() {
@@ -2955,35 +2950,6 @@ function CSVUploadDrawer(props) {
     URL.revokeObjectURL(url);
   }
 
-  // Generate a sample CSV with realistic rows using available policies/projects
-  function generateSampleCSV() {
-    var sampleNames = [
-      'ADAE Q1 2026', 'ADSL Q1 2026', 'ADTTE Q1 2026', 'ADCM Q1 2026',
-      'ADLB Q1 2026', 'ADVS Q1 2026', 'ADMH Q1 2026', 'ADEG Q1 2026',
-    ];
-    var pNames = policies.map(function(p) { return p.name; });
-    var pjNames = projects.map(function(p) { return p.name; });
-    // Filter out names that already exist as bundles
-    var existingNames = {};
-    (bundles || []).forEach(function(b) { if (b.name) existingNames[b.name.trim().toLowerCase()] = true; });
-    var available = sampleNames.filter(function(n) { return !existingNames[n.toLowerCase()]; });
-    if (available.length === 0) available = sampleNames.map(function(n) { return n + ' (copy)'; });
-
-    var rows = available.slice(0, 5).map(function(name, i) {
-      var pol = pNames.length > 0 ? pNames[i % pNames.length] : 'My QC Plan';
-      var proj = pjNames.length > 0 ? pjNames[i % pjNames.length] : 'My Project';
-      return '"' + name + '","' + pol + '","' + proj + '"';
-    });
-    var csv = 'name,policyName,projectName\n' + rows.join('\n');
-    // Feed directly into the parser instead of downloading
-    parseCSV(csv);
-    antd.message.success('Loaded ' + rows.length + ' sample rows — proceed to column mapping');
-  }
-
-  // Load sample CSV from a text area (paste support)
-  var _pasteMode = useState(false); var pasteMode = _pasteMode[0]; var setPasteMode = _pasteMode[1];
-  var _pasteText = useState(''); var pasteText = _pasteText[0]; var setPasteText = _pasteText[1];
-
   var steps = [
     { title: 'Upload' },
     { title: 'Map Columns' },
@@ -3004,7 +2970,7 @@ function CSVUploadDrawer(props) {
     ) : step === 2 ? h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: 8 } },
       h(Button, { onClick: function() { setStep(1); } }, 'Back'),
       h(Button, { type: 'primary', disabled: previewRows.filter(function(r) { return r._valid; }).length === 0, onClick: startUpload },
-        (connected ? 'Upload ' : 'Dry-run ') + previewRows.filter(function(r) { return r._valid; }).length + ' ' + B + 's')
+        'Upload ' + previewRows.filter(function(r) { return r._valid; }).length + ' ' + B + 's')
     ) : null,
   },
     // Steps indicator
@@ -3030,30 +2996,8 @@ function CSVUploadDrawer(props) {
       h('div', { style: { marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' } },
         h(Button, { size: 'small', onClick: downloadTemplate,
           icon: icons && icons.DownloadOutlined ? h(icons.DownloadOutlined) : null,
-        }, 'Download Template'),
-        h(Button, { size: 'small', type: 'dashed', onClick: generateSampleCSV,
-          icon: icons && icons.ExperimentOutlined ? h(icons.ExperimentOutlined) : null,
-        }, 'Load Sample Data'),
-        h(Button, { size: 'small', onClick: function() { setPasteMode(!pasteMode); },
-          icon: icons && icons.EditOutlined ? h(icons.EditOutlined) : null,
-        }, pasteMode ? 'Hide Paste' : 'Paste CSV')
+        }, 'Download Template')
       ),
-      // Paste CSV text area
-      pasteMode ? h('div', { style: { marginTop: 12 } },
-        h(antd.Input.TextArea, {
-          rows: 6,
-          placeholder: 'name,policyName,projectName\n"ADAE Q1 2026","ADaM QC Plan - High Risk","My Project"',
-          value: pasteText,
-          onChange: function(e) { setPasteText(e.target.value); },
-          style: { fontFamily: 'monospace', fontSize: 12 },
-        }),
-        h('div', { style: { marginTop: 8, display: 'flex', gap: 8 } },
-          h(Button, { type: 'primary', size: 'small', disabled: !pasteText.trim(),
-            onClick: function() { parseCSV(pasteText); }
-          }, 'Parse Pasted CSV'),
-          h(Button, { size: 'small', onClick: function() { setPasteText(''); } }, 'Clear')
-        )
-      ) : null,
       h('div', { style: { marginTop: 16 } },
         h(antd.Collapse, { items: [{
           key: 'template',
@@ -3172,8 +3116,8 @@ function CSVUploadDrawer(props) {
                 ? ' (' + previewRows.filter(function(r) { return r._isDuplicate; }).length + ' duplicates will be skipped)'
                 : ''),
           }),
-      !connected ? h(antd.Alert, { type: 'info', showIcon: true, style: { marginBottom: 16 },
-        message: 'Dummy mode: upload will run as a dry-run (no ' + B.toLowerCase() + 's will be created in Domino).' }) : null,
+      !connected ? h(antd.Alert, { type: 'warning', showIcon: true, style: { marginBottom: 16 },
+        message: 'Dummy mode: upload is disabled. Connect to a Domino instance to create ' + B.toLowerCase() + 's.' }) : null,
       h(Table, {
         dataSource: previewRows,
         columns: [
@@ -3213,16 +3157,13 @@ function CSVUploadDrawer(props) {
 
     // Step 3: Uploading
     step === 3 ? h('div', { style: { textAlign: 'center', padding: '40px 0' } },
-      progress.dryRun ? h(Tag, { color: 'blue', style: { marginBottom: 12 } }, 'DRY RUN') : null,
       h(antd.Progress, {
         type: 'circle',
         percent: progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0,
         format: function() { return progress.done + ' / ' + progress.total; },
       }),
       h('div', { style: { marginTop: 16, fontSize: 14, color: '#65657B' } },
-        progress.dryRun
-          ? 'Simulating upload of ' + B.toLowerCase() + 's...'
-          : 'Creating ' + B.toLowerCase() + 's... Please do not close this drawer.'
+        'Creating ' + B.toLowerCase() + 's... Please do not close this drawer.'
       ),
       progress.errors.length > 0
         ? h('div', { style: { marginTop: 12 } },
@@ -3233,15 +3174,14 @@ function CSVUploadDrawer(props) {
 
     // Step 4: Done
     step === 4 ? h('div', { style: { textAlign: 'center', padding: '40px 0' } },
-      progress.dryRun ? h(Tag, { color: 'blue', style: { marginBottom: 12 } }, 'DRY RUN — no deliverables were created') : null,
       h(antd.Result, {
         status: progress.errors.length === 0 ? 'success' : 'warning',
         title: progress.errors.length === 0
-          ? (progress.dryRun ? 'Dry-run complete: ' + progress.total + ' ' + B.toLowerCase() + 's would be created' : 'All ' + progress.total + ' ' + B.toLowerCase() + 's created successfully!')
+          ? 'All ' + progress.total + ' ' + B.toLowerCase() + 's created successfully!'
           : (progress.total - progress.errors.length) + ' of ' + progress.total + ' created',
         subTitle: progress.errors.length > 0
           ? progress.errors.length + ' failed, see details below'
-          : (progress.dryRun ? 'All rows validated and resolved successfully. Connect to Domino to create them for real.' : 'You can now find them in the QC Tracker.'),
+          : 'You can now find them in the QC Tracker.',
         extra: [
           h(Button, { key: 'close', type: 'primary', onClick: handleClose }, 'Close'),
           h(Button, { key: 'again', onClick: reset }, 'Upload More'),
@@ -4067,23 +4007,52 @@ function DetailDrawer(props) {
         var explorerPath = explorerLink ? buildDataExplorerPath(att) : null;
         var ver = id.snapshotVersion;
         var staleness = att._staleness;
-        return h('div', { key: i, style: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid #F5F5F8' } },
-          h(Tag, { color: typeColors[att.type] || 'default', style: { fontSize: 10, flexShrink: 0 } }, typeLabel),
+        var deIcon = icons && icons.TableOutlined ? h(icons.TableOutlined, { style: { fontSize: 11 } }) : null;
+        // Version tag rendering
+        var versionTag = null;
+        if (ver != null) {
+          if (staleness && staleness.isStale) {
+            var timeStr = '';
+            if (staleness.latestSnapshotTime) {
+              var ts = dayjs(staleness.latestSnapshotTime);
+              timeStr = ' (created ' + ts.format('MMM D, YYYY') + ')';
+            }
+            var tipText = 'Outdated: v' + staleness.currentVersion + ' attached, but v' + staleness.latestVersion + ' is available' + timeStr + '. Source: ' + (staleness.sourceName || 'unknown') + '.';
+            versionTag = h(Tooltip, { title: tipText, overlayStyle: { maxWidth: 340 } },
+              h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 3 } },
+                h(Tag, { color: 'orange', style: { fontSize: 10, margin: 0 } }, 'v' + ver),
+                h('span', { style: { color: '#D4380D', fontSize: 13, cursor: 'help' } }, '\u26A0')
+              )
+            );
+          } else if (staleness && !staleness.isStale && staleness.latestVersion > 1) {
+            versionTag = h(Tooltip, { title: 'Current version (latest known: v' + staleness.latestVersion + ')' },
+              h(Tag, { color: 'green', style: { fontSize: 10, margin: 0 } }, 'v' + ver)
+            );
+          } else {
+            versionTag = h(Tag, { style: { fontSize: 10, margin: 0 } }, 'v' + ver);
+          }
+        }
+        // Metadata line: created date + created by
+        var metaParts = [];
+        if (att.createdAt) metaParts.push(dayjs(att.createdAt).format('MMM D, YYYY'));
+        if (att.createdBy) metaParts.push(att.createdBy.name || att.createdBy.userName);
+        var metaLine = metaParts.length > 0
+          ? h('div', { style: { fontSize: 11, color: '#8F8FA3', marginTop: 2 } }, metaParts.join(' \u00B7 '))
+          : null;
+        return h('div', { key: i, style: { display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 0', borderBottom: '1px solid #F5F5F8' } },
+          h(Tag, { color: typeColors[att.type] || 'default', style: { fontSize: 10, flexShrink: 0, marginTop: 2 } }, typeLabel),
           h('div', { style: { flex: 1, minWidth: 0 } },
-            explorerLink
-              ? h(Tooltip, { title: 'Open in Data Explorer: ' + explorerPath },
-                  h('a', { href: explorerLink, onClick: function(e) { openDataExplorer(explorerLink, explorerPath, e); }, style: { fontSize: 13, color: '#0070CC', cursor: 'pointer', fontWeight: 500 } }, fname))
-              : dominoUrl
-                ? h('a', { href: dominoUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 13, color: '#543FDE', fontWeight: 500 } }, fname)
-                : h('span', { style: { fontSize: 13, fontWeight: 500 } }, fname),
-            ver != null
-              ? h('span', { style: { fontSize: 11, color: '#8F8FA3', marginLeft: 6 } },
-                  staleness && staleness.isStale
-                    ? h(Tooltip, { title: 'Outdated: v' + staleness.currentVersion + ' attached, v' + staleness.latestVersion + ' available' }, h('span', { style: { color: '#D4380D' } }, 'v' + ver + ' \u26A0'))
-                    : 'v' + ver)
-              : null
-          ),
-          att.createdBy ? h('span', { style: { fontSize: 11, color: '#B0B0C0', flexShrink: 0 } }, att.createdBy.name || att.createdBy.userName) : null
+            h('div', { style: { display: 'flex', alignItems: 'center', gap: 6 } },
+              explorerLink
+                ? h(Tooltip, { title: 'Open in Data Explorer: ' + explorerPath },
+                    h('a', { href: explorerLink, onClick: function(e) { openDataExplorer(explorerLink, explorerPath, e); }, style: { fontSize: 13, color: '#0070CC', cursor: 'pointer', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: 4 } }, deIcon, fname))
+                : dominoUrl
+                  ? h('a', { href: dominoUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 13, color: '#543FDE', fontWeight: 500 } }, fname)
+                  : h('span', { style: { fontSize: 13, fontWeight: 500 } }, fname),
+              versionTag
+            ),
+            metaLine
+          )
         );
       })
     );
@@ -4631,6 +4600,7 @@ function StageAssignmentsPage(props) {
   var _fs6 = useState([]); var selectedRowKeys = _fs6[0]; var setSelectedRowKeys = _fs6[1];
   var _fs7 = useState(false); var reassignModalOpen = _fs7[0]; var setReassignModalOpen = _fs7[1];
   var _fs8 = useState(undefined); var reassignTarget = _fs8[0]; var setReassignTarget = _fs8[1];
+  var _fs9 = useState(true); var gapsPanelOpen = _fs9[0]; var setGapsPanelOpen = _fs9[1];
 
   // Flatten all stages across all bundles into rows
   var allStages = useMemo(function() {
@@ -8125,10 +8095,6 @@ function App() {
       var mockUser = MOCK_USERS.studyLead;
       setCurrentUser({ id: mockUser.id, userName: mockUser.name, firstName: mockUser.firstName, lastName: mockUser.lastName });
     }
-    // Populate policies from mock data so CSV upload can resolve names
-    if (typeof MOCK_POLICIES !== 'undefined') {
-      setLivePolicies(MOCK_POLICIES);
-    }
     if (typeof MOCK_BUNDLES !== 'undefined') {
       var mockEnriched = MOCK_BUNDLES.map(function(b) {
         var copy = Object.assign({}, b);
@@ -8484,6 +8450,66 @@ function App() {
         h('div', { className: 'main-content' },
           // Universal Scope Bar
           h('div', { className: 'global-filter-bar' },
+            // Saved Views filter group
+            h('div', { className: 'global-filter-group' },
+              h('span', { className: 'global-filter-label' }, 'Saved Views'),
+              h(Select, {
+                placeholder: 'Select a view...',
+                value: activePresetName || undefined,
+                onChange: function(val) {
+                  if (!val) {
+                    setScopeProjects([]); setScopeTags([]); setScopeStates([]); setFilterMyCurrentStage(false); setFilterMyFutureStage(false); setFilterMyPriorStage(false);
+                    setActivePresetName(null);
+                    return;
+                  }
+                  var preset = scopePresets.find(function(p) { return p.name === val; });
+                  if (preset) applyPreset(preset);
+                },
+                allowClear: true,
+                style: { minWidth: 180 }, size: 'small',
+                options: scopePresets.map(function(p) {
+                  return {
+                    label: (defaultPresetName === p.name ? '★ ' : '') + p.name,
+                    value: p.name,
+                  };
+                }),
+                optionRender: function(option) {
+                  var name = option.value;
+                  var isDef = defaultPresetName === name;
+                  return h('div', {
+                    style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' },
+                    onContextMenu: function(e) {
+                      e.preventDefault(); e.stopPropagation();
+                    },
+                  },
+                    h('span', null, option.label),
+                    h('span', { style: { display: 'flex', gap: 4, marginLeft: 8 } },
+                      h(Tooltip, { title: isDef ? 'Remove as default' : 'Set as default (loads on startup)' },
+                        h('span', {
+                          style: { cursor: 'pointer', fontSize: 14, color: isDef ? '#FAAD14' : '#d9d9d9' },
+                          onClick: function(e) { e.stopPropagation(); handleToggleDefault(name); },
+                        }, '★')
+                      ),
+                      h(Tooltip, { title: 'Delete this view' },
+                        h('span', {
+                          style: { cursor: 'pointer', fontSize: 12, color: '#ff4d4f' },
+                          onClick: function(e) { e.stopPropagation(); handleDeletePreset(name); },
+                        }, '✕')
+                      )
+                    )
+                  );
+                },
+              }),
+              hasScopeFilters
+                ? h(Tooltip, { title: 'Save current scope as a named view' },
+                    h(Button, {
+                      type: 'link', size: 'small',
+                      style: { fontSize: 12, padding: '0 4px' },
+                      onClick: function() { setPresetSaveOpen(true); setPresetNameInput(activePresetName || ''); },
+                    }, '+ Save view')
+                  )
+                : null
+            ),
             // Project filter group
             h('div', { className: 'global-filter-group' },
               h('span', { className: 'global-filter-label' }, 'Project'),
@@ -8587,68 +8613,7 @@ function App() {
                 )
               )
             ),
-            h('span', { className: 'global-filter-divider' }),
-            // Saved views — compact
-            h(Select, {
-              placeholder: 'Views',
-              value: activePresetName || undefined,
-              onChange: function(val) {
-                if (!val) {
-                  setScopeProjects([]); setScopeTags([]); setScopeStates([]); setFilterMyCurrentStage(false); setFilterMyFutureStage(false); setFilterMyPriorStage(false);
-                  setActivePresetName(null);
-                  return;
-                }
-                var preset = scopePresets.find(function(p) { return p.name === val; });
-                if (preset) applyPreset(preset);
-              },
-              allowClear: true,
-              style: { minWidth: 120 }, size: 'small',
-              options: scopePresets.map(function(p) {
-                return {
-                  label: (defaultPresetName === p.name ? '★ ' : '') + p.name,
-                  value: p.name,
-                };
-              }),
-              dropdownRender: function(menu) {
-                return h('div', null,
-                  menu,
-                  h('div', { style: { borderTop: '1px solid #f0f0f0', padding: '6px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
-                    hasScopeFilters
-                      ? h(Button, { type: 'link', size: 'small', style: { fontSize: 11, padding: 0 }, onClick: function() {
-                          setPresetSaveOpen(true); setPresetNameInput(activePresetName || '');
-                        } }, '+ Save current view')
-                      : h('span', { style: { fontSize: 11, color: '#8F8FA3' } }, 'Set filters to save a view'),
-                    scopePresets.length > 0 ? h('span', { style: { fontSize: 10, color: '#8F8FA3' } }, 'Right-click for options') : null
-                  )
-                );
-              },
-              optionRender: function(option) {
-                var name = option.value;
-                var isDef = defaultPresetName === name;
-                return h('div', {
-                  style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' },
-                  onContextMenu: function(e) {
-                    e.preventDefault(); e.stopPropagation();
-                  },
-                },
-                  h('span', null, option.label),
-                  h('span', { style: { display: 'flex', gap: 4, marginLeft: 8 } },
-                    h(Tooltip, { title: isDef ? 'Remove as default' : 'Set as default (loads on startup)' },
-                      h('span', {
-                        style: { cursor: 'pointer', fontSize: 14, color: isDef ? '#FAAD14' : '#d9d9d9' },
-                        onClick: function(e) { e.stopPropagation(); handleToggleDefault(name); },
-                      }, '★')
-                    ),
-                    h(Tooltip, { title: 'Delete this view' },
-                      h('span', {
-                        style: { cursor: 'pointer', fontSize: 12, color: '#ff4d4f' },
-                        onClick: function(e) { e.stopPropagation(); handleDeletePreset(name); },
-                      }, '✕')
-                    )
-                  )
-                );
-              },
-            }),
+            // Right-aligned count + clear
             hasScopeFilters
               ? h('span', { style: { marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 } },
                   h(Tag, { color: 'purple' }, scopedBundles.length + ' of ' + bundles.length + ' ' + terms.bundle.toLowerCase() + 's'),
