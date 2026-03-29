@@ -495,6 +495,7 @@ var NAV_ITEMS = [
   { key: 'rules', iconName: 'SettingOutlined', label: 'Bulk Assignment Rules' },
   { key: 'automation', iconName: 'ThunderboltOutlined', label: 'Automation' },
   { key: 'risk', iconName: 'SlidersOutlined', label: 'Risk Optimizer' },
+  { key: 'utilities', iconName: 'ToolOutlined', label: 'Utilities' },
 ];
 
 function Sidebar(props) {
@@ -8250,6 +8251,319 @@ function CsvImportModal(props) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  COMPONENT: Copy Deliverables Utility
+// ═══════════════════════════════════════════════════════════════
+function CopyDeliverablesUtility(props) {
+  var bundles = props.bundles || [];
+  var projects = props.projects || [];
+  var policies = props.policies || [];
+  var connected = props.connected;
+  var onComplete = props.onComplete;
+  var terms = props.terms || DEFAULT_TERMS;
+  var B = capFirst(terms.bundle);
+
+  var _sourceProject = useState(null); var sourceProject = _sourceProject[0]; var setSourceProject = _sourceProject[1];
+  var _targetProject = useState(null); var targetProject = _targetProject[0]; var setTargetProject = _targetProject[1];
+  var _selectedKeys = useState([]); var selectedKeys = _selectedKeys[0]; var setSelectedKeys = _selectedKeys[1];
+  var _step = useState(0); var step = _step[0]; var setStep = _step[1]; // 0=select, 1=confirm, 2=copying, 3=done
+  var _progress = useState({ done: 0, total: 0, errors: [], created: [] }); var progress = _progress[0]; var setProgress = _progress[1];
+
+  // Derive project options from all projects (not just those with bundles)
+  var projectOptions = useMemo(function() {
+    // Combine API projects list with any projects only known from bundles
+    var map = {};
+    projects.forEach(function(p) { map[p.id] = { id: p.id, name: p.name || p.id }; });
+    bundles.forEach(function(b) {
+      if (b.projectId && !map[b.projectId]) map[b.projectId] = { id: b.projectId, name: b.projectName || b.projectId };
+    });
+    return Object.values(map).sort(function(a, b) { return (a.name || '').localeCompare(b.name || ''); });
+  }, [projects, bundles]);
+
+  // Bundles in the source project
+  var sourceBundles = useMemo(function() {
+    if (!sourceProject) return [];
+    return bundles.filter(function(b) { return b.projectId === sourceProject; });
+  }, [bundles, sourceProject]);
+
+  // Existing bundle names in target project (for duplicate detection)
+  var targetExistingNames = useMemo(function() {
+    if (!targetProject) return {};
+    var names = {};
+    bundles.forEach(function(b) {
+      if (b.projectId === targetProject && b.name) names[b.name.trim().toLowerCase()] = true;
+    });
+    return names;
+  }, [bundles, targetProject]);
+
+  // Preview rows with duplicate detection
+  var previewRows = useMemo(function() {
+    return sourceBundles.filter(function(b) {
+      return selectedKeys.indexOf(b.id) >= 0;
+    }).map(function(b) {
+      var isDuplicate = b.name && targetExistingNames[b.name.trim().toLowerCase()];
+      return {
+        id: b.id,
+        name: b.name,
+        policyName: b.policyName || '',
+        policyId: b.policyId || '',
+        state: b.state || '',
+        isDuplicate: !!isDuplicate,
+      };
+    });
+  }, [sourceBundles, selectedKeys, targetExistingNames]);
+
+  var validRows = previewRows.filter(function(r) { return !r.isDuplicate && r.policyId; });
+  var duplicateRows = previewRows.filter(function(r) { return r.isDuplicate; });
+
+  // Auto-select all when source changes
+  useEffect(function() {
+    setSelectedKeys(sourceBundles.map(function(b) { return b.id; }));
+  }, [sourceProject]);
+
+  function reset() {
+    setSourceProject(null); setTargetProject(null); setSelectedKeys([]);
+    setStep(0); setProgress({ done: 0, total: 0, errors: [], created: [] });
+  }
+
+  function startCopy() {
+    if (!connected) {
+      antd.message.warning('Cannot copy in dummy mode. Connect to a Domino instance first.');
+      return;
+    }
+    if (validRows.length === 0) { antd.message.error('No valid ' + B.toLowerCase() + 's to copy.'); return; }
+    setStep(2);
+    setProgress({ done: 0, total: validRows.length, errors: [], created: [] });
+
+    console.group('[CopyDeliverables] Starting copy: ' + validRows.length + ' items');
+    console.log('Source project:', sourceProject, sourceProjectName);
+    console.log('Target project:', targetProject, targetProjectName);
+    console.log('Items to copy:', validRows.map(function(r) { return { name: r.name, policyId: r.policyId, policyName: r.policyName }; }));
+    if (duplicateRows.length > 0) console.warn('Skipping ' + duplicateRows.length + ' duplicates:', duplicateRows.map(function(r) { return r.name; }));
+
+    var idx = 0;
+    var errors = [];
+    var created = [];
+    var CONCURRENCY = 3;
+
+    function copyNext() {
+      if (idx >= validRows.length) {
+        if (errors.length + created.length >= validRows.length) {
+          console.log('[CopyDeliverables] Complete — created: ' + created.length + ', failed: ' + errors.length);
+          if (errors.length > 0) console.warn('[CopyDeliverables] Failures:', errors);
+          console.groupEnd();
+          setStep(3);
+          setProgress(function(p) { return Object.assign({}, p, { errors: errors, created: created }); });
+          if (onComplete) onComplete();
+        }
+        return;
+      }
+      var row = validRows[idx++];
+      var body = { name: row.name.trim(), policyId: row.policyId, projectId: targetProject };
+      console.log('[CopyDeliverables] POST api/bundles →', JSON.stringify(body));
+      apiPost('api/bundles', body)
+        .then(function(resp) {
+          console.log('[CopyDeliverables] OK "' + row.name + '" → id:', resp && resp.id);
+          created.push({ name: row.name, id: resp && resp.id });
+          setProgress(function(p) { return Object.assign({}, p, { done: p.done + 1, created: created.slice() }); });
+        })
+        .catch(function(err) {
+          var errMsg = (err && err.message) || String(err);
+          console.error('[CopyDeliverables] FAIL "' + row.name + '" →', errMsg);
+          errors.push({ name: row.name, error: errMsg, request: body });
+          setProgress(function(p) { return Object.assign({}, p, { done: p.done + 1, errors: errors.slice() }); });
+        })
+        .then(copyNext);
+    }
+
+    for (var c = 0; c < Math.min(CONCURRENCY, validRows.length); c++) { copyNext(); }
+  }
+
+  var sourceProjectName = (projectOptions.find(function(p) { return p.id === sourceProject; }) || {}).name || '';
+  var targetProjectName = (projectOptions.find(function(p) { return p.id === targetProject; }) || {}).name || '';
+
+  // Source bundle table columns
+  var sourceColumns = [
+    { title: B + ' Name', dataIndex: 'name', key: 'name' },
+    { title: capFirst(terms.policy), dataIndex: 'policyName', key: 'policy' },
+    { title: 'State', dataIndex: 'state', key: 'state', width: 100,
+      render: function(val) {
+        var color = val === 'Active' ? 'blue' : val === 'Complete' ? 'green' : 'default';
+        return h(Tag, { color: color }, val || '-');
+      }
+    },
+  ];
+
+  // Preview table columns
+  var previewColumns = [
+    { title: B + ' Name', dataIndex: 'name', key: 'name' },
+    { title: capFirst(terms.policy), dataIndex: 'policyName', key: 'policy' },
+    { title: 'Status', key: 'status', width: 140,
+      render: function(_, row) {
+        if (row.isDuplicate) return h(Tag, { color: 'orange' }, 'Duplicate — skip');
+        if (!row.policyId) return h(Tag, { color: 'red' }, 'No policy');
+        return h(Tag, { color: 'green' }, 'Ready');
+      }
+    },
+  ];
+
+  return h('div', { className: 'panel', style: { maxWidth: 900 } },
+    h('div', { className: 'panel-header' },
+      h('span', { className: 'panel-title' }, 'Copy ' + B + 's Between Projects'),
+      step === 3 ? h(Button, { size: 'small', onClick: reset }, 'Start Over') : null
+    ),
+
+    // Step 0: Select source & target
+    step === 0 ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 16 } },
+      h('div', { style: { display: 'flex', gap: 16, flexWrap: 'wrap' } },
+        h('div', { style: { flex: 1, minWidth: 250 } },
+          h('label', { style: { fontSize: 12, color: '#65657B', display: 'block', marginBottom: 4 } }, 'Source Project'),
+          h(Select, {
+            placeholder: 'Select source project...',
+            value: sourceProject || undefined,
+            onChange: function(val) { setSourceProject(val); setTargetProject(null); },
+            showSearch: true, optionFilterProp: 'label',
+            style: { width: '100%' },
+            options: projectOptions.map(function(p) {
+              var count = bundles.filter(function(b) { return b.projectId === p.id; }).length;
+              return { label: p.name + (count > 0 ? ' (' + count + ' ' + B.toLowerCase() + 's)' : ''), value: p.id };
+            }),
+          })
+        ),
+        h('div', { style: { flex: 1, minWidth: 250 } },
+          h('label', { style: { fontSize: 12, color: '#65657B', display: 'block', marginBottom: 4 } }, 'Target Project'),
+          h(Select, {
+            placeholder: 'Select target project...',
+            value: targetProject || undefined,
+            onChange: function(val) { setTargetProject(val); },
+            showSearch: true, optionFilterProp: 'label',
+            disabled: !sourceProject,
+            style: { width: '100%' },
+            options: projectOptions.filter(function(p) { return p.id !== sourceProject; }).map(function(p) {
+              return { label: p.name, value: p.id };
+            }),
+          })
+        )
+      ),
+
+      sourceProject && sourceBundles.length > 0 ? h('div', null,
+        h('div', { style: { fontSize: 12, color: '#65657B', marginBottom: 8 } },
+          sourceBundles.length + ' ' + B.toLowerCase() + (sourceBundles.length !== 1 ? 's' : '') + ' in ' + sourceProjectName +
+          ' — select which to copy' + (selectedKeys.length > 0 ? ' (' + selectedKeys.length + ' selected)' : '')
+        ),
+        h(Table, {
+          dataSource: sourceBundles,
+          columns: sourceColumns,
+          rowKey: 'id',
+          size: 'small',
+          pagination: sourceBundles.length > 20 ? { pageSize: 20, showSizeChanger: false } : false,
+          rowSelection: {
+            selectedRowKeys: selectedKeys,
+            onChange: function(keys) { setSelectedKeys(keys); },
+          },
+        })
+      ) : sourceProject && sourceBundles.length === 0
+        ? h(Empty, { description: 'No ' + B.toLowerCase() + 's found in this project' })
+        : null,
+
+      sourceProject && targetProject && selectedKeys.length > 0
+        ? h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 } },
+            h(Button, { onClick: reset }, 'Cancel'),
+            h(Button, { type: 'primary', onClick: function() { setStep(1); } },
+              'Review ' + selectedKeys.length + ' ' + B.toLowerCase() + (selectedKeys.length !== 1 ? 's' : ''))
+          )
+        : null
+    ) : null,
+
+    // Step 1: Confirm
+    step === 1 ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 16 } },
+      h(Alert, {
+        type: duplicateRows.length > 0 ? 'warning' : 'info',
+        showIcon: true,
+        message: 'Copying ' + validRows.length + ' ' + B.toLowerCase() + (validRows.length !== 1 ? 's' : '') +
+          ' from ' + sourceProjectName + ' to ' + targetProjectName +
+          (duplicateRows.length > 0 ? ' (' + duplicateRows.length + ' duplicate' + (duplicateRows.length !== 1 ? 's' : '') + ' will be skipped)' : ''),
+      }),
+      h(Table, {
+        dataSource: previewRows,
+        columns: previewColumns,
+        rowKey: 'id',
+        size: 'small',
+        pagination: previewRows.length > 20 ? { pageSize: 20, showSizeChanger: false } : false,
+      }),
+      h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: 8 } },
+        h(Button, { onClick: function() { setStep(0); } }, 'Back'),
+        h(Button, { type: 'primary', disabled: validRows.length === 0, onClick: startCopy },
+          'Copy ' + validRows.length + ' ' + B.toLowerCase() + (validRows.length !== 1 ? 's' : ''))
+      )
+    ) : null,
+
+    // Step 2: Copying in progress
+    step === 2 ? h('div', { style: { textAlign: 'center', padding: '40px 0' } },
+      h(Spin, { size: 'large' }),
+      h('div', { style: { marginTop: 16, fontSize: 14, color: '#65657B' } },
+        'Copying ' + B.toLowerCase() + 's... ' + progress.done + ' / ' + progress.total
+      ),
+      h(Progress, { percent: Math.round((progress.done / (progress.total || 1)) * 100), strokeColor: '#543FDE', style: { maxWidth: 400, margin: '16px auto' } })
+    ) : null,
+
+    // Step 3: Done
+    step === 3 ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 16 } },
+      h(Alert, {
+        type: progress.errors.length > 0 ? 'warning' : 'success',
+        showIcon: true,
+        message: progress.created.length + ' ' + B.toLowerCase() + (progress.created.length !== 1 ? 's' : '') +
+          ' created in ' + targetProjectName +
+          (duplicateRows.length > 0 ? ', ' + duplicateRows.length + ' skipped (duplicate)' : '') +
+          (progress.errors.length > 0 ? ', ' + progress.errors.length + ' failed' : ''),
+      }),
+      progress.created.length > 0 ? h('div', null,
+        h('div', { style: { fontSize: 12, fontWeight: 600, color: '#65657B', marginBottom: 8 } }, 'Created:'),
+        h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 4 } },
+          progress.created.map(function(c, i) { return h(Tag, { key: i, color: 'green' }, c.name); })
+        )
+      ) : null,
+      progress.errors.length > 0 ? h('div', null,
+        h('div', { style: { fontSize: 12, fontWeight: 600, color: '#C20A29', marginBottom: 8 } }, 'Failed:'),
+        progress.errors.map(function(e, i) {
+          return h('div', { key: i, style: { fontSize: 12, color: '#C20A29', marginBottom: 4 } },
+            e.name + ': ' + e.error
+          );
+        })
+      ) : null
+    ) : null
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  PAGE: Utilities
+// ═══════════════════════════════════════════════════════════════
+function UtilitiesPage(props) {
+  var bundles = props.bundles || [];
+  var projects = props.projects || [];
+  var policies = props.policies || [];
+  var connected = props.connected;
+  var onRefresh = props.onRefresh;
+  var terms = props.terms || DEFAULT_TERMS;
+  var B = capFirst(terms.bundle);
+
+  return h('div', { className: 'page-content' },
+    h('div', { className: 'page-header' },
+      h('h2', null, 'Utilities'),
+      h('p', { style: { color: '#65657B', fontSize: 13, marginTop: 4 } },
+        'Administrative tools for managing ' + B.toLowerCase() + 's across projects.')
+    ),
+    h(CopyDeliverablesUtility, {
+      bundles: bundles,
+      projects: projects,
+      policies: policies,
+      connected: connected,
+      onComplete: onRefresh,
+      terms: terms,
+    })
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  ROOT APP
 // ═══════════════════════════════════════════════════════════════
 function App() {
@@ -8273,6 +8587,7 @@ function App() {
   var _pm = useState({}); var projectMembersCache = _pm[0]; var setProjectMembersCache = _pm[1];
   var _pt = useState({}); var projectTagsMap = _pt[0]; var setProjectTagsMap = _pt[1];
   var _lp = useState([]); var livePolicies = _lp[0]; var setLivePolicies = _lp[1];
+  var _lpj = useState([]); var liveProjects = _lpj[0]; var setLiveProjects = _lpj[1];
   var _deu = useState(null); var dataExplorerUrl = _deu[0]; var setDataExplorerUrl = _deu[1];
 
   // ── Universal Scope Filters ──────────────────────────────────
@@ -8630,6 +8945,7 @@ function App() {
         var tagsMap = {};
         var projectOwnerMap = {}; // projectId → { id, userName, firstName, lastName }
         var projectsList = Array.isArray(projects) ? projects : [];
+        setLiveProjects(projectsList);
         projectsList.forEach(function(p) {
           if (p.tags && p.tags.length > 0) {
             tagsMap[p.id] = p.tags; // shape: [{ id, name, isApproved }]
@@ -8936,6 +9252,8 @@ function App() {
         return h(AutomationRulesPage, { bundles: bundles, automationRules: automationRules, setAutomationRules: setAutomationRules, automationHistory: automationHistory, setAutomationHistory: setAutomationHistory, terms: terms, projectMembersCache: projectMembersCache });
       case 'risk':
         return h(RiskOptimizerPage, { bundles: bundles, livePolicies: livePolicies, terms: terms, useDummy: useDummy });
+      case 'utilities':
+        return h(UtilitiesPage, { bundles: bundles, projects: liveProjects, policies: livePolicies, connected: connected, onRefresh: function() { if (connected) fetchLiveData(); }, terms: terms });
       default:
         return h(DashboardPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms });
     }
