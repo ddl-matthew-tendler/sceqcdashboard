@@ -2813,16 +2813,13 @@ function CSVUploadDrawer(props) {
     return errors;
   }, [step, mapping, defaultPolicy, defaultProject, csvRows, previewRows]);
 
-  // Upload function — 1-by-1 with concurrency control
+  // Upload function — 1-by-1 with concurrency control (dry-run in dummy mode)
   function startUpload() {
-    if (!connected) {
-      antd.message.warning('Cannot upload in dummy mode. Connect to a Domino instance first.');
-      return;
-    }
     var validRows = previewRows.filter(function(r) { return r._valid; });
     if (validRows.length === 0) { antd.message.error('No valid rows to upload.'); return; }
+    var isDryRun = !connected;
     setStep(3);
-    setProgress({ done: 0, total: validRows.length, errors: [] });
+    setProgress({ done: 0, total: validRows.length, errors: [], dryRun: isDryRun });
 
     var idx = 0;
     var errors = [];
@@ -2833,11 +2830,19 @@ function CSVUploadDrawer(props) {
         if (idx === validRows.length) {
           setStep(4);
           setProgress(function(p) { return Object.assign({}, p, { errors: errors }); });
-          if (onComplete) onComplete();
+          if (!isDryRun && onComplete) onComplete();
         }
         return;
       }
       var row = validRows[idx++];
+      if (isDryRun) {
+        // Simulate a short delay for dry-run
+        setTimeout(function() {
+          setProgress(function(p) { return Object.assign({}, p, { done: p.done + 1 }); });
+          uploadNext();
+        }, 150);
+        return;
+      }
       var body = { name: row.name.trim(), policyId: row.policyId, projectId: row.projectId };
       apiPost('api/bundles', body)
         .then(function() {
@@ -2856,6 +2861,45 @@ function CSVUploadDrawer(props) {
   var policyOptions = policies.map(function(p) { return { label: p.name || p.id, value: p.id }; });
   var projectOptions = projects.map(function(p) { return { label: p.name || p.id, value: p.id }; });
   var headerOptions = [{ label: '(Do not map)', value: '' }].concat(csvHeaders.map(function(h) { return { label: h, value: h }; }));
+
+  // Download a blank CSV template with correct headers
+  function downloadTemplate() {
+    var csv = 'name,policyName,projectName\n';
+    var blob = new Blob([csv], { type: 'text/csv' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = 'deliverable_upload_template.csv'; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // Generate a sample CSV with realistic rows using available policies/projects
+  function generateSampleCSV() {
+    var sampleNames = [
+      'ADAE Q1 2026', 'ADSL Q1 2026', 'ADTTE Q1 2026', 'ADCM Q1 2026',
+      'ADLB Q1 2026', 'ADVS Q1 2026', 'ADMH Q1 2026', 'ADEG Q1 2026',
+    ];
+    var pNames = policies.map(function(p) { return p.name; });
+    var pjNames = projects.map(function(p) { return p.name; });
+    // Filter out names that already exist as bundles
+    var existingNames = {};
+    (bundles || []).forEach(function(b) { if (b.name) existingNames[b.name.trim().toLowerCase()] = true; });
+    var available = sampleNames.filter(function(n) { return !existingNames[n.toLowerCase()]; });
+    if (available.length === 0) available = sampleNames.map(function(n) { return n + ' (copy)'; });
+
+    var rows = available.slice(0, 5).map(function(name, i) {
+      var pol = pNames.length > 0 ? pNames[i % pNames.length] : 'My QC Plan';
+      var proj = pjNames.length > 0 ? pjNames[i % pjNames.length] : 'My Project';
+      return '"' + name + '","' + pol + '","' + proj + '"';
+    });
+    var csv = 'name,policyName,projectName\n' + rows.join('\n');
+    // Feed directly into the parser instead of downloading
+    parseCSV(csv);
+    antd.message.success('Loaded ' + rows.length + ' sample rows — proceed to column mapping');
+  }
+
+  // Load sample CSV from a text area (paste support)
+  var _pasteMode = useState(false); var pasteMode = _pasteMode[0]; var setPasteMode = _pasteMode[1];
+  var _pasteText = useState(''); var pasteText = _pasteText[0]; var setPasteText = _pasteText[1];
 
   var steps = [
     { title: 'Upload' },
@@ -2877,7 +2921,7 @@ function CSVUploadDrawer(props) {
     ) : step === 2 ? h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: 8 } },
       h(Button, { onClick: function() { setStep(1); } }, 'Back'),
       h(Button, { type: 'primary', disabled: previewRows.filter(function(r) { return r._valid; }).length === 0, onClick: startUpload },
-        'Upload ' + previewRows.filter(function(r) { return r._valid; }).length + ' ' + B + 's')
+        (connected ? 'Upload ' : 'Dry-run ') + previewRows.filter(function(r) { return r._valid; }).length + ' ' + B + 's')
     ) : null,
   },
     // Steps indicator
@@ -2899,6 +2943,34 @@ function CSVUploadDrawer(props) {
         h('p', { className: 'ant-upload-text' }, 'Click or drag a CSV file here'),
         h('p', { className: 'ant-upload-hint' }, 'The file should have a header row. Each row will create one ' + B.toLowerCase() + '.')
       ),
+      // Quick actions
+      h('div', { style: { marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' } },
+        h(Button, { size: 'small', onClick: downloadTemplate,
+          icon: icons && icons.DownloadOutlined ? h(icons.DownloadOutlined) : null,
+        }, 'Download Template'),
+        h(Button, { size: 'small', type: 'dashed', onClick: generateSampleCSV,
+          icon: icons && icons.ExperimentOutlined ? h(icons.ExperimentOutlined) : null,
+        }, 'Load Sample Data'),
+        h(Button, { size: 'small', onClick: function() { setPasteMode(!pasteMode); },
+          icon: icons && icons.EditOutlined ? h(icons.EditOutlined) : null,
+        }, pasteMode ? 'Hide Paste' : 'Paste CSV')
+      ),
+      // Paste CSV text area
+      pasteMode ? h('div', { style: { marginTop: 12 } },
+        h(antd.Input.TextArea, {
+          rows: 6,
+          placeholder: 'name,policyName,projectName\n"ADAE Q1 2026","ADaM QC Plan - High Risk","My Project"',
+          value: pasteText,
+          onChange: function(e) { setPasteText(e.target.value); },
+          style: { fontFamily: 'monospace', fontSize: 12 },
+        }),
+        h('div', { style: { marginTop: 8, display: 'flex', gap: 8 } },
+          h(Button, { type: 'primary', size: 'small', disabled: !pasteText.trim(),
+            onClick: function() { parseCSV(pasteText); }
+          }, 'Parse Pasted CSV'),
+          h(Button, { size: 'small', onClick: function() { setPasteText(''); } }, 'Clear')
+        )
+      ) : null,
       h('div', { style: { marginTop: 16 } },
         h(antd.Collapse, { items: [{
           key: 'template',
@@ -3017,8 +3089,8 @@ function CSVUploadDrawer(props) {
                 ? ' (' + previewRows.filter(function(r) { return r._isDuplicate; }).length + ' duplicates will be skipped)'
                 : ''),
           }),
-      !connected ? h(antd.Alert, { type: 'warning', showIcon: true, style: { marginBottom: 16 },
-        message: 'Dummy mode: upload is disabled. Connect to a Domino instance to create ' + B.toLowerCase() + 's.' }) : null,
+      !connected ? h(antd.Alert, { type: 'info', showIcon: true, style: { marginBottom: 16 },
+        message: 'Dummy mode: upload will run as a dry-run (no ' + B.toLowerCase() + 's will be created in Domino).' }) : null,
       h(Table, {
         dataSource: previewRows,
         columns: [
@@ -3058,13 +3130,16 @@ function CSVUploadDrawer(props) {
 
     // Step 3: Uploading
     step === 3 ? h('div', { style: { textAlign: 'center', padding: '40px 0' } },
+      progress.dryRun ? h(Tag, { color: 'blue', style: { marginBottom: 12 } }, 'DRY RUN') : null,
       h(antd.Progress, {
         type: 'circle',
         percent: progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0,
         format: function() { return progress.done + ' / ' + progress.total; },
       }),
       h('div', { style: { marginTop: 16, fontSize: 14, color: '#65657B' } },
-        'Creating ' + B.toLowerCase() + 's... Please do not close this drawer.'
+        progress.dryRun
+          ? 'Simulating upload of ' + B.toLowerCase() + 's...'
+          : 'Creating ' + B.toLowerCase() + 's... Please do not close this drawer.'
       ),
       progress.errors.length > 0
         ? h('div', { style: { marginTop: 12 } },
@@ -3075,14 +3150,15 @@ function CSVUploadDrawer(props) {
 
     // Step 4: Done
     step === 4 ? h('div', { style: { textAlign: 'center', padding: '40px 0' } },
+      progress.dryRun ? h(Tag, { color: 'blue', style: { marginBottom: 12 } }, 'DRY RUN — no deliverables were created') : null,
       h(antd.Result, {
         status: progress.errors.length === 0 ? 'success' : 'warning',
         title: progress.errors.length === 0
-          ? 'All ' + progress.total + ' ' + B.toLowerCase() + 's created successfully!'
+          ? (progress.dryRun ? 'Dry-run complete: ' + progress.total + ' ' + B.toLowerCase() + 's would be created' : 'All ' + progress.total + ' ' + B.toLowerCase() + 's created successfully!')
           : (progress.total - progress.errors.length) + ' of ' + progress.total + ' created',
         subTitle: progress.errors.length > 0
           ? progress.errors.length + ' failed, see details below'
-          : 'You can now find them in the QC Tracker.',
+          : (progress.dryRun ? 'All rows validated and resolved successfully. Connect to Domino to create them for real.' : 'You can now find them in the QC Tracker.'),
         extra: [
           h(Button, { key: 'close', type: 'primary', onClick: handleClose }, 'Close'),
           h(Button, { key: 'again', onClick: reset }, 'Upload More'),
@@ -7957,6 +8033,10 @@ function App() {
     if (typeof MOCK_USERS !== 'undefined' && MOCK_USERS.studyLead) {
       var mockUser = MOCK_USERS.studyLead;
       setCurrentUser({ id: mockUser.id, userName: mockUser.name, firstName: mockUser.firstName, lastName: mockUser.lastName });
+    }
+    // Populate policies from mock data so CSV upload can resolve names
+    if (typeof MOCK_POLICIES !== 'undefined') {
+      setLivePolicies(MOCK_POLICIES);
     }
     if (typeof MOCK_BUNDLES !== 'undefined') {
       var mockEnriched = MOCK_BUNDLES.map(function(b) {
