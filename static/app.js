@@ -8496,8 +8496,12 @@ function App() {
                 dropdownRender: function(menu) {
                   return h('div', null, menu,
                     h('div', { className: 'select-done-footer' },
-                      h(Button, { type: 'primary', size: 'small', style: { fontSize: 11, height: 22 }, onClick: function() {
-                        document.activeElement && document.activeElement.blur();
+                      h(Button, { type: 'primary', size: 'small', style: { fontSize: 11, height: 22 }, onMouseDown: function(e) {
+                        e.preventDefault(); e.stopPropagation();
+                        setTimeout(function() {
+                          var openSelect = document.querySelector('.ant-select-open .ant-select-selection-search-input');
+                          if (openSelect) openSelect.blur();
+                        }, 0);
                       } }, 'Done')
                     )
                   );
@@ -8516,8 +8520,12 @@ function App() {
                 dropdownRender: function(menu) {
                   return h('div', null, menu,
                     h('div', { className: 'select-done-footer' },
-                      h(Button, { type: 'primary', size: 'small', style: { fontSize: 11, height: 22 }, onClick: function() {
-                        document.activeElement && document.activeElement.blur();
+                      h(Button, { type: 'primary', size: 'small', style: { fontSize: 11, height: 22 }, onMouseDown: function(e) {
+                        e.preventDefault(); e.stopPropagation();
+                        setTimeout(function() {
+                          var openSelect = document.querySelector('.ant-select-open .ant-select-selection-search-input');
+                          if (openSelect) openSelect.blur();
+                        }, 0);
                       } }, 'Done')
                     )
                   );
@@ -8540,8 +8548,12 @@ function App() {
                 dropdownRender: function(menu) {
                   return h('div', null, menu,
                     h('div', { className: 'select-done-footer' },
-                      h(Button, { type: 'primary', size: 'small', style: { fontSize: 11, height: 22 }, onClick: function() {
-                        document.activeElement && document.activeElement.blur();
+                      h(Button, { type: 'primary', size: 'small', style: { fontSize: 11, height: 22 }, onMouseDown: function(e) {
+                        e.preventDefault(); e.stopPropagation();
+                        setTimeout(function() {
+                          var openSelect = document.querySelector('.ant-select-open .ant-select-selection-search-input');
+                          if (openSelect) openSelect.blur();
+                        }, 0);
                       } }, 'Done')
                     )
                   );

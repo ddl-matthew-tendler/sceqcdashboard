@@ -35,15 +35,26 @@ The SCE QC Tracker is a Domino App built for pharmaceutical statistical programm
   }
   ```
 - **Notes**: Discovered via live API probing. The endpoint was undocumented but fully functional. Uses PATCH (not PUT). The response also includes `stage.policyVersionId` which enables deep-linking to version-level governance URLs. The app now calls this endpoint from the expanded row stage timeline dropdowns and from the Stage Assignments page bulk reassign. `API_GAPS.stageReassign.ready` is set to `true`.
+- **Silent Failure Behavior** (discovered 2026-03-29): The endpoint returns 200 OK even when the assignment does not persist. Known triggers:
+  - Assignee is not a collaborator on the bundle's project
+  - Bundle is in Archived or Complete state
+  - Caller (sidecar token identity) lacks write permissions on the project
+  The app mitigates this via read-back verification: after each PATCH, it re-GETs the bundle and compares the actual assignee against the requested one. Frontend pre-flight checks now skip ineligible bundles before calling the API.
 
 ---
 
-### 2. Bulk Assign
+### 2. Bulk Assign — PARTIALLY RESOLVED (workaround)
 
-- **Priority**: High
-- **User Impact**: A QC lead selects 15 deliverables using the table checkboxes and wants to assign the "Self QC" stage across all of them to a single person. Today, the Bulk Action Bar renders a disabled "Assign" button with an "API Pending" badge. The user must wait for single-reassignment (Gap 1) and then change each deliverable one at a time — which is impractical for studies with 100+ deliverables.
-- **Current Behavior**: The `handleBulkAssign` function at `app.js` line ~1536 checks `API_GAPS.bulkAssign.ready` and shows a warning toast. If bypassed, it logs to console and updates local React state only. The bulk action bar correctly collects the selected bundle IDs, chosen stage, and chosen assignee from live data.
-- **What We Need**:
+- **Status**: **Workaround implemented** (2026-03-29). No native bulk endpoint exists. The app calls the single-assignment PATCH (Gap 1) in parallel via `Promise.all()` for each selected bundle.
+- **Priority**: High (native endpoint still desired)
+- **User Impact**: A QC lead can now select multiple deliverables and assign them to a person via the bulk action bar. However, this fires N individual PATCH requests and has no transactional guarantee — some may succeed while others fail.
+- **Current Behavior**: The `handleBulkAssign` function runs pre-flight validation (bundle state, project collaborator check) then fires parallel PATCH requests with read-back verification. Results are reported per-item with actionable error messages.
+- **Known Domino Limitations Discovered** (2026-03-29):
+  1. **Silent rejection on Archived/Complete bundles**: The PATCH returns 200 OK but the assignment does not persist. The app now skips these with a clear message.
+  2. **Project collaborator requirement**: Assignees must be collaborators on the bundle's Domino project. The API returns 200 OK but silently rejects non-collaborators. The app now pre-checks this client-side using the projectMembersCache.
+  3. **No error differentiation**: The API returns 200 OK for all "accepted" requests regardless of whether the assignment actually persisted. The app's read-back verification (re-GET the bundle after PATCH) is the only way to detect silent failures.
+  4. **Auth identity matters**: The PATCH runs as the logged-in user (via sidecar token at `localhost:8899`), not a service account. If the caller lacks write access to the project, the API may silently reject.
+- **What We Still Need**:
   ```
   POST /api/governance/v1/bundles/bulk-assign
 
@@ -347,29 +358,53 @@ The SCE QC Tracker is a Domino App built for pharmaceutical statistical programm
 
 ---
 
+### 8. Undocumented Write Constraints / Silent Rejection
+
+- **Priority**: High (impacts all write operations)
+- **Date Discovered**: 2026-03-29
+- **User Impact**: When stage reassignment was implemented (Gap 1), we discovered that the governance API returns HTTP 200 OK for PATCH requests that it silently rejects. There is no error status code, error message, or response field indicating the assignment was not persisted. This affects single assignments, bulk assignments, and any future write operations. Without read-back verification, the app would show false success to users — a serious issue in a regulated QC environment.
+- **Known Constraints** (all undocumented, discovered empirically):
+  1. **Assignee must be a project collaborator**: If the user ID is valid but not a collaborator on the bundle's project, the API returns 200 but doesn't save.
+  2. **Bundle must be Active**: Archived and Complete bundles accept the PATCH (200 OK) but don't persist changes.
+  3. **Caller must have write access**: The sidecar token identity (the logged-in user) must have sufficient permissions on the project. Permission failures return 200, not 403.
+  4. **Possible stage position constraints**: There may be restrictions on assigning past/future stages vs the current active stage — not yet confirmed.
+- **Current Workaround**: The app performs read-back verification after every PATCH (re-GET the bundle, compare actual vs requested assignee) and reports mismatches to the user. Pre-flight checks skip Archived/Complete bundles and non-collaborators before calling the API.
+- **What We Need**: The governance API should return meaningful error responses for rejected writes:
+  ```
+  HTTP 403 — User lacks write access to this project
+  HTTP 409 — Bundle is in a terminal state (Archived/Complete)
+  HTTP 422 — Assignee is not a collaborator on the bundle's project
+  ```
+  Alternatively, the response body should include a `persisted: false` field with a `reason` when the write is silently rejected.
+- **Risk**: Any future write endpoint (bulk assign, apply rules, bundle state transitions) is likely subject to the same silent rejection pattern. All write operations must include read-back verification until the API provides reliable error responses.
+
+---
+
 ## Priority Summary
 
 | Gap | Priority | Blocking | Proposed Endpoint |
 |-----|----------|----------|-------------------|
 | 1. Stage Reassignment | ~~High~~ RESOLVED | ~~Blocks all individual assignment changes~~ Complete | `PATCH /api/governance/v1/bundles/{bundleId}/stages/{stageId}` with `{"assignee": {"id": "userId"}}` |
-| 2. Bulk Assign | High | Blocks efficient multi-deliverable assignment | `POST /api/governance/v1/bundles/bulk-assign` |
+| 2. Bulk Assign | High (workaround live) | Parallel single-PATCH workaround live; native bulk endpoint still desired | `POST /api/governance/v1/bundles/bulk-assign` |
 | 3. Apply Bulk Assignment Rules | Medium | Blocks rule-based auto-assignment; depends on Gap 1 | `POST /api/governance/v1/bundles/apply-rules` |
 | 4. Bulk Assignment Rules Persistence | Medium | Blocks multi-user/multi-session rule sharing | `GET/PUT /api/governance/v1/projects/{projectId}/assignment-rules` |
 | 5. Pagination | Medium | Silently drops data in projects with 200+ deliverables | Pagination metadata on existing `GET` endpoints |
 | 6. Write Action Audit Trail | Low | Required for GxP compliance; depends on Gaps 1-3 | Audit metadata on all write responses + `GET .../audit-log` |
 | 7. Data Explorer / Cross-App Discovery | Low | Nice-to-have; current workaround is functional | Query param on `GET /api/apps/beta/apps` or app-to-app link registry |
+| 8. Undocumented Write Constraints | High | Silent 200 OK on rejected writes; read-back verification is the only defense | Error status codes (403/409/422) or `persisted: false` in response body |
 
 ### Dependency Graph
 
 ```
-Gap 1 (Stage Reassignment)
-  ├── Gap 2 (Bulk Assign) — can use Gap 1 as fallback
+Gap 1 (Stage Reassignment) ── RESOLVED
+  ├── Gap 2 (Bulk Assign) — workaround live (parallel single-PATCH); native endpoint desired
   ├── Gap 3 (Apply Rules) — requires Gap 1 or Gap 2
   └── Gap 6 (Audit Trail) — requires Gaps 1-3 to exist
 
 Gap 4 (Rules Persistence) — independent, but value increases with Gap 3
 Gap 5 (Pagination) — independent, no dependencies
 Gap 7 (Data Explorer Discovery) — independent, no dependencies
+Gap 8 (Write Constraints) — affects all write operations (Gaps 1, 2, 3); resolving this would eliminate need for read-back verification
 ```
 
 ### Recommended Implementation Order

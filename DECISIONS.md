@@ -167,3 +167,25 @@
 ### D39: CDISC Auto-Suggest — Naming Convention Only, Never Auto-Applied
 **Decision**: When dataset nodes match known CDISC naming patterns (e.g., ADSL, ADAE, DM), the system suggests standard dependency edges (e.g., DM→ADSL, AE→ADAE, all ADaM→ADSL). Suggestions require explicit user confirmation via a modal before being added to the graph.
 **Rationale**: Auto-applying would create incorrect graphs for non-standard naming conventions or studies that deviate from CDISC norms. Requiring confirmation ensures the graph reflects actual data flow, not assumptions.
+
+## 2026-03-29: Assignment Hardening & Attachment UX
+
+### D40: Attachment Clicks Open Detail Drawer, Not Standalone Drawer
+**Decision**: Clicking the attachment count (📎 column) in the QC Tracker table now opens the DetailDrawer with the Attachments tab pre-selected, instead of the old standalone `AttachmentsDrawer`. The standalone AttachmentsDrawer has been removed from the tracker page.
+**Rationale**: The DetailDrawer already has a full Attachments tab with the same information plus context (Findings, Approvals, Gates tabs alongside). Opening a separate drawer was inconsistent — clicking a deliverable name opened the DetailDrawer, but clicking the attachment count opened a different drawer with less context. Unifying on the DetailDrawer reduces cognitive load and provides a single entry point for all bundle details.
+
+### D41: Read-Back Verification for All Write Operations
+**Decision**: Every PATCH to the governance API is followed by a GET to verify the change persisted. The app compares the actual assignee against the requested one. Local React state is only updated if verification succeeds or is indeterminate (network failure on re-read). If verification fails, the UI reverts to the actual Domino value.
+**Rationale**: The Domino governance API returns HTTP 200 OK for PATCH requests that it silently rejects (see DOMINO_API_GAPS.md Gap 8). Without read-back verification, the app would show false success to users. In a regulated QC environment, displaying an incorrect assignee is worse than showing an error. The read-back adds one extra API call per assignment but guarantees data integrity.
+
+### D42: Pre-Flight Validation Before Assignment API Calls
+**Decision**: Before calling the PATCH endpoint, the app validates: (1) bundle state is not Archived or Complete, (2) the assignee is a collaborator on the bundle's project (checked against `projectMembersCache`). Ineligible bundles are skipped with specific error messages explaining the cause and fix.
+**Rationale**: Domino silently rejects assignments on archived/complete bundles and for non-collaborators. Rather than making API calls we know will fail and relying on read-back verification to catch them, pre-flight validation provides immediate feedback and avoids unnecessary network round-trips. The error messages are actionable ("reactivate in Domino first", "add as project collaborator in Domino").
+
+### D43: Bulk Assign Uses Parallel Single-PATCH (No Native Bulk Endpoint)
+**Decision**: Bulk assignment fires N individual PATCH requests via `Promise.all()`, one per selected bundle. Results are collected and reported per-item (succeeded/failed/skipped). There is no transactional guarantee — partial success is possible and reported.
+**Rationale**: No native bulk assignment endpoint exists in the Domino governance API (see DOMINO_API_GAPS.md Gap 2). The parallel single-PATCH approach provides the functionality today. The UI clearly communicates partial failures and skipped items so users know exactly which assignments succeeded. A native bulk endpoint remains the preferred long-term solution for atomicity and performance.
+
+### D44: Assignee Dropdown Shows Project Coverage in Bulk Mode
+**Decision**: When multiple deliverables are selected, the assignee dropdown annotates each member with their project coverage (e.g., "Jane Doe (jane) — 2/3 projects"). Members who are collaborators on all selected projects show no annotation.
+**Rationale**: The member list is a union across all projects. Without the annotation, users would pick an assignee, attempt bulk assign, and get partial failures because the person isn't on every project. The coverage indicator lets users make informed choices upfront.

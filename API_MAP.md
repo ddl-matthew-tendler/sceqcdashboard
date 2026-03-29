@@ -44,12 +44,25 @@ Phase 2 — All fire simultaneously (single Promise.all):
 
 | Action | UI Location | Status | Notes |
 |--------|------------|--------|-------|
-| Stage Reassignment | QC Tracker expanded row, Stage Manager bulk reassign | **LIVE** | PATCH method, body: {assignee: {id: userId}}. Upstream: `PATCH /api/governance/v1/bundles/{bundleId}/stages/{stageId}` |
+| Stage Reassignment | QC Tracker expanded row, Stage Manager bulk reassign, Assignee dropdown | **LIVE** | PATCH method, body: {assignee: {id: userId}}. Upstream: `PATCH /api/governance/v1/bundles/{bundleId}/stages/{stageId}`. Read-back verification after every PATCH. |
 | Create Bundle | CSV Import drawer | **LIVE** | POST method, body: {name, policyId, projectId}. Upstream: `POST /api/governance/v1/bundles` |
-| Bulk Assign | QC Tracker bulk action bar | API Pending | Button disabled, tooltip explains |
+| Bulk Assign | QC Tracker bulk action bar | **LIVE (workaround)** | Fires N parallel single-PATCH requests. Pre-flight checks: bundle state (Active only), project collaborator membership. Per-item results with read-back verification. No native bulk endpoint exists. |
 | Apply Bulk Assignment Rules | Bulk Assignment Rules page | API Pending | Warning toast on attempt |
 
-These are gated by the `API_GAPS` config object in `app.js`. Set `ready: true` when the Domino write API becomes available.
+Bulk Assign and Apply Rules are gated by the `API_GAPS` config object in `app.js`. Set `ready: true` when the Domino write API becomes available.
+
+## Write Operation Constraints (Undocumented)
+
+The governance PATCH endpoint returns 200 OK even when writes are silently rejected. The app mitigates this with:
+
+| Constraint | Detection | App Mitigation |
+|-----------|-----------|----------------|
+| Assignee not a project collaborator | Read-back verification (actual ≠ requested) | Pre-flight check against `projectMembersCache`; skip with error message |
+| Bundle is Archived or Complete | Read-back verification | Pre-flight check on `bundle.state`; skip with "reactivate/reopen in Domino" message |
+| Caller lacks write permissions | Read-back verification | Actionable error: "check project collaborator settings" |
+| Unknown constraints | Read-back verification | Generic: "Domino did not persist — assignment is still [actual]" |
+
+All mitigations are in `app.js` in `handleBulkAssign()` (bulk) and the assignee `onChange` handler (single-row).
 
 ## Cross-App Discovery
 

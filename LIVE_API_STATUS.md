@@ -107,9 +107,25 @@
 
 ### 2.6 Write APIs ~~Remain Pending~~ — Partially Resolved
 - **Severity**: Expected (by design)
-- **Details**: Stage Reassignment is now **LIVE** via `PATCH /api/governance/v1/bundles/{bundleId}/stages/{stageId}`. Two write actions remain gated by `API_GAPS`:
-  - Bulk Assign (`API_GAPS.bulkAssign`)
+- **Details**: Stage Reassignment is now **LIVE** via `PATCH /api/governance/v1/bundles/{bundleId}/stages/{stageId}`. Bulk Assign now uses parallel single-PATCH as a workaround. One write action remains gated by `API_GAPS`:
   - Apply Rules (`API_GAPS.applyRules`)
+
+### 2.9 Silent Write Rejection — Governance PATCH Returns 200 on Failure
+- **Severity**: High (data integrity)
+- **Date Discovered**: 2026-03-29
+- **Details**: The governance PATCH endpoint for stage reassignment returns HTTP 200 OK even when the assignment is silently rejected by Domino. Known triggers: assignee not a project collaborator, bundle in Archived/Complete state, caller lacks write permissions. The API provides no error code or response field to distinguish accepted vs rejected writes.
+- **Mitigation**: The app now performs:
+  1. **Pre-flight validation**: Skips Archived/Complete bundles and non-collaborator assignees before calling the API
+  2. **Read-back verification**: After every PATCH, re-GETs the bundle and compares actual vs requested assignee
+  3. **UI revert on failure**: If verification fails, local state is reverted to the actual Domino value (not the attempted value)
+  4. **Actionable error messages**: Explains the likely cause and fix (e.g., "add as project collaborator in Domino")
+- **Recommendation**: Domino platform team should return proper HTTP error codes (403/409/422) instead of 200 OK for rejected writes. This would eliminate the need for read-back verification and improve response time.
+
+### 2.10 Sidecar Token Is Per-User, Not Service Account
+- **Severity**: Low (informational, architecture clarification)
+- **Date Discovered**: 2026-03-29
+- **Details**: The sidecar token at `localhost:8899/access-token` returns a token for the currently logged-in user, not a shared service account. This means all API calls (including PATCH) execute with the identity and permissions of whoever is running the app. Assignments show "assigned by [logged-in user]" in Domino audit logs.
+- **Implication**: If user A assigns a stage via the app, the Domino audit trail correctly attributes it to user A. However, if user A doesn't have write access to a project, the PATCH silently fails (see 2.9).
 
 ### 2.7 Assignment Rules Storage Is localStorage Only
 - **Severity**: Medium (by design, documented in DECISIONS.md D6)
@@ -132,8 +148,8 @@
 | Category | Count |
 |----------|-------|
 | Fully working | 12 items |
-| Needs attention | 5 items (3 resolved) |
+| Needs attention | 7 items (3 resolved) |
 | Blockers | 0 |
 | Console errors | 0 |
 
-**The app is fully functional on live data.** All mock data references in `app.js` have been replaced. The remaining attention items are enhancements, not bugs — the two most impactful are the N+1 query pattern (2.3) and the pagination ceiling (2.4), both of which only become issues at scale (300+ bundles).
+**The app is fully functional on live data.** All mock data references in `app.js` have been replaced. The most impactful attention items are: the silent write rejection (2.9) which requires read-back verification for all writes, the N+1 query pattern (2.3), and the pagination ceiling (2.4). Items 2.3 and 2.4 only become issues at scale (300+ bundles).
