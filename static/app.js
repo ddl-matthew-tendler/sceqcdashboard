@@ -8617,7 +8617,7 @@ function App() {
     }
   }
 
-  var anyMyWorkCheckbox = filterMyCurrentStage || filterMyFutureStage || filterMyPriorStage;
+  var anyMyWorkCheckbox = filterMyCurrentStage || filterMyFutureStage;
 
   return h(ConfigProvider, { theme: dominoTheme },
     h('div', null,
@@ -8751,9 +8751,9 @@ function App() {
                 },
               })
             ),
-            // Status filter group
+            // State filter group
             h('div', { className: 'global-filter-group' },
-              h('span', { className: 'global-filter-label' }, 'Status'),
+              h('span', { className: 'global-filter-label' }, 'State'),
               h(Select, {
                 mode: 'multiple', placeholder: 'All',
                 value: scopeStates, onChange: setScopeStates,
@@ -8780,10 +8780,10 @@ function App() {
               })
             ),
             h('span', { className: 'global-filter-divider' }),
-            // My stages — segmented toggle replacing checkboxes
+            // Assigned to Me — segmented toggle
             h('div', { className: 'global-filter-group' },
               h(Tooltip, { title: 'Filter deliverables where you are assigned to a stage' },
-                h('span', { className: 'global-filter-label', style: { borderBottom: '1px dashed #8F8FA3', cursor: 'help' } }, 'My stages')
+                h('span', { className: 'global-filter-label', style: { borderBottom: '1px dashed #8F8FA3', cursor: 'help' } }, 'Assigned to Me')
               ),
               h('div', { className: 'stage-toggle-group' },
                 h(Tooltip, { title: 'Show deliverables where you are assigned to the currently active stage' },
@@ -8792,17 +8792,11 @@ function App() {
                     onClick: function() { setFilterMyCurrentStage(function(v) { return !v; }); },
                   }, 'Current')
                 ),
-                h(Tooltip, { title: 'Show deliverables where you are assigned to an upcoming stage' },
+                h(Tooltip, { title: 'Show deliverables where you are assigned to an upcoming (not yet active) stage' },
                   h('button', {
                     className: 'stage-toggle-btn' + (filterMyFutureStage ? ' active' : ''),
                     onClick: function() { setFilterMyFutureStage(function(v) { return !v; }); },
-                  }, 'Future')
-                ),
-                h(Tooltip, { title: 'Show deliverables where you were assigned to a completed stage' },
-                  h('button', {
-                    className: 'stage-toggle-btn' + (filterMyPriorStage ? ' active' : ''),
-                    onClick: function() { setFilterMyPriorStage(function(v) { return !v; }); },
-                  }, 'Prior')
+                  }, 'Upcoming')
                 )
               )
             ),
@@ -8843,7 +8837,7 @@ function App() {
                 'Current scope: ',
                 scopeProjects.length ? scopeProjects.length + ' project(s), ' : '',
                 scopeTags.length ? scopeTags.length + ' tag(s), ' : '',
-                [filterMyCurrentStage && 'current', filterMyFutureStage && 'future', filterMyPriorStage && 'prior'].filter(Boolean).join(', ') || 'no assignment filter'
+                [filterMyCurrentStage && 'current', filterMyFutureStage && 'upcoming'].filter(Boolean).join(', ') || 'no assignment filter'
               )
             )
           ),
