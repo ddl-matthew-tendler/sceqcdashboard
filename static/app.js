@@ -2249,6 +2249,10 @@ function BulkActionBar(props) {
   var bundles = props.bundles || [];
   var pmc = props.projectMembersCache || {};
 
+  var _bs = useState('current');
+  var bulkStage = _bs[0];
+  var setBulkStage = _bs[1];
+
   var _ba = useState(null);
   var bulkAssignee = _ba[0];
   var setBulkAssignee = _ba[1];
@@ -2289,24 +2293,44 @@ function BulkActionBar(props) {
     memberOptions.push({ label: label, value: id });
   });
 
-  // Get the selected bundles with their current stage info
+  // Build stage options from selected bundles — positional only (names vary across QC plans)
+  var maxStages = 0;
+  selectedKeys.forEach(function(bundleId) {
+    var bundle = bundles.find(function(b) { return b.id === bundleId; });
+    if (!bundle || !bundle.stages) return;
+    if (bundle.stages.length > maxStages) maxStages = bundle.stages.length;
+  });
+  var stageOptions = [{ label: 'Current Stage', value: 'current' }];
+  for (var si = 0; si < maxStages; si++) {
+    stageOptions.push({ label: 'Stage ' + (si + 1), value: String(si) });
+  }
+
+  // Get the selected bundles with their target stage info
   function getSelectedBundlesWithStages() {
     return selectedKeys.map(function(bundleId) {
       var bundle = bundles.find(function(b) { return b.id === bundleId; });
       if (!bundle) return null;
-      // Find the current (active) stage — stage matching bundle.stage name, or first non-completed stage
-      var currentStageIdx = -1;
       var stageNames = (bundle.stages || []).map(function(s) {
         return (s.stage && s.stage.name) || s.name || '';
       });
-      if (bundle.stage) {
-        currentStageIdx = stageNames.indexOf(bundle.stage);
+      var targetIdx;
+      if (bulkStage === 'current') {
+        // Find the current (active) stage — stage matching bundle.stage name, or first stage
+        targetIdx = -1;
+        if (bundle.stage) {
+          targetIdx = stageNames.indexOf(bundle.stage);
+        }
+        if (targetIdx < 0) targetIdx = 0;
+      } else {
+        targetIdx = parseInt(bulkStage, 10);
+        if (targetIdx >= (bundle.stages || []).length) {
+          return { bundleId: bundle.id, bundleName: bundle.name, stageId: null, stageName: null, bundle: bundle, stageData: null, skippedNoStage: true };
+        }
       }
-      if (currentStageIdx < 0) currentStageIdx = 0;
-      var stageData = bundle.stages[currentStageIdx];
+      var stageData = bundle.stages[targetIdx];
       if (!stageData) return null;
       var stageId = stageData.stageId || (stageData.stage && stageData.stage.id);
-      return { bundleId: bundle.id, bundleName: bundle.name, stageId: stageId, stageName: stageNames[currentStageIdx], bundle: bundle, stageData: stageData };
+      return { bundleId: bundle.id, bundleName: bundle.name, stageId: stageId, stageName: stageNames[targetIdx], bundle: bundle, stageData: stageData };
     }).filter(Boolean);
   }
 
@@ -2319,7 +2343,10 @@ function BulkActionBar(props) {
     }
     var missingStageIds = targets.filter(function(t) { return !t.stageId; });
     if (missingStageIds.length > 0) {
-      antd.message.warning(missingStageIds.length + ' ' + B.toLowerCase() + '(s) have no stage ID, skipping those');
+      var skipReason = bulkStage !== 'current'
+        ? missingStageIds.length + ' ' + B.toLowerCase() + '(s) don\'t have a Stage ' + (parseInt(bulkStage, 10) + 1) + ', skipping those'
+        : missingStageIds.length + ' ' + B.toLowerCase() + '(s) have no stage ID, skipping those';
+      antd.message.warning(skipReason);
     }
     var validTargets = targets.filter(function(t) { return t.stageId; });
     if (validTargets.length === 0) return;
@@ -2404,7 +2431,8 @@ function BulkActionBar(props) {
       ] : [];
 
       if (failed.length === 0 && succeeded.length > 0) {
-        var msg = 'Assigned ' + succeeded.length + ' ' + B.toLowerCase() + (succeeded.length > 1 ? 's' : '');
+        var stageLabel = bulkStage === 'current' ? 'current stage' : 'Stage ' + (parseInt(bulkStage, 10) + 1);
+        var msg = 'Assigned ' + stageLabel + ' on ' + succeeded.length + ' ' + B.toLowerCase() + (succeeded.length > 1 ? 's' : '');
         msg += verified.length === succeeded.length ? ' — all verified in Domino' : ' (verification pending for ' + (succeeded.length - verified.length) + ')';
         if (skippedCount > 0) msg += '. ' + skippedCount + ' skipped.';
         antd.message.success(msg);
@@ -2446,6 +2474,13 @@ function BulkActionBar(props) {
   return h('div', { className: 'bulk-action-bar' },
     h('span', { className: 'bulk-action-count' }, count + ' ' + B.toLowerCase() + (count > 1 ? 's' : '') + ' selected'),
     h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+      h(Select, {
+        size: 'small',
+        value: bulkStage,
+        style: { minWidth: 150 },
+        options: stageOptions,
+        onChange: setBulkStage,
+      }),
       h(Select, {
         size: 'small',
         placeholder: 'Assign to...',
