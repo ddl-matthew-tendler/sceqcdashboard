@@ -149,6 +149,85 @@ class TestSingleAssignment:
 
     @patch("app.gov_get")
     @patch("app.gov_patch")
+    def test_unassign_domino_returns_empty_string_id(self, mock_patch, mock_get):
+        """Regression: Domino returns assignee.id='' (not null) after unassign.
+
+        Before fix: verification compared '' == None → False → showed error.
+        After fix:  both falsy → verified: True.
+        """
+        patch_resp = {
+            "bundleId": BUNDLE_A, "stageId": STAGE_1,
+            "stage": {"id": STAGE_1}, "assignee": {"id": ""}, "assignedAt": None,
+        }
+        mock_patch.return_value = patch_resp
+        # Domino read-back returns assignee.id="" — the actual observed behaviour
+        bundle_with_empty_string = {
+            "id": BUNDLE_A,
+            "stages": [{"stageId": STAGE_1, "stage": {"id": STAGE_1}, "assignee": {"id": ""}}],
+        }
+        mock_get.return_value = bundle_with_empty_string
+
+        resp = client.patch(
+            f"/api/bundles/{BUNDLE_A}/stages/{STAGE_1}",
+            json={"assignee": None},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["verified"] is True, (
+            "Empty-string assignee id from Domino should be treated as unassigned"
+        )
+
+    @patch("app.gov_get")
+    @patch("app.gov_patch")
+    def test_unassign_uses_empty_body_first(self, mock_patch, mock_get):
+        """Empty-body payload {} (what Domino's own UI sends) is tried first."""
+        patch_resp = {
+            "bundleId": BUNDLE_A, "stageId": STAGE_1,
+            "stage": {"id": STAGE_1}, "assignee": {"id": ""}, "assignedAt": None,
+        }
+        mock_patch.return_value = patch_resp
+        mock_get.return_value = {
+            "id": BUNDLE_A,
+            "stages": [{"stageId": STAGE_1, "stage": {"id": STAGE_1}, "assignee": {"id": ""}}],
+        }
+
+        client.patch(
+            f"/api/bundles/{BUNDLE_A}/stages/{STAGE_1}",
+            json={"assignee": None},
+        )
+
+        first_call_kwargs = mock_patch.call_args_list[0]
+        assert first_call_kwargs == call(
+            f"/bundles/{BUNDLE_A}/stages/{STAGE_1}", json_body={}
+        ), "First unassign attempt must use the empty-body payload {}"
+
+    @patch("app.gov_get")
+    @patch("app.gov_patch")
+    def test_unassign_stops_after_first_working_format(self, mock_patch, mock_get):
+        """Once a format's quick-check confirms the stage is unassigned, no further formats are tried."""
+        patch_resp = {
+            "bundleId": BUNDLE_A, "stageId": STAGE_1,
+            "stage": {"id": STAGE_1}, "assignee": {"id": ""}, "assignedAt": None,
+        }
+        mock_patch.return_value = patch_resp
+        mock_get.return_value = {
+            "id": BUNDLE_A,
+            "stages": [{"stageId": STAGE_1, "stage": {"id": STAGE_1}, "assignee": {"id": ""}}],
+        }
+
+        resp = client.patch(
+            f"/api/bundles/{BUNDLE_A}/stages/{STAGE_1}",
+            json={"assignee": None},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["verified"] is True
+        # Empty-body {} worked on first try — only one PATCH should have been sent
+        assert mock_patch.call_count == 1, (
+            f"Expected 1 PATCH (empty-body worked), got {mock_patch.call_count}"
+        )
+
+    @patch("app.gov_get")
+    @patch("app.gov_patch")
     def test_assign_different_stages_same_bundle(self, mock_patch, mock_get):
         """Assign different users to different stages of the same bundle."""
         # First call: assign Alice to STAGE_1

@@ -351,6 +351,7 @@ def patch_bundle_stage(bundle_id: str, stage_id: str, body: dict):
     unassign_formats_tried = []
     if is_unassign:
         unassign_payloads = [
+            ("empty_body", {}),  # what Domino's own UI sends (content-length: 2)
             ("assignee_null", {"assignee": None}),
             ("assignee_empty_obj", {"assignee": {}}),
             ("assignee_id_empty", {"assignee": {"id": ""}}),
@@ -370,7 +371,7 @@ def patch_bundle_stage(bundle_id: str, stage_id: str, body: dict):
                     if sid == stage_id:
                         actual = (s.get("assignee") or {}).get("id") if s.get("assignee") else None
                         unassign_formats_tried[-1]["readBackAssignee"] = actual
-                        if actual is None:
+                        if not actual:  # treat "" and None both as unassigned
                             unassign_formats_tried[-1]["worked"] = True
                             logger.info(f"Unassign format={fmt_name} WORKED — stage is now unassigned")
                         else:
@@ -427,7 +428,7 @@ def patch_bundle_stage(bundle_id: str, stage_id: str, body: dict):
                 actual_id = (matched.get("assignee") or {}).get("id") if matched.get("assignee") else None
                 attempt_info["actualId"] = actual_id
                 attempt_info["matched"] = True
-                if actual_id == requested_id:
+                if (not actual_id and not requested_id) or actual_id == requested_id:
                     verified = True
                     debug["attempts"].append(attempt_info)
                     break
