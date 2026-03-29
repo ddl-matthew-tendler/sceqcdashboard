@@ -52,7 +52,7 @@ Phase 2.5 — Unknown assignee resolution (conditional):
 | Action | UI Location | Status | Notes |
 |--------|------------|--------|-------|
 | Stage Reassignment | QC Tracker expanded row, Stage Manager bulk reassign, Assignee dropdown | **LIVE** | PATCH method, body: {assignee: {id: userId}}. Upstream: `PATCH /api/governance/v1/bundles/{bundleId}/stages/{stageId}`. Read-back verification after every PATCH. |
-| Create Bundle | CSV Import drawer | **LIVE** | POST method, body: {name, policyId, projectId}. Upstream: `POST /api/governance/v1/bundles` |
+| Create Bundle | CSV Import drawer, Utilities → Copy Deliverables | **LIVE** | POST method, body: {name, policyId, projectId}. Upstream: `POST /api/governance/v1/bundles` |
 | Bulk Assign | QC Tracker bulk action bar | **LIVE (workaround)** | Fires N parallel single-PATCH requests. Pre-flight checks: bundle state (Active only), project collaborator membership. Per-item results with read-back verification. No native bulk endpoint exists. |
 | Apply Bulk Assignment Rules | Bulk Assignment Rules page | API Pending | Warning toast on attempt |
 
@@ -70,6 +70,23 @@ The governance PATCH endpoint returns 200 OK even when writes are silently rejec
 | Unknown constraints | Read-back verification | Generic: "Domino did not persist — assignment is still [actual]" |
 
 All mitigations are in `app.js` in `handleBulkAssign()` (bulk) and the assignee `onChange` handler (single-row).
+
+## Bundle Creation Constraints (Discovered)
+
+The `POST /api/governance/v1/bundles` endpoint has the following behaviors discovered during cross-project copy testing:
+
+| Constraint | HTTP Status | Error Message | App Mitigation |
+|-----------|-------------|---------------|----------------|
+| Duplicate name in same project | **409 Conflict** | `"There is already a bundle with the same name in the project. Please change your bundle name."` | Client-side duplicate detection against target project bundles. For intra-batch collisions (e.g., two source bundles named "T_POP Output" under different policies), the app auto-appends ` (PolicyName)` suffix and shows the rename at the review step. |
+| Same name allowed across different policies in same project | N/A (inconsistency) | The governance API sometimes allows duplicate names within a project when bundles belong to different policies (observed in production data). However, the create endpoint enforces uniqueness regardless of policy. | The app treats all same-name bundles as collisions and disambiguates proactively. |
+
+**Copy Deliverables flow** (Utilities tab → Copy Deliverables Between Projects):
+1. Lists all bundles from source project with their policies
+2. Detects intra-batch name collisions and auto-renames with policy suffix
+3. Detects duplicates already existing in target project
+4. Fires N parallel `POST /api/bundles` calls (concurrency: 3 for ≤50 items, 5 for larger batches)
+5. Progress updates throttled for large batches (every N items instead of every item)
+6. Only copies name + policyId — stage assignments, findings, approvals, and attachments do not carry over
 
 ## Cross-App Discovery
 

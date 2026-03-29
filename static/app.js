@@ -8295,15 +8295,52 @@ function CopyDeliverablesUtility(props) {
     return names;
   }, [bundles, targetProject]);
 
-  // Preview rows with duplicate detection
+  // Preview rows with duplicate detection + intra-batch name disambiguation
   var previewRows = useMemo(function() {
-    return sourceBundles.filter(function(b) {
-      return selectedKeys.indexOf(b.id) >= 0;
-    }).map(function(b) {
-      var isDuplicate = b.name && targetExistingNames[b.name.trim().toLowerCase()];
+    // Use object lookup instead of indexOf for O(1) per item (matters at 1000+)
+    var keySet = {};
+    selectedKeys.forEach(function(k) { keySet[k] = true; });
+    var selected = sourceBundles.filter(function(b) { return keySet[b.id]; });
+
+    // Detect names that appear more than once in the batch
+    var nameCounts = {};
+    selected.forEach(function(b) {
+      var key = (b.name || '').trim().toLowerCase();
+      nameCounts[key] = (nameCounts[key] || 0) + 1;
+    });
+
+    // Track names we've already used (including target existing) for disambiguation
+    var usedNames = {};
+    Object.keys(targetExistingNames).forEach(function(k) { usedNames[k] = true; });
+
+    return selected.map(function(b) {
+      var baseName = (b.name || '').trim();
+      var key = baseName.toLowerCase();
+      var isDuplicate = targetExistingNames[key] && !nameCounts[key]; // exact dup in target, not disambiguated
+      var copyName = baseName;
+      var renamed = false;
+
+      // If this name appears multiple times in the batch, or would collide with an already-used name, disambiguate
+      if (nameCounts[key] > 1 || usedNames[key]) {
+        var suffix = b.policyName ? ' (' + b.policyName + ')' : ' (' + (b.policyId || '').slice(0, 8) + ')';
+        var candidate = baseName + suffix;
+        if (!usedNames[candidate.toLowerCase()]) {
+          copyName = candidate;
+          renamed = true;
+          isDuplicate = false;
+        } else {
+          // Even with suffix it collides — mark as duplicate
+          isDuplicate = true;
+        }
+      }
+
+      usedNames[copyName.toLowerCase()] = true;
+
       return {
         id: b.id,
-        name: b.name,
+        name: baseName,
+        copyName: copyName,
+        renamed: renamed,
         policyName: b.policyName || '',
         policyId: b.policyId || '',
         state: b.state || '',
@@ -8337,40 +8374,62 @@ function CopyDeliverablesUtility(props) {
     console.group('[CopyDeliverables] Starting copy: ' + validRows.length + ' items');
     console.log('Source project:', sourceProject, sourceProjectName);
     console.log('Target project:', targetProject, targetProjectName);
-    console.log('Items to copy:', validRows.map(function(r) { return { name: r.name, policyId: r.policyId, policyName: r.policyName }; }));
+    console.log('Items to copy:', validRows.map(function(r) { return { name: r.copyName, originalName: r.renamed ? r.name : undefined, policyId: r.policyId, policyName: r.policyName }; }));
     if (duplicateRows.length > 0) console.warn('Skipping ' + duplicateRows.length + ' duplicates:', duplicateRows.map(function(r) { return r.name; }));
 
     var idx = 0;
     var errors = [];
     var created = [];
-    var CONCURRENCY = 3;
+    // Scale concurrency: 3 for small batches, up to 5 for large ones
+    var CONCURRENCY = validRows.length > 50 ? 5 : 3;
+    // Throttle UI updates: every item for small batches, every N items for large
+    var PROGRESS_INTERVAL = validRows.length > 100 ? Math.max(Math.floor(validRows.length / 50), 5) : 1;
+    var completedCount = 0;
+    var progressTimer = null;
+
+    function flushProgress() {
+      progressTimer = null;
+      setProgress({ done: completedCount, total: validRows.length, errors: errors.slice(), created: created.slice() });
+    }
+
+    function scheduleProgressUpdate(force) {
+      completedCount++;
+      if (force || completedCount % PROGRESS_INTERVAL === 0) {
+        if (progressTimer) clearTimeout(progressTimer);
+        flushProgress();
+      } else if (!progressTimer) {
+        // Ensure we update at least every 500ms even between intervals
+        progressTimer = setTimeout(flushProgress, 500);
+      }
+    }
 
     function copyNext() {
       if (idx >= validRows.length) {
-        if (errors.length + created.length >= validRows.length) {
+        if (completedCount >= validRows.length) {
+          if (progressTimer) { clearTimeout(progressTimer); progressTimer = null; }
           console.log('[CopyDeliverables] Complete — created: ' + created.length + ', failed: ' + errors.length);
           if (errors.length > 0) console.warn('[CopyDeliverables] Failures:', errors);
           console.groupEnd();
           setStep(3);
-          setProgress(function(p) { return Object.assign({}, p, { errors: errors, created: created }); });
+          setProgress({ done: completedCount, total: validRows.length, errors: errors, created: created });
           if (onComplete) onComplete();
         }
         return;
       }
       var row = validRows[idx++];
-      var body = { name: row.name.trim(), policyId: row.policyId, projectId: targetProject };
+      var body = { name: row.copyName.trim(), policyId: row.policyId, projectId: targetProject };
       console.log('[CopyDeliverables] POST api/bundles →', JSON.stringify(body));
       apiPost('api/bundles', body)
         .then(function(resp) {
-          console.log('[CopyDeliverables] OK "' + row.name + '" → id:', resp && resp.id);
-          created.push({ name: row.name, id: resp && resp.id });
-          setProgress(function(p) { return Object.assign({}, p, { done: p.done + 1, created: created.slice() }); });
+          console.log('[CopyDeliverables] OK "' + row.copyName + '" → id:', resp && resp.id);
+          created.push({ name: row.copyName, id: resp && resp.id });
+          scheduleProgressUpdate(false);
         })
         .catch(function(err) {
           var errMsg = (err && err.message) || String(err);
-          console.error('[CopyDeliverables] FAIL "' + row.name + '" →', errMsg);
-          errors.push({ name: row.name, error: errMsg, request: body });
-          setProgress(function(p) { return Object.assign({}, p, { done: p.done + 1, errors: errors.slice() }); });
+          console.error('[CopyDeliverables] FAIL "' + row.copyName + '" →', errMsg);
+          errors.push({ name: row.copyName, error: errMsg, request: body });
+          scheduleProgressUpdate(false);
         })
         .then(copyNext);
     }
@@ -8395,12 +8454,23 @@ function CopyDeliverablesUtility(props) {
 
   // Preview table columns
   var previewColumns = [
-    { title: B + ' Name', dataIndex: 'name', key: 'name' },
+    { title: B + ' Name', key: 'name',
+      render: function(_, row) {
+        if (row.renamed) {
+          return h('span', null,
+            h('span', { style: { textDecoration: 'line-through', color: '#8F8FA3', marginRight: 6 } }, row.name),
+            h('span', { style: { fontWeight: 500 } }, row.copyName)
+          );
+        }
+        return row.copyName;
+      }
+    },
     { title: capFirst(terms.policy), dataIndex: 'policyName', key: 'policy' },
-    { title: 'Status', key: 'status', width: 140,
+    { title: 'Status', key: 'status', width: 180,
       render: function(_, row) {
         if (row.isDuplicate) return h(Tag, { color: 'orange' }, 'Duplicate — skip');
         if (!row.policyId) return h(Tag, { color: 'red' }, 'No policy');
+        if (row.renamed) return h(Tag, { color: 'blue' }, 'Renamed — ready');
         return h(Tag, { color: 'green' }, 'Ready');
       }
     },
@@ -8517,18 +8587,21 @@ function CopyDeliverablesUtility(props) {
           (progress.errors.length > 0 ? ', ' + progress.errors.length + ' failed' : ''),
       }),
       progress.created.length > 0 ? h('div', null,
-        h('div', { style: { fontSize: 12, fontWeight: 600, color: '#65657B', marginBottom: 8 } }, 'Created:'),
+        h('div', { style: { fontSize: 12, fontWeight: 600, color: '#65657B', marginBottom: 8 } }, 'Created (' + progress.created.length + '):'),
+        // For large batches, show first 50 then a "+N more" note
         h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 4 } },
-          progress.created.map(function(c, i) { return h(Tag, { key: i, color: 'green' }, c.name); })
+          progress.created.slice(0, 50).map(function(c, i) { return h(Tag, { key: i, color: 'green' }, c.name); }),
+          progress.created.length > 50 ? h(Tag, { key: 'more', color: 'default' }, '+' + (progress.created.length - 50) + ' more') : null
         )
       ) : null,
       progress.errors.length > 0 ? h('div', null,
-        h('div', { style: { fontSize: 12, fontWeight: 600, color: '#C20A29', marginBottom: 8 } }, 'Failed:'),
-        progress.errors.map(function(e, i) {
+        h('div', { style: { fontSize: 12, fontWeight: 600, color: '#C20A29', marginBottom: 8 } }, 'Failed (' + progress.errors.length + '):'),
+        progress.errors.slice(0, 50).map(function(e, i) {
           return h('div', { key: i, style: { fontSize: 12, color: '#C20A29', marginBottom: 4 } },
             e.name + ': ' + e.error
           );
-        })
+        }),
+        progress.errors.length > 50 ? h('div', { style: { fontSize: 12, color: '#C20A29', fontStyle: 'italic' } }, '...and ' + (progress.errors.length - 50) + ' more') : null
       ) : null
     ) : null
   );
