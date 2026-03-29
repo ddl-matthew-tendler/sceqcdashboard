@@ -48,6 +48,23 @@ var DEFAULT_TERMS = { bundle: 'Bundle', policy: 'Policy' };
 
 // Ensure terminology is capitalized for display (API may return lowercase)
 function capFirst(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+// Capitalize each word (e.g. "QC plan" → "QC Plan")
+function capWords(s) { return s ? s.replace(/\b[a-z]/g, function(c) { return c.toUpperCase(); }) : s; }
+
+// Parse nested server error JSON into a human-readable message
+function parseServerError(raw) {
+  try {
+    var outer = JSON.parse(raw);
+    var detail = typeof outer === 'string' ? outer : outer.detail || outer.message || raw;
+    if (typeof detail === 'string') {
+      try {
+        var inner = JSON.parse(detail);
+        return inner.Message || inner.message || inner.error || detail;
+      } catch(e) { return detail; }
+    }
+    return String(detail);
+  } catch(e) { return raw; }
+}
 
 // ── Data Explorer Integration ────────────────────────────────────
 // File extensions that Data Explorer can open
@@ -95,10 +112,6 @@ function buildDataExplorerUrl(baseUrl, attachment) {
 function openDataExplorer(url, path, e) {
   if (e) e.preventDefault();
   window.open(url, '_blank', 'noopener,noreferrer');
-  antd.message.info({
-    content: 'Opening in Data Explorer. If the file doesn\u2019t auto-load, look for: ' + path,
-    duration: 6,
-  });
 }
 
 // ── Snapshot Staleness Detection ─────────────────────────────────
@@ -2293,7 +2306,7 @@ function BulkActionBar(props) {
         })
         .catch(function(err) {
           var detail = err.message || String(err);
-          var reason = detail.indexOf('403') !== -1 ? 'Permission denied' : detail.indexOf('404') !== -1 ? 'Not found' : detail;
+          var reason = detail.indexOf('403') !== -1 ? 'Permission denied' : detail.indexOf('404') !== -1 ? 'Not found' : parseServerError(detail);
           return { success: false, bundleName: t.bundleName, stageName: t.stageName, error: detail, reason: reason };
         });
     });
@@ -3392,10 +3405,12 @@ function QCTrackerPage(props) {
                   if (resp.verified === true) {
                     antd.message.success('Assignee updated — verified in Domino');
                   } else if (resp.verified === false) {
-                    var actualName = resp.actualAssignee ? (resp.actualAssignee.name || resp.actualAssignee.id) : 'nobody';
+                    var actualName = resp.actualAssignee ? (resp.actualAssignee.name || resp.actualAssignee.userName || resp.actualAssignee.id || '') : '';
                     antd.notification.warning({
                       message: 'Assignment may not have saved',
-                      description: 'Domino accepted the request but the read-back shows the stage is still assigned to ' + actualName + '. Try refreshing the page.',
+                      description: actualName
+                        ? 'Domino accepted the request but the read-back shows the stage is still assigned to ' + actualName + '. Try refreshing the page.'
+                        : 'Domino accepted the request but the read-back doesn\u2019t reflect the change. Try refreshing the page.',
                       duration: 10,
                     });
                   } else {
@@ -3407,9 +3422,10 @@ function QCTrackerPage(props) {
                 .catch(function(err) {
                   var detail = err.message || String(err);
                   var bundleName = record.name || record.id;
+                  var friendlyDetail = parseServerError(detail);
                   antd.notification.error({
                     message: 'Reassignment failed for ' + bundleName,
-                    description: detail.indexOf('403') !== -1 ? 'You do not have permission to reassign this stage. Check that you are a collaborator on the project.' : detail.indexOf('404') !== -1 ? 'This deliverable or stage was not found. It may have been deleted — try refreshing the page.' : 'Server returned: ' + detail,
+                    description: detail.indexOf('403') !== -1 ? 'You do not have permission to reassign this stage. Check that you are a collaborator on the project.' : detail.indexOf('404') !== -1 ? 'This deliverable or stage was not found. It may have been deleted — try refreshing the page.' : friendlyDetail,
                     duration: 8,
                   });
                 });
@@ -3781,7 +3797,7 @@ function DetailDrawer(props) {
                           else if (resp.verified === false) { antd.notification.warning({ message: 'Assignment may not have saved', description: 'Read-back mismatch. Try refreshing.', duration: 10 }); }
                           else { antd.message.success('Stage reassigned'); }
                         })
-                        .catch(function(err) { antd.notification.error({ message: 'Reassignment failed', description: err.message || String(err), duration: 8 }); });
+                        .catch(function(err) { antd.notification.error({ message: 'Reassignment failed', description: parseServerError(err.message || String(err)), duration: 8 }); });
                     },
                     optionFilterProp: 'label',
                   })
@@ -3935,15 +3951,17 @@ function DetailDrawer(props) {
       ? h(Button, { type: 'primary', size: 'small', onClick: function() { window.open(dominoUrl, '_blank'); } }, '\u2197 View in Domino')
       : null,
   },
-    // View selector dropdown (native select — lightweight, Data Explorer style)
-    h('div', { style: { padding: '12px 24px', borderBottom: '1px solid #E0E0E0', flexShrink: 0 } },
-      h('select', {
-        className: 'detail-view-select',
-        value: activeView,
-        onChange: function(e) { setActiveView(e.target.value); },
-      }, viewOptions.map(function(opt) {
-        return h('option', { key: opt.value, value: opt.value }, opt.label);
-      }))
+    // View selector tabs
+    h('div', { style: { borderBottom: '1px solid #E0E0E0', flexShrink: 0 } },
+      h(Tabs, {
+        activeKey: activeView,
+        onChange: function(key) { setActiveView(key); },
+        size: 'small',
+        style: { margin: '0 24px' },
+        items: viewOptions.map(function(opt) {
+          return { key: opt.value, label: opt.label };
+        }),
+      })
     ),
     // Active view content
     h('div', { style: { padding: '16px 24px', flex: 1, overflow: 'auto' } },
@@ -4595,7 +4613,7 @@ function StageAssignmentsPage(props) {
         })
         .catch(function(err) {
           var detail = err.message || String(err);
-          var reason = detail.indexOf('403') !== -1 ? 'Permission denied' : detail.indexOf('404') !== -1 ? 'Not found' : detail;
+          var reason = detail.indexOf('403') !== -1 ? 'Permission denied' : detail.indexOf('404') !== -1 ? 'Not found' : parseServerError(detail);
           return { error: detail, reason: reason, bundleName: row.bundleName, stageName: row.stageName };
         });
     });
@@ -7691,6 +7709,7 @@ function App() {
   var _sc3a = useState(_initDefault ? !!_initDefault.myCurrentStage : false); var filterMyCurrentStage = _sc3a[0]; var setFilterMyCurrentStage = _sc3a[1];
   var _sc3b = useState(_initDefault ? !!_initDefault.myFutureStage : false); var filterMyFutureStage = _sc3b[0]; var setFilterMyFutureStage = _sc3b[1];
   var _sc3c = useState(_initDefault ? !!_initDefault.myPriorStage : false); var filterMyPriorStage = _sc3c[0]; var setFilterMyPriorStage = _sc3c[1];
+  var _sc4 = useState(_initDefault ? (_initDefault.states || []) : []); var scopeStates = _sc4[0]; var setScopeStates = _sc4[1];
 
   // Helper: get current scope state as a preset object
   function getCurrentScopeState(name) {
@@ -7701,6 +7720,7 @@ function App() {
       myCurrentStage: filterMyCurrentStage,
       myFutureStage: filterMyFutureStage,
       myPriorStage: filterMyPriorStage,
+      states: scopeStates,
     };
   }
 
@@ -7711,6 +7731,7 @@ function App() {
     setFilterMyCurrentStage(!!preset.myCurrentStage);
     setFilterMyFutureStage(!!preset.myFutureStage);
     setFilterMyPriorStage(!!preset.myPriorStage);
+    setScopeStates(preset.states || []);
     setActivePresetName(preset.name);
   }
 
@@ -7898,6 +7919,8 @@ function App() {
         var matchesTag = scopeTags.some(function(ft) { return tagLabels.indexOf(ft) >= 0; });
         if (!matchesTag) return false;
       }
+      // State filter
+      if (scopeStates.length > 0 && scopeStates.indexOf(b.state) < 0) return false;
       // "Assigned to Me" checkbox filters — if any checked, bundle must match at least one
       var anyCheckbox = filterMyCurrentStage || filterMyFutureStage || filterMyPriorStage;
       if (anyCheckbox && scopeCurrentUser) {
@@ -7923,9 +7946,9 @@ function App() {
       }
       return true;
     });
-  }, [bundles, scopeProjects, scopeTags, filterMyCurrentStage, filterMyFutureStage, filterMyPriorStage, scopeCurrentUser, projectTagsMap]);
+  }, [bundles, scopeProjects, scopeTags, scopeStates, filterMyCurrentStage, filterMyFutureStage, filterMyPriorStage, scopeCurrentUser, projectTagsMap]);
 
-  var hasScopeFilters = scopeProjects.length > 0 || scopeTags.length > 0 || filterMyCurrentStage || filterMyFutureStage || filterMyPriorStage;
+  var hasScopeFilters = scopeProjects.length > 0 || scopeTags.length > 0 || scopeStates.length > 0 || filterMyCurrentStage || filterMyFutureStage || filterMyPriorStage;
 
   // Load mock/dummy data
   function loadMockData() {
@@ -8218,7 +8241,7 @@ function App() {
   useEffect(function() {
     if (!connected) return;
     apiGet('api/terminology')
-      .then(function(t) { setTerms(t); })
+      .then(function(t) { setTerms({ bundle: capWords(t.bundle), policy: capWords(t.policy) }); })
       .catch(function() {});
   }, [connected]);
 
@@ -8302,6 +8325,17 @@ function App() {
               style: { minWidth: 220 }, size: 'small',
               options: scopeTagOptions,
             }),
+            h(Select, {
+              mode: 'multiple', placeholder: 'All States',
+              value: scopeStates, onChange: setScopeStates,
+              allowClear: true, maxTagCount: 2,
+              style: { minWidth: 160 }, size: 'small',
+              options: [
+                { label: 'Active', value: 'Active' },
+                { label: 'Complete', value: 'Complete' },
+                { label: 'Archived', value: 'Archived' },
+              ],
+            }),
             h('span', { className: 'global-filter-divider' }),
             h(Tooltip, { title: 'Filter deliverables where you are assigned to a stage' },
               h('span', { className: 'global-filter-label', style: { borderBottom: '1px dashed #8F8FA3', cursor: 'help' } }, 'Assigned to Me:')
@@ -8334,7 +8368,7 @@ function App() {
               value: activePresetName || undefined,
               onChange: function(val) {
                 if (!val) {
-                  setScopeProjects([]); setScopeTags([]); setFilterMyCurrentStage(false); setFilterMyFutureStage(false); setFilterMyPriorStage(false);
+                  setScopeProjects([]); setScopeTags([]); setScopeStates([]); setFilterMyCurrentStage(false); setFilterMyFutureStage(false); setFilterMyPriorStage(false);
                   setActivePresetName(null);
                   return;
                 }
@@ -8398,7 +8432,7 @@ function App() {
               ? h('span', { style: { marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 } },
                   h(Tag, { color: 'purple' }, scopedBundles.length + ' of ' + bundles.length + ' ' + terms.bundle.toLowerCase() + 's'),
                   h(Button, { type: 'link', size: 'small', onClick: function() {
-                    setScopeProjects([]); setScopeTags([]); setFilterMyCurrentStage(false); setFilterMyFutureStage(false); setFilterMyPriorStage(false);
+                    setScopeProjects([]); setScopeTags([]); setScopeStates([]); setFilterMyCurrentStage(false); setFilterMyFutureStage(false); setFilterMyPriorStage(false);
                     setActivePresetName(null);
                   } }, 'Clear all')
                 )
