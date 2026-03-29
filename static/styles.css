@@ -580,11 +580,62 @@ body {
 }
 
 .global-filter-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: #8F8FA3;
+  letter-spacing: 0.3px;
+}
+
+.global-filter-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Stage segmented toggle */
+.stage-toggle-group {
+  display: inline-flex;
+  border: 1px solid #d9d6fe;
+  border-radius: 4px;
+  overflow: hidden;
+  height: 24px;
+}
+.stage-toggle-btn {
+  border: none;
+  background: #fff;
+  padding: 0 10px;
+  font-size: 11px;
+  color: #65657B;
+  cursor: pointer;
+  border-right: 1px solid #e8e6f7;
+  transition: all 0.15s;
+  line-height: 22px;
+}
+.stage-toggle-btn:last-child { border-right: none; }
+.stage-toggle-btn.active {
+  background: #543FDE;
+  color: #fff;
+}
+.stage-toggle-btn:hover:not(.active) {
+  background: #f0eeff;
+}
+
+/* Multi-select Done footer */
+.select-done-footer {
+  border-top: 1px solid #f0f0f0;
+  padding: 6px 8px;
+  text-align: right;
+}
+
+/* Views button */
+.views-compact-btn.ant-btn {
   font-size: 12px;
-  font-weight: 600;
-  color: #543FDE;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  color: #8F8FA3;
+  padding: 0 8px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 /* ── Team Metrics: Section Headers ──────────────────── */

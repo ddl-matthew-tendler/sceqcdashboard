@@ -2237,16 +2237,34 @@ function BulkActionBar(props) {
 
   if (count === 0) return null;
 
-  // Combine all project members for bulk assignment — use id as value
+  // Collect unique project IDs from selected bundles
+  var selectedProjectIds = {};
+  selectedKeys.forEach(function(bundleId) {
+    var bundle = bundles.find(function(b) { return b.id === bundleId; });
+    if (bundle && bundle.projectId) selectedProjectIds[bundle.projectId] = true;
+  });
+  var selectedPids = Object.keys(selectedProjectIds);
+
+  // Combine all project members for bulk assignment — annotate with project coverage
   var seen = {};
   var memberOptions = [];
   Object.keys(pmc).forEach(function(pid) {
     (pmc[pid] || []).forEach(function(m) {
       if (!seen[m.id]) {
-        seen[m.id] = true;
-        memberOptions.push({ label: (m.firstName || '') + ' ' + (m.lastName || '') + ' (' + m.userName + ')', value: m.id });
+        seen[m.id] = { member: m, projectIds: {} };
       }
+      seen[m.id].projectIds[pid] = true;
     });
+  });
+  Object.keys(seen).forEach(function(id) {
+    var entry = seen[id];
+    var m = entry.member;
+    var coveredCount = selectedPids.filter(function(pid) { return entry.projectIds[pid]; }).length;
+    var label = (m.firstName || '') + ' ' + (m.lastName || '') + ' (' + m.userName + ')';
+    if (selectedPids.length > 0 && coveredCount < selectedPids.length) {
+      label += ' — ' + coveredCount + '/' + selectedPids.length + ' projects';
+    }
+    memberOptions.push({ label: label, value: id });
   });
 
   // Get the selected bundles with their current stage info
@@ -2291,22 +2309,60 @@ function BulkActionBar(props) {
       return !!bulkMember;
     });
     var body = { assignee: { id: bulkAssignee, userName: bulkMember ? bulkMember.userName : undefined } };
-    var promises = validTargets.map(function(t) {
+    var assigneeName = bulkMember ? bulkMember.userName : 'Selected user';
+
+    // Pre-check: filter out bundles that can't be assigned
+    var skipped = [];
+    var eligible = [];
+    validTargets.forEach(function(t) {
+      // Skip archived/complete bundles — Domino silently rejects these
+      var state = (t.bundle.state || '').toLowerCase();
+      if (state === 'archived') {
+        skipped.push({ bundleName: t.bundleName, reason: 'Archived — reactivate in Domino first' });
+        return;
+      }
+      if (state === 'complete') {
+        skipped.push({ bundleName: t.bundleName, reason: 'Complete — reopen in Domino first' });
+        return;
+      }
+      // Skip if assignee isn't a collaborator on the bundle's project
+      var pid = t.bundle.projectId;
+      if (pid && pmc[pid] && !pmc[pid].some(function(m) { return m.id === bulkAssignee; })) {
+        skipped.push({ bundleName: t.bundleName, reason: 'Not a collaborator on project ' + (t.bundle.projectName || pid) });
+        return;
+      }
+      eligible.push(t);
+    });
+
+    if (eligible.length === 0) {
+      setBulkLoading(false);
+      antd.notification.error({
+        message: 'Cannot assign any of the selected ' + B.toLowerCase() + 's',
+        description: h('div', null,
+          skipped.map(function(s, i) { return h('p', { key: i, style: { fontSize: 12 } }, '\u2022 ' + s.bundleName + ' — ' + s.reason); }),
+          h('p', { style: { marginTop: 8, color: '#65657B', fontSize: 12 } }, 'Domino requires: active ' + B.toLowerCase() + ', and assignee must be a project collaborator.')
+        ),
+        duration: 15,
+      });
+      return;
+    }
+
+    var promises = eligible.map(function(t) {
       return apiPatch('api/bundles/' + t.bundleId + '/stages/' + t.stageId, body)
         .then(function(resp) {
-          // Update local state immediately
-          if (resp && resp.assignee && t.stageData) {
-            t.stageData.assignee = resp.assignee;
-          }
           if (resp.verified === false) {
             var actualName = resp.actualAssignee ? (resp.actualAssignee.name || resp.actualAssignee.id) : 'nobody';
-            return { success: false, bundleName: t.bundleName, stageName: t.stageName, reason: 'Domino shows ' + actualName + ' instead' };
+            return { success: false, bundleName: t.bundleName, stageName: t.stageName, reason: 'Domino did not persist — assignee is still ' + actualName + '. They may need to be added as a collaborator on project ' + (t.bundle.projectName || '') + '.' };
+          }
+          // Only update local state after verification succeeds
+          if (resp && resp.assignee && t.stageData) {
+            t.stageData.assignee = resp.assignee;
           }
           return { success: true, bundleName: t.bundleName, stageName: t.stageName, verified: resp.verified };
         })
         .catch(function(err) {
           var detail = err.message || String(err);
-          var reason = detail.indexOf('403') !== -1 ? 'Permission denied' : detail.indexOf('404') !== -1 ? 'Not found' : parseServerError(detail);
+          var reason = detail.indexOf('403') !== -1 ? 'Permission denied — check project collaborator settings' : detail.indexOf('404') !== -1 ? 'Not found' : parseServerError(detail);
           return { success: false, bundleName: t.bundleName, stageName: t.stageName, error: detail, reason: reason };
         });
     });
@@ -2316,21 +2372,48 @@ function BulkActionBar(props) {
       var succeeded = results.filter(function(r) { return r.success; });
       var failed = results.filter(function(r) { return !r.success; });
       var verified = succeeded.filter(function(r) { return r.verified === true; });
-      if (failed.length === 0) {
+      var totalAttempted = eligible.length;
+      var skippedCount = skipped.length;
+
+      // Build skipped section if any were pre-filtered
+      var skippedSection = skippedCount > 0 ? [
+        h('p', { style: { fontWeight: 500, marginTop: 8, fontSize: 12, color: '#8F8FA3' } }, 'Skipped (' + skippedCount + '):'),
+        skipped.map(function(s, i) { return h('p', { key: 'skip-' + i, style: { marginLeft: 8, fontSize: 11, color: '#8F8FA3' } }, '\u2022 ' + s.bundleName + ' — ' + s.reason); })
+      ] : [];
+
+      if (failed.length === 0 && succeeded.length > 0) {
         var msg = 'Assigned ' + succeeded.length + ' ' + B.toLowerCase() + (succeeded.length > 1 ? 's' : '');
         msg += verified.length === succeeded.length ? ' — all verified in Domino' : ' (verification pending for ' + (succeeded.length - verified.length) + ')';
+        if (skippedCount > 0) msg += '. ' + skippedCount + ' skipped.';
         antd.message.success(msg);
+        if (skippedCount > 0) {
+          antd.notification.info({
+            message: skippedCount + ' ' + B.toLowerCase() + (skippedCount > 1 ? 's' : '') + ' skipped',
+            description: h('div', null, skippedSection),
+            duration: 10,
+          });
+        }
       } else if (succeeded.length > 0) {
         antd.notification.warning({
-          message: succeeded.length + ' of ' + results.length + ' assignments succeeded' + (verified.length > 0 ? ' (' + verified.length + ' verified)' : ''),
-          description: 'Failed (' + failed.length + '): ' + failed.map(function(f) { return f.bundleName + ' / ' + f.stageName + ' — ' + f.reason; }).join('; '),
-          duration: 10,
+          message: succeeded.length + ' of ' + totalAttempted + ' assignments succeeded',
+          description: h('div', null,
+            verified.length > 0 ? h('p', null, verified.length + ' verified in Domino') : null,
+            h('p', { style: { fontWeight: 500, marginTop: 4 } }, 'Failed (' + failed.length + '):'),
+            failed.map(function(f, i) { return h('p', { key: i, style: { marginLeft: 8, fontSize: 12 } }, '\u2022 ' + f.bundleName + ' / ' + f.stageName + ' — ' + f.reason); }),
+            skippedSection,
+            h('p', { style: { marginTop: 8, color: '#65657B', fontSize: 12 } }, 'Tip: Ensure the assignee is a collaborator on each ' + B.toLowerCase() + '\'s Domino project.')
+          ),
+          duration: 15,
         });
-      } else {
+      } else if (failed.length > 0) {
         antd.notification.error({
           message: 'All ' + failed.length + ' assignments failed',
-          description: failed.map(function(f) { return f.bundleName + ' / ' + f.stageName + ' — ' + f.reason; }).join('; '),
-          duration: 10,
+          description: h('div', null,
+            failed.map(function(f, i) { return h('p', { key: i, style: { fontSize: 12 } }, '\u2022 ' + f.bundleName + ' / ' + f.stageName + ' — ' + f.reason); }),
+            skippedSection,
+            h('p', { style: { marginTop: 8, color: '#65657B', fontSize: 12 } }, 'Domino requires: active ' + B.toLowerCase() + ' state, and assignee must be a project collaborator.')
+          ),
+          duration: 15,
         });
       }
       setBulkAssignee(null);
@@ -3219,8 +3302,6 @@ function QCTrackerPage(props) {
   // Findings & attachments drawer state
   var _fd1 = useState(false); var findingsDrawerOpen = _fd1[0]; var setFindingsDrawerOpen = _fd1[1];
   var _fd2 = useState(null); var findingsDrawerBundle = _fd2[0]; var setFindingsDrawerBundle = _fd2[1];
-  var _ad1 = useState(false); var attachDrawerOpen = _ad1[0]; var setAttachDrawerOpen = _ad1[1];
-  var _ad2 = useState(null); var attachDrawerBundle = _ad2[0]; var setAttachDrawerBundle = _ad2[1];
   // Column widths state (resizable)
   var _cw = useState({}); var colWidths = _cw[0]; var setColWidths = _cw[1];
   // Hidden columns state
@@ -3456,41 +3537,57 @@ function QCTrackerPage(props) {
               var body = { assignee: userId ? { id: userId, userName: memberMatch ? memberMatch.userName : undefined } : null };
               apiPatch('api/bundles/' + record.id + '/stages/' + currentStageId, body)
                 .then(function(resp) {
-                  // Update local state with full assignee info
-                  var newAssignee = null;
-                  if (userId) {
-                    var m = members.find(function(mm) { return mm.id === userId; });
-                    if (m) {
-                      newAssignee = { id: m.id, name: m.userName, firstName: m.firstName, lastName: m.lastName };
-                    } else if (resp && resp.assignee) {
-                      newAssignee = resp.assignee;
-                    } else {
-                      newAssignee = { id: userId };
-                    }
-                  }
-                  record.stageAssignee = newAssignee;
-                  // Also update the stage in the stages array
-                  if (record.stages) {
-                    record.stages.forEach(function(s) {
-                      if ((s.stageId || (s.stage && s.stage.id)) === currentStageId) {
-                        s.assignee = newAssignee;
-                      }
-                    });
-                  }
-                  // Check read-back verification from backend
-                  if (resp.verified === true) {
-                    antd.message.success('Assignee updated — verified in Domino');
-                  } else if (resp.verified === false) {
+                  // Check read-back verification BEFORE updating local state
+                  if (resp.verified === false) {
                     var actualName = resp.actualAssignee ? (resp.actualAssignee.name || resp.actualAssignee.userName || resp.actualAssignee.id || '') : '';
+                    // Revert the select to the actual value from Domino
+                    if (resp.actualAssignee) {
+                      record.stageAssignee = resp.actualAssignee;
+                      if (record.stages) {
+                        record.stages.forEach(function(s) {
+                          if ((s.stageId || (s.stage && s.stage.id)) === currentStageId) {
+                            s.assignee = resp.actualAssignee;
+                          }
+                        });
+                      }
+                    }
                     antd.notification.warning({
-                      message: 'Assignment may not have saved',
-                      description: actualName
-                        ? 'Domino accepted the request but the read-back shows the stage is still assigned to ' + actualName + '. Try refreshing the page.'
-                        : 'Domino accepted the request but the read-back doesn\u2019t reflect the change. Try refreshing the page.',
-                      duration: 10,
+                      message: 'Assignment did not save in Domino',
+                      description: h('div', null,
+                        h('p', null, actualName
+                          ? 'Domino accepted the request but the stage is still assigned to ' + actualName + '.'
+                          : 'Domino accepted the request but did not persist the change.'),
+                        h('p', { style: { marginTop: 6, fontSize: 12, color: '#65657B' } }, 'Common causes: the assignee is not a collaborator on this project, or the ' + B.toLowerCase() + ' is in a state that prevents changes.'),
+                        h('p', { style: { marginTop: 4, fontSize: 12, fontWeight: 500 } }, 'Fix: Verify the assignee is a project collaborator in Domino.')
+                      ),
+                      duration: 12,
                     });
                   } else {
-                    antd.message.success('Assignee updated (verification pending)');
+                    // Only update local state after verification succeeds or is indeterminate
+                    var newAssignee = null;
+                    if (userId) {
+                      var m = members.find(function(mm) { return mm.id === userId; });
+                      if (m) {
+                        newAssignee = { id: m.id, name: m.userName, firstName: m.firstName, lastName: m.lastName };
+                      } else if (resp && resp.assignee) {
+                        newAssignee = resp.assignee;
+                      } else {
+                        newAssignee = { id: userId };
+                      }
+                    }
+                    record.stageAssignee = newAssignee;
+                    if (record.stages) {
+                      record.stages.forEach(function(s) {
+                        if ((s.stageId || (s.stage && s.stage.id)) === currentStageId) {
+                          s.assignee = newAssignee;
+                        }
+                      });
+                    }
+                    if (resp.verified === true) {
+                      antd.message.success('Assignee updated — verified in Domino');
+                    } else {
+                      antd.message.success('Assignee updated (verification pending)');
+                    }
                   }
                   // Force table re-render
                   setRerenderKey(function(k) { return k + 1; });
@@ -3534,7 +3631,7 @@ function QCTrackerPage(props) {
         var count = (record._attachments || []).length;
         if (count === 0) return h('span', { style: { color: '#D1D1DB', fontSize: 11 } }, '\u2013');
         var stale = countStaleAttachments(record);
-        var clickHandler = function(e) { e.stopPropagation(); setAttachDrawerBundle(record); setAttachDrawerOpen(true); };
+        var clickHandler = function(e) { e.stopPropagation(); if (onSelectBundle) onSelectBundle(record, 'attachments'); };
         if (stale > 0) {
           return h(Tooltip, { title: count + ' attachment' + (count > 1 ? 's' : '') + ' \u2014 ' + stale + ' outdated snapshot' + (stale > 1 ? 's' : '') + '. Click to review.' },
             h('span', {
@@ -3773,13 +3870,6 @@ function QCTrackerPage(props) {
         onClose: function() { setFindingsDrawerOpen(false); },
         bundle: findingsDrawerBundle,
       }),
-      h(AttachmentsDrawer, {
-        visible: attachDrawerOpen,
-        onClose: function() { setAttachDrawerOpen(false); },
-        bundle: attachDrawerBundle,
-        dataExplorerUrl: dataExplorerUrl,
-        terms: terms,
-      })
     )
   );
 }
@@ -3797,14 +3887,15 @@ function DetailDrawer(props) {
   var P = terms.policy;
   var deUrl = props.dataExplorerUrl || null;
   var projectMembersCache = props.projectMembersCache || {};
+  var initialView = props.initialView || null;
 
   var _view = useState('stage-timeline');
   var activeView = _view[0];
   var setActiveView = _view[1];
 
-  // Always reset to Stage Timeline when a new bundle is selected
+  // Reset to initialView (or Stage Timeline) when a new bundle is selected
   var bundleId = bundle ? (bundle.id || bundle.name) : null;
-  useEffect(function() { setActiveView('stage-timeline'); }, [bundleId]);
+  useEffect(function() { setActiveView(initialView || 'stage-timeline'); }, [bundleId, initialView]);
 
   if (!bundle) return null;
 
@@ -8332,8 +8423,11 @@ function App() {
       .catch(function() {});
   }, []);
 
-  function handleSelectBundle(bundle) {
+  var _s6b = useState(null); var drawerInitialView = _s6b[0]; var setDrawerInitialView = _s6b[1];
+
+  function handleSelectBundle(bundle, initialView) {
     setSelectedBundle(bundle);
+    setDrawerInitialView(initialView || null);
     setDrawerOpen(true);
   }
 
@@ -8390,61 +8484,101 @@ function App() {
         h('div', { className: 'main-content' },
           // Universal Scope Bar
           h('div', { className: 'global-filter-bar' },
-            h('span', { className: 'global-filter-label' }, 'Scope:'),
-            h(Select, {
-              mode: 'multiple', placeholder: 'All Projects',
-              value: scopeProjects, onChange: setScopeProjects,
-              allowClear: true, maxTagCount: 2,
-              style: { minWidth: 220 }, size: 'small',
-              options: scopeProjectOptions,
-            }),
-            h(Select, {
-              mode: 'multiple', placeholder: 'Tags',
-              value: scopeTags, onChange: setScopeTags,
-              allowClear: true, maxTagCount: 2,
-              style: { minWidth: 220 }, size: 'small',
-              options: scopeTagOptions,
-            }),
-            h(Select, {
-              mode: 'multiple', placeholder: 'All States',
-              value: scopeStates, onChange: setScopeStates,
-              allowClear: true, maxTagCount: 2,
-              style: { minWidth: 160 }, size: 'small',
-              options: [
-                { label: 'Active', value: 'Active' },
-                { label: 'Complete', value: 'Complete' },
-                { label: 'Archived', value: 'Archived' },
-              ],
-            }),
+            // Project filter group
+            h('div', { className: 'global-filter-group' },
+              h('span', { className: 'global-filter-label' }, 'Project'),
+              h(Select, {
+                mode: 'multiple', placeholder: 'All',
+                value: scopeProjects, onChange: setScopeProjects,
+                allowClear: true, maxTagCount: 2,
+                style: { minWidth: 180 }, size: 'small',
+                options: scopeProjectOptions,
+                dropdownRender: function(menu) {
+                  return h('div', null, menu,
+                    h('div', { className: 'select-done-footer' },
+                      h(Button, { type: 'primary', size: 'small', style: { fontSize: 11, height: 22 }, onClick: function() {
+                        document.activeElement && document.activeElement.blur();
+                      } }, 'Done')
+                    )
+                  );
+                },
+              })
+            ),
+            // Tags filter group
+            h('div', { className: 'global-filter-group' },
+              h('span', { className: 'global-filter-label' }, 'Tags'),
+              h(Select, {
+                mode: 'multiple', placeholder: 'All',
+                value: scopeTags, onChange: setScopeTags,
+                allowClear: true, maxTagCount: 2,
+                style: { minWidth: 160 }, size: 'small',
+                options: scopeTagOptions,
+                dropdownRender: function(menu) {
+                  return h('div', null, menu,
+                    h('div', { className: 'select-done-footer' },
+                      h(Button, { type: 'primary', size: 'small', style: { fontSize: 11, height: 22 }, onClick: function() {
+                        document.activeElement && document.activeElement.blur();
+                      } }, 'Done')
+                    )
+                  );
+                },
+              })
+            ),
+            // Status filter group
+            h('div', { className: 'global-filter-group' },
+              h('span', { className: 'global-filter-label' }, 'Status'),
+              h(Select, {
+                mode: 'multiple', placeholder: 'All',
+                value: scopeStates, onChange: setScopeStates,
+                allowClear: true, maxTagCount: 2,
+                style: { minWidth: 130 }, size: 'small',
+                options: [
+                  { label: 'Active', value: 'Active' },
+                  { label: 'Complete', value: 'Complete' },
+                  { label: 'Archived', value: 'Archived' },
+                ],
+                dropdownRender: function(menu) {
+                  return h('div', null, menu,
+                    h('div', { className: 'select-done-footer' },
+                      h(Button, { type: 'primary', size: 'small', style: { fontSize: 11, height: 22 }, onClick: function() {
+                        document.activeElement && document.activeElement.blur();
+                      } }, 'Done')
+                    )
+                  );
+                },
+              })
+            ),
             h('span', { className: 'global-filter-divider' }),
-            h(Tooltip, { title: 'Filter deliverables where you are assigned to a stage' },
-              h('span', { className: 'global-filter-label', style: { borderBottom: '1px dashed #8F8FA3', cursor: 'help' } }, 'Assigned to Me:')
-            ),
-            h(Tooltip, { title: 'Show deliverables where you are assigned to the currently active stage' },
-              h(Checkbox, {
-                checked: filterMyCurrentStage,
-                onChange: function(e) { setFilterMyCurrentStage(e.target.checked); },
-                style: { fontSize: 12 },
-              }, 'Current stage')
-            ),
-            h(Tooltip, { title: 'Show deliverables where you are assigned to an upcoming stage' },
-              h(Checkbox, {
-                checked: filterMyFutureStage,
-                onChange: function(e) { setFilterMyFutureStage(e.target.checked); },
-                style: { fontSize: 12 },
-              }, 'Future stage')
-            ),
-            h(Tooltip, { title: 'Show deliverables where you were assigned to a completed stage' },
-              h(Checkbox, {
-                checked: filterMyPriorStage,
-                onChange: function(e) { setFilterMyPriorStage(e.target.checked); },
-                style: { fontSize: 12 },
-              }, 'Prior stage')
+            // My stages — segmented toggle replacing checkboxes
+            h('div', { className: 'global-filter-group' },
+              h(Tooltip, { title: 'Filter deliverables where you are assigned to a stage' },
+                h('span', { className: 'global-filter-label', style: { borderBottom: '1px dashed #8F8FA3', cursor: 'help' } }, 'My stages')
+              ),
+              h('div', { className: 'stage-toggle-group' },
+                h(Tooltip, { title: 'Show deliverables where you are assigned to the currently active stage' },
+                  h('button', {
+                    className: 'stage-toggle-btn' + (filterMyCurrentStage ? ' active' : ''),
+                    onClick: function() { setFilterMyCurrentStage(function(v) { return !v; }); },
+                  }, 'Current')
+                ),
+                h(Tooltip, { title: 'Show deliverables where you are assigned to an upcoming stage' },
+                  h('button', {
+                    className: 'stage-toggle-btn' + (filterMyFutureStage ? ' active' : ''),
+                    onClick: function() { setFilterMyFutureStage(function(v) { return !v; }); },
+                  }, 'Future')
+                ),
+                h(Tooltip, { title: 'Show deliverables where you were assigned to a completed stage' },
+                  h('button', {
+                    className: 'stage-toggle-btn' + (filterMyPriorStage ? ' active' : ''),
+                    onClick: function() { setFilterMyPriorStage(function(v) { return !v; }); },
+                  }, 'Prior')
+                )
+              )
             ),
             h('span', { className: 'global-filter-divider' }),
-            // Presets dropdown
+            // Saved views — compact
             h(Select, {
-              placeholder: 'Saved views',
+              placeholder: 'Views',
               value: activePresetName || undefined,
               onChange: function(val) {
                 if (!val) {
@@ -8456,7 +8590,7 @@ function App() {
                 if (preset) applyPreset(preset);
               },
               allowClear: true,
-              style: { minWidth: 160 }, size: 'small',
+              style: { minWidth: 120 }, size: 'small',
               options: scopePresets.map(function(p) {
                 return {
                   label: (defaultPresetName === p.name ? '★ ' : '') + p.name,
@@ -8466,9 +8600,14 @@ function App() {
               dropdownRender: function(menu) {
                 return h('div', null,
                   menu,
-                  scopePresets.length > 0 ? h('div', { style: { borderTop: '1px solid #f0f0f0', padding: '4px 8px' } },
-                    h('div', { style: { fontSize: 11, color: '#8F8FA3', marginBottom: 2 } }, 'Right-click a view for options')
-                  ) : null
+                  h('div', { style: { borderTop: '1px solid #f0f0f0', padding: '6px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' } },
+                    hasScopeFilters
+                      ? h(Button, { type: 'link', size: 'small', style: { fontSize: 11, padding: 0 }, onClick: function() {
+                          setPresetSaveOpen(true); setPresetNameInput(activePresetName || '');
+                        } }, '+ Save current view')
+                      : h('span', { style: { fontSize: 11, color: '#8F8FA3' } }, 'Set filters to save a view'),
+                    scopePresets.length > 0 ? h('span', { style: { fontSize: 10, color: '#8F8FA3' } }, 'Right-click for options') : null
+                  )
                 );
               },
               optionRender: function(option) {
@@ -8498,16 +8637,6 @@ function App() {
                 );
               },
             }),
-            // Save preset button
-            hasScopeFilters
-              ? h(Tooltip, { title: 'Save current scope as a named view' },
-                  h(Button, {
-                    type: 'link', size: 'small',
-                    style: { fontSize: 12, padding: '0 4px' },
-                    onClick: function() { setPresetSaveOpen(true); setPresetNameInput(activePresetName || ''); },
-                  }, '+ Save view')
-                )
-              : null,
             hasScopeFilters
               ? h('span', { style: { marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 } },
                   h(Tag, { color: 'purple' }, scopedBundles.length + ' of ' + bundles.length + ' ' + terms.bundle.toLowerCase() + 's'),
@@ -8567,10 +8696,11 @@ function App() {
       h(DetailDrawer, {
         bundle: selectedBundle,
         visible: drawerOpen,
-        onClose: function() { setDrawerOpen(false); },
+        onClose: function() { setDrawerOpen(false); setDrawerInitialView(null); },
         terms: terms,
         dataExplorerUrl: dataExplorerUrl,
         projectMembersCache: projectMembersCache,
+        initialView: drawerInitialView,
       })
     )
   );
