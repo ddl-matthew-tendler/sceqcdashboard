@@ -380,6 +380,23 @@ The SCE QC Tracker is a Domino App built for pharmaceutical statistical programm
 
 ---
 
+### 9. NetApp Volume Snapshot Listing
+
+- **Priority**: Low (staleness detection partially works via cross-bundle comparison)
+- **Date Discovered**: 2026-03-29
+- **User Impact**: The app cannot detect whether an attached NetApp volume snapshot is outdated relative to newer snapshots that exist in Domino but are not yet attached to any bundle. If a user creates Snapshot v2 in Domino and the deliverable still references v1, the app shows no staleness warning — because there is no API to query the list of snapshots for a given volume.
+- **Attempted Endpoints** (all return 404):
+  - `GET /api/storage/v1/volumes/{volumeId}/snapshots`
+  - `GET /v4/storage/volumes/{volumeId}/snapshots`
+  - `GET /api/netapp/v1/volumes/{volumeId}/snapshots`
+- **What Works Today**: Cross-bundle staleness detection. If Bundle A has volume v1 attached and Bundle B has the same volume at v2, Bundle A's attachment is flagged as outdated. This works purely from governance API data — no snapshot listing endpoint needed.
+- **What Doesn't Work**: "Unattached newer snapshot" detection. If v2 exists in Domino but is attached to no bundle, no staleness warning appears anywhere.
+- **Equivalent Dataset API** (for reference): Datasets have `/datasetUi/collections/{datasetId}/snapshots` which works. No equivalent exists for NetApp volumes in the current Domino API surface.
+- **What We Need**: `GET /api/netapp/v1/volumes/{volumeId}/snapshots` (or equivalent) returning `[{ version, snapshotName, createdAt }]` sorted by version descending.
+- **Current Workaround**: None. Accepted as a known limitation. Staleness detection for volumes is cross-bundle only.
+
+---
+
 ## Priority Summary
 
 | Gap | Priority | Blocking | Proposed Endpoint |
@@ -392,6 +409,7 @@ The SCE QC Tracker is a Domino App built for pharmaceutical statistical programm
 | 6. Write Action Audit Trail | Low | Required for GxP compliance; depends on Gaps 1-3 | Audit metadata on all write responses + `GET .../audit-log` |
 | 7. Data Explorer / Cross-App Discovery | Low | Nice-to-have; current workaround is functional | Query param on `GET /api/apps/beta/apps` or app-to-app link registry |
 | 8. Undocumented Write Constraints | High | Silent 200 OK on rejected writes; read-back verification is the only defense | Error status codes (403/409/422) or `persisted: false` in response body |
+| 9. NetApp Volume Snapshot Listing | Low | Staleness detection is cross-bundle only; can't detect newer unattached snapshots | `GET /api/netapp/v1/volumes/{volumeId}/snapshots` |
 
 ### Dependency Graph
 

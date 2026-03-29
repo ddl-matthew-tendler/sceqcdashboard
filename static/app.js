@@ -930,8 +930,18 @@ function MilestonesPage(props) {
                       // Shorten label to fit within bar
                       var words = stage.split(' ');
                       var label = words.length > 2 ? words.slice(0, 2).join(' ') : stage;
-                      return h(Tooltip, { key: stage, title: stage },
-                        h('div', { className: cls },
+                      var url = getDominoBundleUrl(bundle, { stageName: stage });
+                      var tooltipTitle = idx <= currentIdx
+                        ? stage + ' — Click to open in Domino'
+                        : stage;
+                      return h(Tooltip, { key: stage, title: tooltipTitle },
+                        h('div', {
+                          className: cls,
+                          style: url && idx <= currentIdx ? { cursor: 'pointer' } : undefined,
+                          onClick: url && idx <= currentIdx ? function(stageName) {
+                            return function() { window.open(getDominoBundleUrl(bundle, { stageName: stageName }), '_blank'); };
+                          }(stage) : undefined
+                        },
                           idx <= currentIdx ? label : ''
                         )
                       );
@@ -3259,6 +3269,8 @@ function QCTrackerPage(props) {
   var _cw = useState({}); var colWidths = _cw[0]; var setColWidths = _cw[1];
   // Hidden columns state
   var _hc = useState(['policy']); var hiddenCols = _hc[0]; var setHiddenCols = _hc[1];
+  // Per-stage assignee columns: hidden by default; track which ones the user has turned on
+  var _sc2 = useState([]); var shownStageCols = _sc2[0]; var setShownStageCols = _sc2[1];
 
   // Derive filter options from scoped bundles (project/tag scope handled at App level)
   var policyOptions = useMemo(function() {
@@ -3290,11 +3302,20 @@ function QCTrackerPage(props) {
     return Object.keys(names).sort();
   }, [bundles]);
 
-  // Unique stage names for column filter
+  // Unique current-stage names for column filter
   var allStageNames = useMemo(function() {
     var names = {};
     bundles.forEach(function(b) { if (b.stage) names[b.stage] = true; });
     return Object.keys(names).sort();
+  }, [bundles]);
+
+  // Max stage count across all bundles (for positional Stage 1, Stage 2, … columns)
+  var maxStageCount = useMemo(function() {
+    var max = 0;
+    bundles.forEach(function(b) {
+      if (b.stages && b.stages.length > max) max = b.stages.length;
+    });
+    return max;
   }, [bundles]);
 
   // Apply local filters (project/tag scope now handled at App level)
@@ -3308,6 +3329,10 @@ function QCTrackerPage(props) {
           || (b.stage || '').toLowerCase().indexOf(q) >= 0
           || (b.state || '').toLowerCase().indexOf(q) >= 0
           || (b.stageAssignee && b.stageAssignee.name || '').toLowerCase().indexOf(q) >= 0
+          || (b.stages && b.stages.some(function(s) {
+               var an = s.assignee && (s.assignee.name || s.assignee.userName) || '';
+               return an.toLowerCase().indexOf(q) >= 0;
+             }))
           || (b._attachments || []).some(function(att) {
                var fname = att.identifier && att.identifier.filename || '';
                var aname = att.identifier && att.identifier.name || '';
@@ -3333,6 +3358,28 @@ function QCTrackerPage(props) {
       return true;
     });
   }, [bundles, searchText, filterPolicies, filterState, filterAssignee, filterFlags, filterStage]);
+
+  // Track which filtered rows matched via a hidden per-stage assignee (for the search indicator)
+  var hiddenStageMatchIds = useMemo(function() {
+    if (!searchText) return {};
+    var q = searchText.toLowerCase();
+    var result = {};
+    filtered.forEach(function(b) {
+      if (!b.stages) return;
+      b.stages.forEach(function(s) {
+        var sName = s.stage && s.stage.name;
+        var an = (s.assignee && (s.assignee.name || s.assignee.userName)) || '';
+        if (sName && an.toLowerCase().indexOf(q) >= 0) {
+          var colKey = 'sa_' + sName;
+          if (shownStageCols.indexOf(colKey) < 0) {
+            var id = b.id || b.name;
+            result[id] = (result[id] || []).concat(sName);
+          }
+        }
+      });
+    });
+    return result;
+  }, [filtered, searchText, shownStageCols]);
 
   // Stats (computed from all bundles, not filtered — so stat cards show true totals)
   var stats = useMemo(function() {
@@ -3394,10 +3441,19 @@ function QCTrackerPage(props) {
       sorter: function(a, b) { return a.name.localeCompare(b.name); },
       render: function(name, record) {
         var nameColor = record.state === 'Complete' ? '#28A464' : record.state === 'Archived' ? '#8F8FA3' : '#543FDE';
-        return h('a', {
-          style: { fontWeight: 600, color: nameColor, fontSize: 12 },
-          onClick: function(e) { e.stopPropagation(); if (onSelectBundle) onSelectBundle(record); }
-        }, name);
+        var id = record.id || record.name;
+        var hiddenMatches = hiddenStageMatchIds[id];
+        return h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } },
+          h('a', {
+            style: { fontWeight: 600, color: nameColor, fontSize: 12 },
+            onClick: function(e) { e.stopPropagation(); if (onSelectBundle) onSelectBundle(record); }
+          }, name),
+          hiddenMatches && hiddenMatches.length > 0
+            ? h(Tooltip, { title: 'Search matched assignee in hidden stage' + (hiddenMatches.length > 1 ? 's' : '') + ': ' + hiddenMatches.join(', ') },
+                h('span', { style: { color: '#8F8FA3', fontSize: 11, cursor: 'help', lineHeight: 1 } }, '\u24d8')
+              )
+            : null
+        );
       }
     },
     { title: 'Project', dataIndex: 'projectName', key: 'project', width: 130,
@@ -3414,7 +3470,7 @@ function QCTrackerPage(props) {
     { title: 'Progress', key: 'progress', width: 130,
       sorter: function(a, b) { return getBundleProgress(a) - getBundleProgress(b); },
       render: function(_, record) { return h(StagePipeline, { bundle: record, onFindingsClick: function(b) { setFindingsDrawerBundle(b); setFindingsDrawerOpen(true); } }); } },
-    { title: 'Stage', dataIndex: 'stage', key: 'stage', width: 130, ellipsis: true,
+    { title: 'Current Stage', dataIndex: 'stage', key: 'stage', width: 130, ellipsis: true,
       filters: allStageNames.map(function(s) { return { text: s, value: s }; }),
       filterSearch: true,
       onFilter: function(v, r) { return r.stage === v; },
@@ -3651,6 +3707,174 @@ function QCTrackerPage(props) {
       render: function(_, record) { return h(StatusFlags, { bundle: record, onFindingsClick: function(b) { setFindingsDrawerBundle(b); setFindingsDrawerOpen(true); } }); } },
   ];
 
+  // Per-stage column pairs: [Stage Name] status + [Stage Name] Assignee (hidden by default)
+  var perStageCols = useMemo(function() {
+    var statusColorMap = { Current: 'gold', Completed: 'green', Future: 'blue' };
+    var result = [];
+
+    allUniqueStageNames.forEach(function(sName) {
+      // Helper: find this stage's object + its computed status within a bundle
+      function getStageInfo(bundle) {
+        if (!bundle.stages) return null;
+        var currentIdx = deriveBundleStageIndex(bundle);
+        var isComplete = bundle.state === 'Complete';
+        var idx = bundle.stages.findIndex(function(st) { return st.stage && st.stage.name === sName; });
+        if (idx < 0) return null;
+        var stageObj = bundle.stages[idx];
+        var status = isComplete || idx < currentIdx ? 'Completed' : idx === currentIdx ? 'Current' : 'Future';
+        return { stageObj: stageObj, status: status, idx: idx };
+      }
+
+      // ── Stage status column ─────────────────────────────────────
+      result.push({
+        title: sName,
+        key: 'st_' + sName,
+        width: 100,
+        sorter: function(a, b) {
+          var order = { Current: 0, Future: 1, Completed: 2 };
+          var ia = getStageInfo(a); var ib = getStageInfo(b);
+          return (order[(ia && ia.status) || 'Future'] || 0) - (order[(ib && ib.status) || 'Future'] || 0);
+        },
+        filters: [
+          { text: 'Current', value: 'Current' },
+          { text: 'Future', value: 'Future' },
+          { text: 'Completed', value: 'Completed' },
+          { text: 'N/A', value: '__na__' },
+        ],
+        onFilter: function(value, record) {
+          var info = getStageInfo(record);
+          if (value === '__na__') return !info;
+          return info && info.status === value;
+        },
+        render: function(_, record) {
+          var info = getStageInfo(record);
+          if (!info) return h('span', { style: { color: '#D1D1DB', fontSize: 11 } }, '\u2013');
+          return h(Tag, { color: statusColorMap[info.status] || 'default', style: { fontSize: 11 } }, info.status);
+        },
+      });
+
+      // ── Stage assignee column ───────────────────────────────────
+      var stageAssigneeFilters = [{ text: 'Unassigned', value: '__unassigned__' }];
+      var seen = {};
+      bundles.forEach(function(b) {
+        if (!b.stages) return;
+        b.stages.forEach(function(s) {
+          if (s.stage && s.stage.name === sName) {
+            var aName = s.assignee && (s.assignee.name || s.assignee.userName);
+            if (aName && !seen[aName]) { seen[aName] = true; stageAssigneeFilters.push({ text: aName, value: aName }); }
+          }
+        });
+      });
+
+      result.push({
+        title: sName + ' Assignee',
+        key: 'sa_' + sName,
+        width: 160,
+        sorter: function(a, b) {
+          var ia = getStageInfo(a); var ib = getStageInfo(b);
+          var aa = (ia && ia.stageObj.assignee && (ia.stageObj.assignee.name || ia.stageObj.assignee.userName)) || '';
+          var bb = (ib && ib.stageObj.assignee && (ib.stageObj.assignee.name || ib.stageObj.assignee.userName)) || '';
+          return aa.localeCompare(bb);
+        },
+        filters: stageAssigneeFilters,
+        filterSearch: true,
+        onFilter: function(value, record) {
+          var info = getStageInfo(record);
+          var aName = info && info.stageObj.assignee && (info.stageObj.assignee.name || info.stageObj.assignee.userName);
+          if (value === '__unassigned__') return !aName;
+          return aName === value;
+        },
+        render: function(_, record) {
+          var info = getStageInfo(record);
+          if (!info) return h('span', { style: { color: '#D1D1DB', fontSize: 11 } }, '\u2013');
+          var stageObj = info.stageObj;
+          var pmc = props.projectMembersCache || {};
+          var members = pmc[record.projectId] || [];
+          function fmtMember(m) {
+            var full = ((m.firstName || '') + ' ' + (m.lastName || '')).trim();
+            return full ? full + ' (' + (m.userName || m.id) + ')' : (m.userName || m.fullName || m.id);
+          }
+          var memberOpts = members.map(function(m) { return { label: fmtMember(m), value: m.id }; });
+          var stageId = stageObj.stageId || (stageObj.stage && stageObj.stage.id);
+          var assigneeRaw = stageObj.assignee || null;
+          var assigneeId = assigneeRaw ? assigneeRaw.id : undefined;
+          var assigneeName = null;
+          var memberMatch = null;
+          if (assigneeId) {
+            memberMatch = members.find(function(m) { return m.id === assigneeId; });
+            if (!memberMatch && assigneeRaw) {
+              var saName = assigneeRaw.name || assigneeRaw.userName;
+              if (saName) {
+                memberMatch = members.find(function(m) { return m.userName === saName; });
+                if (memberMatch) assigneeId = memberMatch.id;
+              }
+            }
+            if (memberMatch) assigneeName = fmtMember(memberMatch);
+          }
+          if (!assigneeName && assigneeRaw) {
+            var sa = assigneeRaw;
+            var full = ((sa.firstName || '') + ' ' + (sa.lastName || '')).trim();
+            assigneeName = full ? full + ' (' + (sa.name || sa.userName || '') + ')' : (sa.name || sa.userName || null);
+          }
+          if (assigneeId && !memberOpts.some(function(o) { return o.value === assigneeId; })) {
+            memberOpts.unshift({ label: assigneeName || 'Unknown user (' + (assigneeRaw && (assigneeRaw.name || assigneeRaw.id) || '?') + ')', value: assigneeId });
+          }
+          if (API_GAPS.stageReassign.ready && memberOpts.length > 0) {
+            return h(Select, {
+              size: 'small',
+              placeholder: 'Assign...',
+              value: assigneeId || undefined,
+              style: { width: '100%', fontSize: 11 },
+              showSearch: true,
+              allowClear: true,
+              options: memberOpts,
+              optionFilterProp: 'label',
+              onClick: function(e) { e.stopPropagation(); },
+              onChange: function(userId) {
+                if (!stageId) { antd.message.error('Missing stage ID'); return; }
+                var mm = userId ? members.find(function(m) { return m.id === userId; }) : null;
+                var body = { assignee: userId ? { id: userId, userName: mm ? mm.userName : undefined } : null };
+                apiPatch('api/bundles/' + record.id + '/stages/' + stageId, body)
+                  .then(function(resp) {
+                    if (resp.verified === false) {
+                      var actualName = resp.actualAssignee ? (resp.actualAssignee.name || resp.actualAssignee.userName || resp.actualAssignee.id || '') : '';
+                      antd.notification.warning({
+                        message: 'Assignment did not save in Domino',
+                        description: actualName ? 'The stage is still assigned to ' + actualName + '.' : 'Domino did not persist the change.',
+                        duration: 10,
+                      });
+                    } else {
+                      stageObj.assignee = userId
+                        ? (mm ? { id: mm.id, name: mm.userName, firstName: mm.firstName, lastName: mm.lastName } : { id: userId })
+                        : null;
+                      antd.message.success(resp.verified === true ? 'Assignee updated — verified in Domino' : 'Assignee updated (verification pending)');
+                    }
+                    setRerenderKey(function(k) { return k + 1; });
+                  })
+                  .catch(function(err) {
+                    var detail = err.message || String(err);
+                    antd.notification.error({
+                      message: 'Reassignment failed',
+                      description: detail.indexOf('403') !== -1 ? 'Permission denied — check project collaborator access.' : parseServerError(detail),
+                      duration: 8,
+                    });
+                  });
+              },
+            });
+          }
+          return assigneeName
+            ? h('span', { style: { fontSize: 12 } }, assigneeName)
+            : h('span', { style: { color: '#F59E0B', fontSize: 11, fontWeight: 500 } }, 'Unassigned');
+        },
+      });
+    });
+
+    return result;
+  }, [allUniqueStageNames, bundles]);
+
+  // All columns combined (per-stage pairs appended; hidden by default via shownStageCols)
+  var allColumns = columns.concat(perStageCols);
+
   // Charts — Status Distribution donut + Deliverables by Stage bar
   useEffect(function() {
     if (bundles.length === 0) return;
@@ -3793,12 +4017,23 @@ function QCTrackerPage(props) {
           prefix: h('span', { style: { color: '#8F8FA3' } }, '\u2315'),
         }),
         h(ColumnVisibilityDropdown, {
-          columns: columns.map(function(c) { return { key: c.key, title: typeof c.title === 'string' ? c.title : c.key }; }),
-          hiddenKeys: hiddenCols,
+          columns: allColumns.map(function(c) { return { key: c.key, title: typeof c.title === 'string' ? c.title : c.key }; }),
+          hiddenKeys: (function() {
+            // Per-stage cols are hidden unless explicitly enabled
+            var stageCols = perStageCols.map(function(c) { return c.key; });
+            var hiddenStageCols = stageCols.filter(function(k) { return shownStageCols.indexOf(k) < 0; });
+            return hiddenCols.concat(hiddenStageCols);
+          })(),
           onToggle: function(key) {
-            setHiddenCols(function(prev) {
-              return prev.indexOf(key) >= 0 ? prev.filter(function(k) { return k !== key; }) : prev.concat([key]);
-            });
+            if (key.startsWith('st_') || key.startsWith('sa_')) {
+              setShownStageCols(function(prev) {
+                return prev.indexOf(key) >= 0 ? prev.filter(function(k) { return k !== key; }) : prev.concat([key]);
+              });
+            } else {
+              setHiddenCols(function(prev) {
+                return prev.indexOf(key) >= 0 ? prev.filter(function(k) { return k !== key; }) : prev.concat([key]);
+              });
+            }
           },
         })
       ),
@@ -3811,8 +4046,11 @@ function QCTrackerPage(props) {
       // Table with Excel-like column filters, resizable + hideable columns
       h('div', { className: 'panel-body-flush' },
         (function() {
-          // Apply column widths and visibility
-          var visibleCols = columns.filter(function(c) { return hiddenCols.indexOf(c.key) < 0; });
+          // Apply column widths and visibility (per-stage cols hidden unless in shownStageCols)
+          var visibleCols = allColumns.filter(function(c) {
+            if (c.key.startsWith('st_') || c.key.startsWith('sa_')) return shownStageCols.indexOf(c.key) >= 0;
+            return hiddenCols.indexOf(c.key) < 0;
+          });
           var resizableCols = visibleCols.map(function(col) {
             var w = colWidths[col.key] || col.width;
             return Object.assign({}, col, {
