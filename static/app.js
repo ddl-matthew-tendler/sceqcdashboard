@@ -3366,14 +3366,14 @@ function QCTrackerPage(props) {
     var result = {};
     filtered.forEach(function(b) {
       if (!b.stages) return;
-      b.stages.forEach(function(s) {
+      b.stages.forEach(function(s, idx) {
         var sName = s.stage && s.stage.name;
         var an = (s.assignee && (s.assignee.name || s.assignee.userName)) || '';
         if (sName && an.toLowerCase().indexOf(q) >= 0) {
-          var colKey = 'sa_' + sName;
+          var colKey = 'sa_' + (idx + 1);
           if (shownStageCols.indexOf(colKey) < 0) {
             var id = b.id || b.name;
-            result[id] = (result[id] || []).concat(sName);
+            result[id] = (result[id] || []).concat('Stage ' + (idx + 1) + ' (' + sName + ')');
           }
         }
       });
@@ -3707,170 +3707,183 @@ function QCTrackerPage(props) {
       render: function(_, record) { return h(StatusFlags, { bundle: record, onFindingsClick: function(b) { setFindingsDrawerBundle(b); setFindingsDrawerOpen(true); } }); } },
   ];
 
-  // Per-stage column pairs: [Stage Name] status + [Stage Name] Assignee (hidden by default)
+  // Positional per-stage column pairs: Stage 1 / Stage 1 Assignee, Stage 2 / Stage 2 Assignee, …
   var perStageCols = useMemo(function() {
     var statusColorMap = { Current: 'gold', Completed: 'green', Future: 'blue' };
     var result = [];
 
-    allUniqueStageNames.forEach(function(sName) {
-      // Helper: find this stage's object + its computed status within a bundle
-      function getStageInfo(bundle) {
-        if (!bundle.stages) return null;
-        var currentIdx = deriveBundleStageIndex(bundle);
-        var isComplete = bundle.state === 'Complete';
-        var idx = bundle.stages.findIndex(function(st) { return st.stage && st.stage.name === sName; });
-        if (idx < 0) return null;
-        var stageObj = bundle.stages[idx];
-        var status = isComplete || idx < currentIdx ? 'Completed' : idx === currentIdx ? 'Current' : 'Future';
-        return { stageObj: stageObj, status: status, idx: idx };
-      }
+    for (var n = 1; n <= maxStageCount; n++) {
+      (function(idx) {  // idx is 0-based, label is 1-based
+        var label = 'Stage ' + (idx + 1);
 
-      // ── Stage status column ─────────────────────────────────────
-      result.push({
-        title: sName,
-        key: 'st_' + sName,
-        width: 100,
-        sorter: function(a, b) {
-          var order = { Current: 0, Future: 1, Completed: 2 };
-          var ia = getStageInfo(a); var ib = getStageInfo(b);
-          return (order[(ia && ia.status) || 'Future'] || 0) - (order[(ib && ib.status) || 'Future'] || 0);
-        },
-        filters: [
-          { text: 'Current', value: 'Current' },
-          { text: 'Future', value: 'Future' },
-          { text: 'Completed', value: 'Completed' },
-          { text: 'N/A', value: '__na__' },
-        ],
-        onFilter: function(value, record) {
-          var info = getStageInfo(record);
-          if (value === '__na__') return !info;
-          return info && info.status === value;
-        },
-        render: function(_, record) {
-          var info = getStageInfo(record);
-          if (!info) return h('span', { style: { color: '#D1D1DB', fontSize: 11 } }, '\u2013');
-          return h(Tag, { color: statusColorMap[info.status] || 'default', style: { fontSize: 11 } }, info.status);
-        },
-      });
+        // Helper: get stage object and computed status at position idx
+        function getStageAt(bundle) {
+          if (!bundle.stages || idx >= bundle.stages.length) return null;
+          var stageObj = bundle.stages[idx];
+          if (!stageObj || !stageObj.stage) return null;
+          var currentIdx = deriveBundleStageIndex(bundle);
+          var isComplete = bundle.state === 'Complete';
+          var status = isComplete || idx < currentIdx ? 'Completed' : idx === currentIdx ? 'Current' : 'Future';
+          return { stageObj: stageObj, status: status, name: stageObj.stage.name || '' };
+        }
 
-      // ── Stage assignee column ───────────────────────────────────
-      var stageAssigneeFilters = [{ text: 'Unassigned', value: '__unassigned__' }];
-      var seen = {};
-      bundles.forEach(function(b) {
-        if (!b.stages) return;
-        b.stages.forEach(function(s) {
-          if (s.stage && s.stage.name === sName) {
-            var aName = s.assignee && (s.assignee.name || s.assignee.userName);
-            if (aName && !seen[aName]) { seen[aName] = true; stageAssigneeFilters.push({ text: aName, value: aName }); }
+        // ── Stage name column ─────────────────────────────────────
+        // Collect unique stage names at this position for filter
+        var stageNameFilters = [];
+        var seenNames = {};
+        bundles.forEach(function(b) {
+          var info = getStageAt(b);
+          if (info && info.name && !seenNames[info.name]) {
+            seenNames[info.name] = true;
+            stageNameFilters.push({ text: info.name, value: info.name });
           }
         });
-      });
+        stageNameFilters.sort(function(a, b) { return a.text.localeCompare(b.text); });
 
-      result.push({
-        title: sName + ' Assignee',
-        key: 'sa_' + sName,
-        width: 160,
-        sorter: function(a, b) {
-          var ia = getStageInfo(a); var ib = getStageInfo(b);
-          var aa = (ia && ia.stageObj.assignee && (ia.stageObj.assignee.name || ia.stageObj.assignee.userName)) || '';
-          var bb = (ib && ib.stageObj.assignee && (ib.stageObj.assignee.name || ib.stageObj.assignee.userName)) || '';
-          return aa.localeCompare(bb);
-        },
-        filters: stageAssigneeFilters,
-        filterSearch: true,
-        onFilter: function(value, record) {
-          var info = getStageInfo(record);
-          var aName = info && info.stageObj.assignee && (info.stageObj.assignee.name || info.stageObj.assignee.userName);
-          if (value === '__unassigned__') return !aName;
-          return aName === value;
-        },
-        render: function(_, record) {
-          var info = getStageInfo(record);
-          if (!info) return h('span', { style: { color: '#D1D1DB', fontSize: 11 } }, '\u2013');
-          var stageObj = info.stageObj;
-          var pmc = props.projectMembersCache || {};
-          var members = pmc[record.projectId] || [];
-          function fmtMember(m) {
-            var full = ((m.firstName || '') + ' ' + (m.lastName || '')).trim();
-            return full ? full + ' (' + (m.userName || m.id) + ')' : (m.userName || m.fullName || m.id);
+        result.push({
+          title: label,
+          key: 'st_' + (idx + 1),
+          width: 150,
+          ellipsis: true,
+          sorter: function(a, b) {
+            var ia = getStageAt(a); var ib = getStageAt(b);
+            return (ia ? ia.name : '').localeCompare(ib ? ib.name : '');
+          },
+          filters: stageNameFilters,
+          filterSearch: true,
+          onFilter: function(value, record) {
+            var info = getStageAt(record);
+            return info && info.name === value;
+          },
+          render: function(_, record) {
+            var info = getStageAt(record);
+            if (!info) return h('span', { style: { color: '#D1D1DB', fontSize: 11 } }, '\u2013');
+            return h('span', { style: { fontSize: 12 } },
+              h('span', null, info.name),
+              h(Tag, { color: statusColorMap[info.status] || 'default', style: { fontSize: 10, marginLeft: 6 } }, info.status)
+            );
+          },
+        });
+
+        // ── Stage assignee column ─────────────────────────────────
+        var assigneeFilters = [{ text: 'Unassigned', value: '__unassigned__' }];
+        var seenAssignees = {};
+        bundles.forEach(function(b) {
+          var info = getStageAt(b);
+          if (!info) return;
+          var aName = info.stageObj.assignee && (info.stageObj.assignee.name || info.stageObj.assignee.userName);
+          if (aName && !seenAssignees[aName]) {
+            seenAssignees[aName] = true;
+            assigneeFilters.push({ text: aName, value: aName });
           }
-          var memberOpts = members.map(function(m) { return { label: fmtMember(m), value: m.id }; });
-          var stageId = stageObj.stageId || (stageObj.stage && stageObj.stage.id);
-          var assigneeRaw = stageObj.assignee || null;
-          var assigneeId = assigneeRaw ? assigneeRaw.id : undefined;
-          var assigneeName = null;
-          var memberMatch = null;
-          if (assigneeId) {
-            memberMatch = members.find(function(m) { return m.id === assigneeId; });
-            if (!memberMatch && assigneeRaw) {
-              var saName = assigneeRaw.name || assigneeRaw.userName;
-              if (saName) {
-                memberMatch = members.find(function(m) { return m.userName === saName; });
-                if (memberMatch) assigneeId = memberMatch.id;
-              }
+        });
+
+        result.push({
+          title: label + ' Assignee',
+          key: 'sa_' + (idx + 1),
+          width: 160,
+          sorter: function(a, b) {
+            var ia = getStageAt(a); var ib = getStageAt(b);
+            var aa = (ia && ia.stageObj.assignee && (ia.stageObj.assignee.name || ia.stageObj.assignee.userName)) || '';
+            var bb = (ib && ib.stageObj.assignee && (ib.stageObj.assignee.name || ib.stageObj.assignee.userName)) || '';
+            return aa.localeCompare(bb);
+          },
+          filters: assigneeFilters,
+          filterSearch: true,
+          onFilter: function(value, record) {
+            var info = getStageAt(record);
+            var aName = info && info.stageObj.assignee && (info.stageObj.assignee.name || info.stageObj.assignee.userName);
+            if (value === '__unassigned__') return !aName;
+            return aName === value;
+          },
+          render: function(_, record) {
+            var info = getStageAt(record);
+            if (!info) return h('span', { style: { color: '#D1D1DB', fontSize: 11 } }, '\u2013');
+            var stageObj = info.stageObj;
+            var pmc = props.projectMembersCache || {};
+            var members = pmc[record.projectId] || [];
+            function fmtMember(m) {
+              var full = ((m.firstName || '') + ' ' + (m.lastName || '')).trim();
+              return full ? full + ' (' + (m.userName || m.id) + ')' : (m.userName || m.fullName || m.id);
             }
-            if (memberMatch) assigneeName = fmtMember(memberMatch);
-          }
-          if (!assigneeName && assigneeRaw) {
-            var sa = assigneeRaw;
-            var full = ((sa.firstName || '') + ' ' + (sa.lastName || '')).trim();
-            assigneeName = full ? full + ' (' + (sa.name || sa.userName || '') + ')' : (sa.name || sa.userName || null);
-          }
-          if (assigneeId && !memberOpts.some(function(o) { return o.value === assigneeId; })) {
-            memberOpts.unshift({ label: assigneeName || 'Unknown user (' + (assigneeRaw && (assigneeRaw.name || assigneeRaw.id) || '?') + ')', value: assigneeId });
-          }
-          if (API_GAPS.stageReassign.ready && memberOpts.length > 0) {
-            return h(Select, {
-              size: 'small',
-              placeholder: 'Assign...',
-              value: assigneeId || undefined,
-              style: { width: '100%', fontSize: 11 },
-              showSearch: true,
-              allowClear: true,
-              options: memberOpts,
-              optionFilterProp: 'label',
-              onClick: function(e) { e.stopPropagation(); },
-              onChange: function(userId) {
-                if (!stageId) { antd.message.error('Missing stage ID'); return; }
-                var mm = userId ? members.find(function(m) { return m.id === userId; }) : null;
-                var body = { assignee: userId ? { id: userId, userName: mm ? mm.userName : undefined } : null };
-                apiPatch('api/bundles/' + record.id + '/stages/' + stageId, body)
-                  .then(function(resp) {
-                    if (resp.verified === false) {
-                      var actualName = resp.actualAssignee ? (resp.actualAssignee.name || resp.actualAssignee.userName || resp.actualAssignee.id || '') : '';
-                      antd.notification.warning({
-                        message: 'Assignment did not save in Domino',
-                        description: actualName ? 'The stage is still assigned to ' + actualName + '.' : 'Domino did not persist the change.',
-                        duration: 10,
+            var memberOpts = members.map(function(m) { return { label: fmtMember(m), value: m.id }; });
+            var stageId = stageObj.stageId || (stageObj.stage && stageObj.stage.id);
+            var assigneeRaw = stageObj.assignee || null;
+            var assigneeId = assigneeRaw ? assigneeRaw.id : undefined;
+            var assigneeName = null;
+            var memberMatch = null;
+            if (assigneeId) {
+              memberMatch = members.find(function(m) { return m.id === assigneeId; });
+              if (!memberMatch && assigneeRaw) {
+                var saName = assigneeRaw.name || assigneeRaw.userName;
+                if (saName) {
+                  memberMatch = members.find(function(m) { return m.userName === saName; });
+                  if (memberMatch) assigneeId = memberMatch.id;
+                }
+              }
+              if (memberMatch) assigneeName = fmtMember(memberMatch);
+            }
+            if (!assigneeName && assigneeRaw) {
+              var sa = assigneeRaw;
+              var full = ((sa.firstName || '') + ' ' + (sa.lastName || '')).trim();
+              assigneeName = full ? full + ' (' + (sa.name || sa.userName || '') + ')' : (sa.name || sa.userName || null);
+            }
+            if (assigneeId && !memberOpts.some(function(o) { return o.value === assigneeId; })) {
+              memberOpts.unshift({ label: assigneeName || 'Unknown user (' + (assigneeRaw && (assigneeRaw.name || assigneeRaw.id) || '?') + ')', value: assigneeId });
+            }
+            if (API_GAPS.stageReassign.ready && memberOpts.length > 0) {
+              return h(Select, {
+                size: 'small',
+                placeholder: 'Assign...',
+                value: assigneeId || undefined,
+                style: { width: '100%', fontSize: 11 },
+                showSearch: true,
+                allowClear: true,
+                options: memberOpts,
+                optionFilterProp: 'label',
+                onClick: function(e) { e.stopPropagation(); },
+                onChange: function(userId) {
+                  if (!stageId) { antd.message.error('Missing stage ID'); return; }
+                  var mm = userId ? members.find(function(m) { return m.id === userId; }) : null;
+                  var body = { assignee: userId ? { id: userId, userName: mm ? mm.userName : undefined } : null };
+                  apiPatch('api/bundles/' + record.id + '/stages/' + stageId, body)
+                    .then(function(resp) {
+                      if (resp.verified === false) {
+                        var actualName = resp.actualAssignee ? (resp.actualAssignee.name || resp.actualAssignee.userName || resp.actualAssignee.id || '') : '';
+                        antd.notification.warning({
+                          message: 'Assignment did not save in Domino',
+                          description: actualName ? 'The stage is still assigned to ' + actualName + '.' : 'Domino did not persist the change.',
+                          duration: 10,
+                        });
+                      } else {
+                        stageObj.assignee = userId
+                          ? (mm ? { id: mm.id, name: mm.userName, firstName: mm.firstName, lastName: mm.lastName } : { id: userId })
+                          : null;
+                        antd.message.success(resp.verified === true ? 'Assignee updated — verified in Domino' : 'Assignee updated (verification pending)');
+                      }
+                      setRerenderKey(function(k) { return k + 1; });
+                    })
+                    .catch(function(err) {
+                      var detail = err.message || String(err);
+                      antd.notification.error({
+                        message: 'Reassignment failed',
+                        description: detail.indexOf('403') !== -1 ? 'Permission denied — check project collaborator access.' : parseServerError(detail),
+                        duration: 8,
                       });
-                    } else {
-                      stageObj.assignee = userId
-                        ? (mm ? { id: mm.id, name: mm.userName, firstName: mm.firstName, lastName: mm.lastName } : { id: userId })
-                        : null;
-                      antd.message.success(resp.verified === true ? 'Assignee updated — verified in Domino' : 'Assignee updated (verification pending)');
-                    }
-                    setRerenderKey(function(k) { return k + 1; });
-                  })
-                  .catch(function(err) {
-                    var detail = err.message || String(err);
-                    antd.notification.error({
-                      message: 'Reassignment failed',
-                      description: detail.indexOf('403') !== -1 ? 'Permission denied — check project collaborator access.' : parseServerError(detail),
-                      duration: 8,
                     });
-                  });
-              },
-            });
-          }
-          return assigneeName
-            ? h('span', { style: { fontSize: 12 } }, assigneeName)
-            : h('span', { style: { color: '#F59E0B', fontSize: 11, fontWeight: 500 } }, 'Unassigned');
-        },
-      });
-    });
+                },
+              });
+            }
+            return assigneeName
+              ? h('span', { style: { fontSize: 12 } }, assigneeName)
+              : h('span', { style: { color: '#F59E0B', fontSize: 11, fontWeight: 500 } }, 'Unassigned');
+          },
+        });
+      })(n - 1);
+    }
 
     return result;
-  }, [allUniqueStageNames, bundles]);
+  }, [maxStageCount, bundles]);
 
   // All columns combined (per-stage pairs appended; hidden by default via shownStageCols)
   var allColumns = columns.concat(perStageCols);
