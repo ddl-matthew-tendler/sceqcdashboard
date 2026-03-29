@@ -1,5 +1,6 @@
 import os
 import logging
+import time
 import requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
@@ -329,6 +330,10 @@ def patch_bundle_stage(bundle_id: str, stage_id: str, body: dict):
     patch_resp = gov_patch(f"/bundles/{bundle_id}/stages/{stage_id}", json_body=body)
 
     # ── Read-back verification ───────────────────────────────────
+    # Brief delay before read-back: Domino's API has eventual consistency,
+    # so an immediate GET after PATCH may return stale assignee data.
+    time.sleep(0.5)
+
     requested_id = (body.get("assignee") or {}).get("id") if body.get("assignee") else None
     try:
         bundle = gov_get(f"/bundles/{bundle_id}")
