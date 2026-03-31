@@ -252,8 +252,8 @@ var API_GAPS = {
   },
   applyRules: {
     label: 'Apply Bulk Assignment Rules',
-    message: 'This action is coming soon. The Domino write API for applying rules is in development.',
-    ready: false,
+    message: 'Apply assignment rules to matching deliverable stages via the Domino API.',
+    ready: true,
   },
   automationRun: {
     label: 'Run Automation',
@@ -484,6 +484,67 @@ function TopNav(props) {
   );
 }
 
+// ── Shared Report Configuration Helpers ─────────────────────────
+var ROLE_MAPPING_KEY = 'sceqc_stage_role_mapping_v2';
+var PATH_PATTERN_KEY = 'sceqc_path_patterns';
+
+var ROLE_OPTIONS = ['Developer', 'Double Programmer', 'Independent Reviewer', 'Other'];
+
+var DEFAULT_PATH_PATTERNS = {
+  'Developer': { prefix: 'prod/', label: 'Production program' },
+  'Double Programmer': { prefix: 'qc/', label: 'QC / double programming' },
+  'Independent Reviewer': { prefix: null, label: 'Independent review' },
+};
+
+// Heuristic: guess a role label for a stage name
+function guessRoleLabel(stageName) {
+  var s = stageName.toLowerCase();
+  if (/double|dp\b|dual/.test(s)) return 'Double Programmer';
+  if (/independent|ir\b|verif|lead/.test(s)) return 'Independent Reviewer';
+  if (/self|develop|author|program|creat/.test(s)) return 'Developer';
+  return null;
+}
+
+// Build default mapping: { policyId: { stageName: roleLabel } }
+function buildDefaultRoleMapping(policies, bndls) {
+  var map = {};
+  function mapStages(policyId, stageNames) {
+    if (map[policyId]) return;
+    var m = {};
+    stageNames.forEach(function(sName) {
+      var role = guessRoleLabel(sName);
+      if (role) m[sName] = role;
+    });
+    // If nothing matched, assign first stage as Developer
+    if (Object.keys(m).length === 0 && stageNames.length > 0) m[stageNames[0]] = 'Developer';
+    map[policyId] = m;
+  }
+  policies.forEach(function(p) {
+    if (p.stages && p.stages.length) mapStages(p.id, p.stages);
+  });
+  bndls.forEach(function(b) {
+    if (!b.policyId || map[b.policyId]) return;
+    if (!b.stages || !b.stages.length) return;
+    var names = b.stages.map(function(s) { return s.stage ? s.stage.name : ''; }).filter(Boolean);
+    if (names.length) mapStages(b.policyId, names);
+  });
+  return map;
+}
+
+// Helper: get stages for a role from the new mapping
+function getStageForRole(policyMapping, roleLabel) {
+  if (!policyMapping) return null;
+  var keys = Object.keys(policyMapping);
+  for (var i = 0; i < keys.length; i++) {
+    if (policyMapping[keys[i]] === roleLabel) return keys[i];
+  }
+  return null;
+}
+
+function loadStoredJSON(key) {
+  try { var s = localStorage.getItem(key); return s ? JSON.parse(s) : null; } catch(e) { return null; }
+}
+
 // ── Sidebar ─────────────────────────────────────────────────────
 var NAV_ITEMS = [
   { key: 'tracker', iconName: 'TableOutlined', label: 'QC Tracker' },
@@ -496,6 +557,7 @@ var NAV_ITEMS = [
   { key: 'automation', iconName: 'ThunderboltOutlined', label: 'Automation' },
   { key: 'risk', iconName: 'SlidersOutlined', label: 'Risk Optimizer' },
   { key: 'utilities', iconName: 'ToolOutlined', label: 'Utilities' },
+  { key: 'config', iconName: 'ControlOutlined', label: 'Configuration' },
 ];
 
 function Sidebar(props) {
@@ -1455,6 +1517,7 @@ function MetricsPage(props) {
   var bundles = props.bundles;
   var terms = props.terms || DEFAULT_TERMS;
   var livePolicies = props.livePolicies || [];
+  var reportConfig = props.reportConfig || {};
   var B = capFirst(terms.bundle);
   var P = capFirst(terms.policy);
 
@@ -1462,116 +1525,40 @@ function MetricsPage(props) {
   var metricsFilter = _mf[0];
   var setMetricsFilter = _mf[1];
 
-  // ── Stage Role Mapping (for PDVT reports) ────────────────────
-  // Heuristic: match stage names to roles based on keywords
-  function guessRole(stageName) {
-    var s = stageName.toLowerCase();
-    if (/double|dp\b|dual/.test(s)) return 'dp';
-    if (/independent|ir\b|review|verif|lead/.test(s)) return 'ir';
-    if (/self|develop|author|program|creat/.test(s)) return 'dev';
-    return null;
-  }
-
-  // Build default mapping from policies: { policyId: { dev: stageName, dp: stageName, ir: stageName } }
-  function buildDefaultMapping(policies, bndls) {
-    var map = {};
-    // Collect policies from livePolicies
-    policies.forEach(function(p) {
-      if (!p.stages || !p.stages.length) return;
-      var m = { dev: null, dp: null, ir: null };
-      p.stages.forEach(function(sName) {
-        var role = guessRole(sName);
-        if (role && !m[role]) m[role] = sName;
-      });
-      // Fallback: if no dev matched, use first stage
-      if (!m.dev && p.stages.length > 0) m.dev = p.stages[0];
-      map[p.id] = m;
-    });
-    // Also collect from bundle stage arrays for policies not in livePolicies
-    bndls.forEach(function(b) {
-      if (!b.policyId || map[b.policyId]) return;
-      if (!b.stages || !b.stages.length) return;
-      var m = { dev: null, dp: null, ir: null };
-      b.stages.forEach(function(s) {
-        var sName = s.stage ? s.stage.name : '';
-        if (!sName) return;
-        var role = guessRole(sName);
-        if (role && !m[role]) m[role] = sName;
-      });
-      if (!m.dev && b.stages.length > 0) m.dev = b.stages[0].stage ? b.stages[0].stage.name : '';
-      map[b.policyId] = m;
-    });
-    return map;
-  }
-
-  var ROLE_MAPPING_KEY = 'sceqc_stage_role_mapping';
-  var _rm = useState(function() {
-    try {
-      var stored = localStorage.getItem(ROLE_MAPPING_KEY);
-      return stored ? JSON.parse(stored) : null;
-    } catch(e) { return null; }
-  });
-  var roleMapping = _rm[0];
-  var setRoleMapping = _rm[1];
-
-  var _rmOpen = useState(false);
-  var roleMappingOpen = _rmOpen[0];
-  var setRoleMappingOpen = _rmOpen[1];
-
-  // Effective mapping: stored or defaults
-  var effectiveMapping = useMemo(function() {
-    var defaults = buildDefaultMapping(livePolicies, bundles);
-    if (!roleMapping) return defaults;
-    // Merge: stored overrides defaults
-    var merged = {};
-    Object.keys(defaults).forEach(function(pid) { merged[pid] = defaults[pid]; });
-    Object.keys(roleMapping).forEach(function(pid) { merged[pid] = roleMapping[pid]; });
-    return merged;
-  }, [livePolicies, bundles, roleMapping]);
-
-  function saveRoleMapping(newMap) {
-    setRoleMapping(newMap);
-    try { localStorage.setItem(ROLE_MAPPING_KEY, JSON.stringify(newMap)); } catch(e) {}
-  }
-
-  // Build a lookup: policyId -> { id, name, stages[] }
-  var policyLookup = useMemo(function() {
-    var map = {};
-    livePolicies.forEach(function(p) { map[p.id] = p; });
-    // Fill from bundles if needed
-    bundles.forEach(function(b) {
-      if (b.policyId && !map[b.policyId] && b.stages && b.stages.length) {
-        map[b.policyId] = {
-          id: b.policyId,
-          name: b.policyName || 'Unknown',
-          stages: b.stages.map(function(s) { return s.stage ? s.stage.name : ''; }).filter(Boolean)
-        };
-      }
-    });
-    return map;
-  }, [livePolicies, bundles]);
-
-  // Get all unique policy IDs that have bundles
-  var policyIdsWithBundles = useMemo(function() {
-    var ids = {};
-    bundles.forEach(function(b) { if (b.policyId) ids[b.policyId] = true; });
-    return Object.keys(ids);
-  }, [bundles]);
+  // Use shared report config from App level
+  var effectiveMapping = reportConfig.roleMapping || {};
+  var effectivePatterns = reportConfig.pathPatterns || DEFAULT_PATH_PATTERNS;
 
   // ── PDVT Report Data ─────────────────────────────────────────
+  // Collect all unique role labels across all policies
+  var allRoleLabels = useMemo(function() {
+    var labels = {};
+    Object.keys(effectiveMapping).forEach(function(pid) {
+      var pm = effectiveMapping[pid];
+      Object.keys(pm).forEach(function(sn) { if (pm[sn]) labels[pm[sn]] = true; });
+    });
+    return Object.keys(labels).sort();
+  }, [effectiveMapping]);
+
   var pdvtData = useMemo(function() {
     return bundles.map(function(b) {
-      var mapping = effectiveMapping[b.policyId] || {};
-      var devAssignee = null, dpAssignee = null, irAssignee = null;
-      if (b.stages) {
-        b.stages.forEach(function(s) {
-          var sName = s.stage ? s.stage.name : '';
-          var assigneeName = (s.assignee && s.assignee.name) ? s.assignee.name : null;
-          if (sName === mapping.dev) devAssignee = assigneeName;
-          if (sName === mapping.dp) dpAssignee = assigneeName;
-          if (sName === mapping.ir) irAssignee = assigneeName;
-        });
-      }
+      var policyMap = effectiveMapping[b.policyId] || {};
+      // For each role, find the stage and its assignee
+      var roleAssignees = {};
+      var roleStages = {};
+      allRoleLabels.forEach(function(rl) {
+        var stageName = getStageForRole(policyMap, rl);
+        roleStages[rl] = stageName;
+        roleAssignees[rl] = null;
+        if (stageName && b.stages) {
+          b.stages.forEach(function(s) {
+            var sName = s.stage ? s.stage.name : '';
+            if (sName === stageName) {
+              roleAssignees[rl] = (s.assignee && s.assignee.name) ? s.assignee.name : null;
+            }
+          });
+        }
+      });
       return {
         id: b.id,
         name: b.name,
@@ -1579,15 +1566,11 @@ function MetricsPage(props) {
         policyId: b.policyId,
         state: b.state,
         stage: b.stage,
-        developer: devAssignee,
-        doubleProgrammer: dpAssignee,
-        independentReviewer: irAssignee,
-        devStage: mapping.dev || null,
-        dpStage: mapping.dp || null,
-        irStage: mapping.ir || null,
+        roleAssignees: roleAssignees,
+        roleStages: roleStages,
       };
     });
-  }, [bundles, effectiveMapping]);
+  }, [bundles, effectiveMapping, allRoleLabels]);
 
   // ── Validation Status by Category ────────────────────────────
   var statusByCategory = useMemo(function() {
@@ -1606,6 +1589,77 @@ function MetricsPage(props) {
     return Object.values(groups).sort(function(a, b) { return b.total - a.total; });
   }, [bundles]);
 
+  // ── Validation Task Status (Report #2) ──────────────────────
+  var taskStatusData = useMemo(function() {
+    return bundles.map(function(b) {
+      var policyMap = effectiveMapping[b.policyId] || {};
+      // Determine stage ordering for completion status
+      var stageNames = (b.stages || []).map(function(s) { return s.stage ? s.stage.name : ''; });
+      var currentStageIdx = stageNames.indexOf(b.stage || '');
+
+      // For each role, determine completion status and find matching attachment paths
+      var roleStatus = {};
+      var rolePaths = {};
+      allRoleLabels.forEach(function(rl) {
+        var stageName = getStageForRole(policyMap, rl);
+        if (!stageName) {
+          roleStatus[rl] = 'NA';
+          rolePaths[rl] = null;
+          return;
+        }
+        var stageIdx = stageNames.indexOf(stageName);
+        if (stageIdx < 0) {
+          roleStatus[rl] = 'NA';
+          rolePaths[rl] = null;
+          return;
+        }
+        // Completed if bundle state is Complete OR current stage is past this one
+        if (b.state === 'Complete') {
+          roleStatus[rl] = 'Completed';
+        } else if (currentStageIdx > stageIdx) {
+          roleStatus[rl] = 'Completed';
+        } else {
+          roleStatus[rl] = 'Pending';
+        }
+
+        // Find matching attachment path using path patterns
+        var pathPrefix = effectivePatterns[rl] ? effectivePatterns[rl].prefix : null;
+        var matchedPath = null;
+        (b._attachments || []).forEach(function(a) {
+          if (a.type !== 'Report' || !a.identifier || !a.identifier.filename) return;
+          if (pathPrefix && a.identifier.filename.indexOf(pathPrefix) === 0) {
+            matchedPath = a.identifier.filename;
+          }
+        });
+        rolePaths[rl] = matchedPath;
+
+        // If stage should be completed but no attachment found, mark as Missing
+        if (roleStatus[rl] === 'Completed' && !matchedPath && pathPrefix) {
+          roleStatus[rl] = 'Missing';
+        }
+      });
+
+      // Get branch from first report attachment
+      var repoBranch = null;
+      (b._attachments || []).forEach(function(a) {
+        if (!repoBranch && a.type === 'Report' && a.identifier && a.identifier.branch) {
+          repoBranch = a.identifier.branch;
+        }
+      });
+
+      return {
+        id: b.id,
+        name: b.name,
+        policyName: b.policyName || 'Unknown',
+        policyId: b.policyId,
+        state: b.state,
+        roleStatus: roleStatus,
+        rolePaths: rolePaths,
+        repoBranch: repoBranch,
+      };
+    });
+  }, [bundles, effectiveMapping, effectivePatterns, allRoleLabels]);
+
   // ── CSV Export helpers ───────────────────────────────────────
   function exportCSV(filename, headers, rows) {
     var csv = headers.map(function(h) { return '"' + String(h).replace(/"/g, '""') + '"'; }).join(',') + '\n';
@@ -1621,9 +1675,14 @@ function MetricsPage(props) {
   }
 
   function exportPDVT() {
-    var headers = ['Validation Task', 'Category (' + P + ')', 'Developer', 'Double Programmer', 'Independent Reviewer', 'State'];
+    var headers = ['Validation Task', 'Category (' + P + ')'].concat(allRoleLabels).concat(['State']);
     var rows = pdvtData.map(function(d) {
-      return [d.name, d.policyName, d.devStage ? (d.developer || 'Unassigned') : 'NA', d.dpStage ? (d.doubleProgrammer || 'Unassigned') : 'NA', d.irStage ? (d.independentReviewer || 'Unassigned') : 'NA', d.state];
+      var base = [d.name, d.policyName];
+      allRoleLabels.forEach(function(rl) {
+        base.push(d.roleStages[rl] ? (d.roleAssignees[rl] || 'Unassigned') : 'NA');
+      });
+      base.push(d.state);
+      return base;
     });
     exportCSV('pdvt_validation_tasks.csv', headers, rows);
   }
@@ -1634,6 +1693,20 @@ function MetricsPage(props) {
       return [d.policyName, d.total, d.active, d.complete, d.archived, d.total > 0 ? Math.round((d.complete / d.total) * 100) + '%' : '0%'];
     });
     exportCSV('validation_status_by_category.csv', headers, rows);
+  }
+
+  function exportTaskStatus() {
+    var statusHeaders = allRoleLabels.map(function(rl) { return rl + ' Status'; });
+    var pathHeaders = allRoleLabels.map(function(rl) { return 'Path to ' + rl; });
+    var headers = ['Validation Task (Category)'].concat(statusHeaders).concat(pathHeaders).concat(['Repo Branch']);
+    var rows = taskStatusData.map(function(d) {
+      var base = [d.name + ' (' + d.policyName + ')'];
+      allRoleLabels.forEach(function(rl) { base.push(d.roleStatus[rl]); });
+      allRoleLabels.forEach(function(rl) { base.push(d.rolePaths[rl] || (d.roleStatus[rl] === 'NA' ? 'NA' : 'Missing')); });
+      base.push(d.repoBranch || '');
+      return base;
+    });
+    exportCSV('validation_task_status.csv', headers, rows);
   }
 
   // ── Compute all metrics ──────────────────────────────────────
@@ -2177,94 +2250,6 @@ function MetricsPage(props) {
     h('div', { style: { fontSize: 12, color: '#8F8FA3', marginBottom: 12, marginTop: -8 } },
       'Planned validation tasks with role assignments mapped from ' + P.toLowerCase() + ' stages.'),
 
-    // Stage Role Mapping config toggle
-    h('div', { style: { marginBottom: 12 } },
-      h(Button, { size: 'small', type: roleMappingOpen ? 'primary' : 'default', ghost: roleMappingOpen,
-        onClick: function() { setRoleMappingOpen(!roleMappingOpen); },
-        icon: icons && icons.SettingOutlined ? h(icons.SettingOutlined) : null
-      }, roleMappingOpen ? 'Hide Stage Mapping' : 'Configure Stage Mapping')
-    ),
-
-    // Stage Role Mapping config panel
-    roleMappingOpen ? h('div', { className: 'panel', style: { marginBottom: 16 } },
-      h('div', { className: 'panel-header' },
-        h('span', { className: 'panel-title' }, 'Stage \u2192 Role Mapping'),
-        h('div', { style: { display: 'flex', gap: 8 } },
-          h(Button, { size: 'small', onClick: function() {
-            saveRoleMapping(null);
-          } }, 'Reset to Defaults')
-        )
-      ),
-      h('div', { className: 'panel-body' },
-        h('div', { style: { fontSize: 12, color: '#8F8FA3', marginBottom: 12 } },
-          'Map which stage in each ' + P.toLowerCase() + ' corresponds to Developer, Double Programmer, and Independent Reviewer roles.'),
-        h(Table, {
-          dataSource: policyIdsWithBundles.map(function(pid) {
-            var pol = policyLookup[pid];
-            return { key: pid, policyId: pid, policyName: pol ? pol.name : 'Unknown', stages: pol ? pol.stages : [] };
-          }),
-          columns: [
-            { title: P, dataIndex: 'policyName', key: 'policy', width: 220,
-              render: function(t) { return h('span', { style: { fontWeight: 500, fontSize: 12 } }, t); } },
-            { title: 'Developer', key: 'dev', width: 200,
-              render: function(_, row) {
-                var current = (effectiveMapping[row.policyId] || {}).dev || null;
-                return h(Select, {
-                  size: 'small', style: { width: '100%' }, value: current || undefined,
-                  allowClear: true, placeholder: 'Select stage...',
-                  onChange: function(val) {
-                    var newMap = JSON.parse(JSON.stringify(effectiveMapping));
-                    if (!newMap[row.policyId]) newMap[row.policyId] = { dev: null, dp: null, ir: null };
-                    newMap[row.policyId].dev = val || null;
-                    saveRoleMapping(newMap);
-                  }
-                }, (row.stages || []).map(function(s) {
-                  return h(Select.Option, { key: s, value: s }, s);
-                }));
-              }
-            },
-            { title: 'Double Programmer', key: 'dp', width: 200,
-              render: function(_, row) {
-                var current = (effectiveMapping[row.policyId] || {}).dp || null;
-                return h(Select, {
-                  size: 'small', style: { width: '100%' }, value: current || undefined,
-                  allowClear: true, placeholder: 'Select stage...',
-                  onChange: function(val) {
-                    var newMap = JSON.parse(JSON.stringify(effectiveMapping));
-                    if (!newMap[row.policyId]) newMap[row.policyId] = { dev: null, dp: null, ir: null };
-                    newMap[row.policyId].dp = val || null;
-                    saveRoleMapping(newMap);
-                  }
-                }, (row.stages || []).map(function(s) {
-                  return h(Select.Option, { key: s, value: s }, s);
-                }));
-              }
-            },
-            { title: 'Independent Reviewer', key: 'ir', width: 200,
-              render: function(_, row) {
-                var current = (effectiveMapping[row.policyId] || {}).ir || null;
-                return h(Select, {
-                  size: 'small', style: { width: '100%' }, value: current || undefined,
-                  allowClear: true, placeholder: 'Select stage...',
-                  onChange: function(val) {
-                    var newMap = JSON.parse(JSON.stringify(effectiveMapping));
-                    if (!newMap[row.policyId]) newMap[row.policyId] = { dev: null, dp: null, ir: null };
-                    newMap[row.policyId].ir = val || null;
-                    saveRoleMapping(newMap);
-                  }
-                }, (row.stages || []).map(function(s) {
-                  return h(Select.Option, { key: s, value: s }, s);
-                }));
-              }
-            },
-          ],
-          rowKey: 'key',
-          pagination: false,
-          size: 'small',
-        })
-      )
-    ) : null,
-
     // PDVT Table
     h('div', { className: 'panel' },
       h('div', { className: 'panel-header' },
@@ -2304,48 +2289,27 @@ function MetricsPage(props) {
               })(),
               onFilter: function(val, rec) { return rec.policyName === val; },
             },
-            { title: 'Developer', key: 'dev', width: 150,
+          ].concat(allRoleLabels.map(function(rl) {
+            return {
+              title: rl, key: 'role_' + rl, width: 150,
               render: function(_, r) {
-                if (!r.devStage) return h('span', { style: { color: '#B0B0C0', fontSize: 12 } }, 'NA');
-                return h('span', null, r.developer || h('span', { style: { color: '#F59E0B', fontSize: 12 } }, 'Unassigned'));
+                if (!r.roleStages[rl]) return h('span', { style: { color: '#B0B0C0', fontSize: 12 } }, 'NA');
+                return h('span', null, r.roleAssignees[rl] || h('span', { style: { color: '#F59E0B', fontSize: 12 } }, 'Unassigned'));
               },
               filters: [{ text: 'Assigned', value: 'assigned' }, { text: 'Unassigned', value: 'unassigned' }, { text: 'NA', value: 'na' }],
               onFilter: function(val, rec) {
-                if (val === 'na') return !rec.devStage;
-                if (val === 'unassigned') return rec.devStage && !rec.developer;
-                return rec.devStage && rec.developer;
+                if (val === 'na') return !rec.roleStages[rl];
+                if (val === 'unassigned') return rec.roleStages[rl] && !rec.roleAssignees[rl];
+                return rec.roleStages[rl] && rec.roleAssignees[rl];
               },
-            },
-            { title: 'Double Programmer', key: 'dp', width: 150,
-              render: function(_, r) {
-                if (!r.dpStage) return h('span', { style: { color: '#B0B0C0', fontSize: 12 } }, 'NA');
-                return h('span', null, r.doubleProgrammer || h('span', { style: { color: '#F59E0B', fontSize: 12 } }, 'Unassigned'));
-              },
-              filters: [{ text: 'Assigned', value: 'assigned' }, { text: 'Unassigned', value: 'unassigned' }, { text: 'NA', value: 'na' }],
-              onFilter: function(val, rec) {
-                if (val === 'na') return !rec.dpStage;
-                if (val === 'unassigned') return rec.dpStage && !rec.doubleProgrammer;
-                return rec.dpStage && rec.doubleProgrammer;
-              },
-            },
-            { title: 'Independent Reviewer', key: 'ir', width: 170,
-              render: function(_, r) {
-                if (!r.irStage) return h('span', { style: { color: '#B0B0C0', fontSize: 12 } }, 'NA');
-                return h('span', null, r.independentReviewer || h('span', { style: { color: '#F59E0B', fontSize: 12 } }, 'Unassigned'));
-              },
-              filters: [{ text: 'Assigned', value: 'assigned' }, { text: 'Unassigned', value: 'unassigned' }, { text: 'NA', value: 'na' }],
-              onFilter: function(val, rec) {
-                if (val === 'na') return !rec.irStage;
-                if (val === 'unassigned') return rec.irStage && !rec.independentReviewer;
-                return rec.irStage && rec.independentReviewer;
-              },
-            },
+            };
+          })).concat([
             { title: 'State', dataIndex: 'state', key: 'state', width: 90,
               render: function(s) { return h(Tag, { color: stateColor(s) }, s); },
               filters: [{ text: 'Active', value: 'Active' }, { text: 'Complete', value: 'Complete' }, { text: 'Archived', value: 'Archived' }],
               onFilter: function(val, rec) { return rec.state === val; },
             },
-          ],
+          ]),
           rowKey: 'id',
           pagination: { pageSize: 15, size: 'small', showSizeChanger: true, pageSizeOptions: ['10', '15', '25', '50'] },
           size: 'small',
@@ -2407,6 +2371,94 @@ function MetricsPage(props) {
           pagination: false,
           size: 'small',
           scroll: { x: 900 },
+        })
+      )
+    ),
+
+    // ── Section 7: Validation Task Status ──
+    h('div', { className: 'metrics-section-header', style: { marginTop: 24 } }, 'Validation Task Status'),
+    h('div', { style: { fontSize: 12, color: '#8F8FA3', marginBottom: 12, marginTop: -8 } },
+      'Stage completion status and program output paths per ' + B.toLowerCase() + '. Status is derived from stage progression; paths from report attachments matched by file path patterns.'),
+
+    h('div', { className: 'panel' },
+      h('div', { className: 'panel-header' },
+        h('span', { className: 'panel-title' }, 'Task Status'),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+          h('span', { style: { fontSize: 12, color: '#8F8FA3' } }, taskStatusData.length + ' ' + B.toLowerCase() + 's'),
+          h(Button, { size: 'small', onClick: exportTaskStatus, icon: icons && icons.DownloadOutlined ? h(icons.DownloadOutlined) : null }, 'CSV')
+        )
+      ),
+      h('div', { className: 'panel-body-flush' },
+        h(Table, {
+          dataSource: taskStatusData,
+          columns: [
+            { title: 'Validation Task (Category)', key: 'name', width: 250,
+              render: function(_, r) {
+                return h('div', null,
+                  h('span', { style: { fontWeight: 500 } }, r.name),
+                  h(Tag, { style: { marginLeft: 6, fontSize: 10 } }, r.policyName)
+                );
+              },
+              filterDropdown: function(fProps) {
+                return h('div', { style: { padding: 8 } },
+                  h(Input, { size: 'small', placeholder: 'Search...', value: fProps.selectedKeys[0] || '',
+                    onChange: function(e) { fProps.setSelectedKeys(e.target.value ? [e.target.value] : []); },
+                    onPressEnter: function() { fProps.confirm(); },
+                    style: { width: 180, marginBottom: 8, display: 'block' }
+                  }),
+                  h(Button, { size: 'small', type: 'primary', onClick: function() { fProps.confirm(); }, style: { width: 85, marginRight: 8 } }, 'Filter'),
+                  h(Button, { size: 'small', onClick: function() { fProps.clearFilters && fProps.clearFilters(); fProps.confirm(); } }, 'Reset')
+                );
+              },
+              onFilter: function(val, rec) { return rec.name.toLowerCase().indexOf(val.toLowerCase()) >= 0; },
+            },
+          ].concat(allRoleLabels.map(function(rl) {
+            return {
+              title: rl, key: 'status_' + rl, width: 120,
+              render: function(_, r) {
+                var status = r.roleStatus[rl];
+                if (status === 'NA') return h('span', { style: { color: '#B0B0C0', fontSize: 12 } }, 'NA');
+                if (status === 'Completed') return h(Tag, { color: 'green' }, 'Completed');
+                if (status === 'Missing') return h(Tag, { color: 'gold', style: { fontWeight: 600 } }, 'Missing');
+                return h(Tag, { color: 'blue' }, 'Pending');
+              },
+              filters: [{ text: 'Completed', value: 'Completed' }, { text: 'Pending', value: 'Pending' }, { text: 'Missing', value: 'Missing' }, { text: 'NA', value: 'NA' }],
+              onFilter: function(val, rec) { return rec.roleStatus[rl] === val; },
+            };
+          })).concat(allRoleLabels.map(function(rl) {
+            return {
+              title: 'Path: ' + rl, key: 'path_' + rl, width: 200, ellipsis: true,
+              render: function(_, r) {
+                var status = r.roleStatus[rl];
+                var path = r.rolePaths[rl];
+                if (status === 'NA') return h('span', { style: { color: '#B0B0C0', fontSize: 12 } }, 'NA');
+                if (!path) return h('span', { style: { color: '#F59E0B', fontSize: 12, fontWeight: 600 } }, 'Missing');
+                return h(Tooltip, { title: path },
+                  h('span', { style: { fontSize: 11, fontFamily: 'monospace', color: '#65657B' } }, path)
+                );
+              },
+            };
+          })).concat([
+            { title: 'Repo Branch', key: 'branch', width: 110,
+              render: function(_, r) {
+                return r.repoBranch
+                  ? h(Tag, { style: { fontFamily: 'monospace', fontSize: 11 } }, r.repoBranch)
+                  : h('span', { style: { color: '#B0B0C0', fontSize: 12 } }, '\u2013');
+              },
+              filters: (function() {
+                var seen = {};
+                return taskStatusData.reduce(function(acc, d) {
+                  if (d.repoBranch && !seen[d.repoBranch]) { seen[d.repoBranch] = true; acc.push({ text: d.repoBranch, value: d.repoBranch }); }
+                  return acc;
+                }, []);
+              })(),
+              onFilter: function(val, rec) { return rec.repoBranch === val; },
+            },
+          ]),
+          rowKey: 'id',
+          pagination: { pageSize: 15, size: 'small', showSizeChanger: true, pageSizeOptions: ['10', '15', '25', '50'] },
+          size: 'small',
+          scroll: { x: 250 + allRoleLabels.length * 320 + 110 },
         })
       )
     ),
@@ -4906,6 +4958,7 @@ function AssignmentRulesPage(props) {
   var _rf2 = useState(undefined); var formStage = _rf2[0]; var setFormStage = _rf2[1];
   var _rf3 = useState(undefined); var formAssignee = _rf3[0]; var setFormAssignee = _rf3[1];
   var _rc = useState('skip'); var conflictMode = _rc[0]; var setConflictMode = _rc[1];
+  var _rl = useState(false); var applyLoading = _rl[0]; var setApplyLoading = _rl[1];
 
   // Unique projects from bundles
   var projectOptions = useMemo(function() {
@@ -5008,10 +5061,9 @@ function AssignmentRulesPage(props) {
   // Apply preview: what changes will be made
   var applyPreview = useMemo(function() {
     var changes = [];
+    var pmc = props.projectMembersCache || {};
+    var projMembers = selectedProject ? (pmc[selectedProject] || []) : [];
     projectRules.forEach(function(rule) {
-      // Find the user label for display
-      var pmc = props.projectMembersCache || {};
-      var projMembers = selectedProject ? (pmc[selectedProject] || []) : [];
       var mem = projMembers.find(function(m) { return m.userName === rule.assignee; });
       var newLabel = mem ? (mem.firstName || '') + ' ' + (mem.lastName || '') : rule.assignee;
       projectBundles.forEach(function(b) {
@@ -5024,6 +5076,12 @@ function AssignmentRulesPage(props) {
           changes.push({
             key: b.id + '-' + stageName,
             bundleName: b.name,
+            bundleId: b.id,
+            stageId: s.stage ? s.stage.id : null,
+            stageData: s,
+            bundle: b,
+            memberId: mem ? mem.id : null,
+            memberUserName: rule.assignee,
             stageName: stageName,
             currentAssignee: current || 'Unassigned',
             newAssignee: newLabel,
@@ -5091,31 +5149,119 @@ function AssignmentRulesPage(props) {
   }
 
   function handleApplyRules() {
-    var gapInfo = API_GAPS.applyRules;
-    if (!gapInfo.ready) {
-      antd.message.warning(gapInfo.message);
+    var toApply = applyPreview.filter(function(c) { return c.willApply; });
+    if (toApply.length === 0) { setApplyModalOpen(false); return; }
+
+    // Pre-check: filter out ineligible items
+    var skipped = [];
+    var eligible = [];
+    toApply.forEach(function(t) {
+      if (!t.stageId) {
+        skipped.push({ bundleName: t.bundleName, reason: 'Missing stage ID' });
+        return;
+      }
+      if (!t.memberId) {
+        skipped.push({ bundleName: t.bundleName, reason: 'Assignee "' + t.memberUserName + '" not found in project members — they may need to be added as a collaborator' });
+        return;
+      }
+      var state = (t.bundle.state || '').toLowerCase();
+      if (state === 'archived') {
+        skipped.push({ bundleName: t.bundleName, reason: 'Archived — reactivate in Domino first' });
+        return;
+      }
+      if (state === 'complete') {
+        skipped.push({ bundleName: t.bundleName, reason: 'Complete — reopen in Domino first' });
+        return;
+      }
+      eligible.push(t);
+    });
+
+    if (eligible.length === 0) {
       setApplyModalOpen(false);
+      antd.notification.error({
+        message: 'Cannot apply any rules',
+        description: h('div', null,
+          skipped.map(function(s, i) { return h('p', { key: i, style: { fontSize: 12 } }, '\u2022 ' + s.bundleName + ' — ' + s.reason); })
+        ),
+        duration: 15,
+      });
       return;
     }
-    var updated = bundles.map(function(b) {
-      if (b.projectId !== selectedProject) return b;
-      var matched = false;
-      var newStages = (b.stages || []).map(function(s) {
-        var stageName = s.stage ? s.stage.name : '';
-        var rule = projectRules.find(function(r) {
-          return r.policyName === b.policyName && r.stageName === stageName;
+
+    setApplyLoading(true);
+    var promises = eligible.map(function(t) {
+      var body = { assignee: { id: t.memberId, userName: t.memberUserName, name: t.memberUserName } };
+      return apiPatch('api/bundles/' + t.bundleId + '/stages/' + t.stageId, body)
+        .then(function(resp) {
+          if (resp.verified === false) {
+            var actualName = resp.actualAssignee ? (resp.actualAssignee.name || resp.actualAssignee.id) : 'nobody';
+            return { success: false, bundleName: t.bundleName, stageName: t.stageName, reason: 'Domino did not persist — assignee is still ' + actualName + '. They may need to be added as a collaborator.' };
+          }
+          // Update local state after verification
+          if (resp && resp.assignee && t.stageData) {
+            t.stageData.assignee = resp.assignee;
+          }
+          return { success: true, bundleName: t.bundleName, stageName: t.stageName, verified: resp.verified };
+        })
+        .catch(function(err) {
+          var detail = err.message || String(err);
+          var reason = detail.indexOf('403') !== -1 ? 'Permission denied — check project collaborator settings' : detail.indexOf('404') !== -1 ? B + ' or stage not found' : parseServerError(detail);
+          return { success: false, bundleName: t.bundleName, stageName: t.stageName, reason: reason };
         });
-        if (!rule) return s;
-        var current = s.assignee && s.assignee.name;
-        if (conflictMode === 'skip' && current) return s;
-        matched = true;
-        return Object.assign({}, s, { assignee: { id: '', name: rule.assignee } });
-      });
-      if (!matched) return b;
-      return Object.assign({}, b, { stages: newStages });
     });
-    setApplyModalOpen(false);
-    setBundles(updated);
+
+    Promise.all(promises).then(function(results) {
+      setApplyLoading(false);
+      setApplyModalOpen(false);
+      var succeeded = results.filter(function(r) { return r.success; });
+      var failed = results.filter(function(r) { return !r.success; });
+      var verified = succeeded.filter(function(r) { return r.verified === true; });
+
+      // Force re-render of bundles so UI updates
+      if (succeeded.length > 0) {
+        setBundles(bundles.slice());
+      }
+
+      var skippedSection = skipped.length > 0 ? [
+        h('p', { style: { fontWeight: 500, marginTop: 8, fontSize: 12, color: '#8F8FA3' } }, 'Skipped (' + skipped.length + '):'),
+        skipped.map(function(s, i) { return h('p', { key: 'skip-' + i, style: { marginLeft: 8, fontSize: 11, color: '#8F8FA3' } }, '\u2022 ' + s.bundleName + ' — ' + s.reason); })
+      ] : [];
+
+      if (failed.length === 0 && succeeded.length > 0) {
+        var msg = 'Applied rules: assigned ' + succeeded.length + ' stage' + (succeeded.length !== 1 ? 's' : '');
+        msg += verified.length === succeeded.length ? ' — all verified in Domino' : ' (verification pending for ' + (succeeded.length - verified.length) + ')';
+        if (skipped.length > 0) msg += '. ' + skipped.length + ' skipped.';
+        antd.message.success(msg);
+        if (skipped.length > 0) {
+          antd.notification.info({
+            message: skipped.length + ' stage' + (skipped.length > 1 ? 's' : '') + ' skipped',
+            description: h('div', null, skippedSection),
+            duration: 10,
+          });
+        }
+      } else if (succeeded.length > 0) {
+        antd.notification.warning({
+          message: succeeded.length + ' of ' + eligible.length + ' assignments succeeded',
+          description: h('div', null,
+            verified.length > 0 ? h('p', null, verified.length + ' verified in Domino') : null,
+            h('p', { style: { fontWeight: 500, marginTop: 4 } }, 'Failed (' + failed.length + '):'),
+            failed.map(function(f, i) { return h('p', { key: i, style: { marginLeft: 8, fontSize: 12 } }, '\u2022 ' + f.bundleName + ' / ' + f.stageName + ' — ' + f.reason); }),
+            skippedSection,
+            h('p', { style: { marginTop: 8, color: '#65657B', fontSize: 12 } }, 'Tip: Ensure the assignee is a collaborator on the ' + B.toLowerCase() + '\'s Domino project.')
+          ),
+          duration: 15,
+        });
+      } else {
+        antd.notification.error({
+          message: 'All ' + eligible.length + ' assignments failed',
+          description: h('div', null,
+            failed.map(function(f, i) { return h('p', { key: i, style: { marginLeft: 8, fontSize: 12 } }, '\u2022 ' + f.bundleName + ' / ' + f.stageName + ' — ' + f.reason); }),
+            skippedSection
+          ),
+          duration: 15,
+        });
+      }
+    });
   }
 
   // Rules table columns
@@ -5322,9 +5468,11 @@ function AssignmentRulesPage(props) {
             title: 'Apply Bulk Assignment Rules',
             open: applyModalOpen,
             onOk: handleApplyRules,
-            onCancel: function() { setApplyModalOpen(false); },
-            okText: 'Apply ' + changesCount + ' Assignment' + (changesCount !== 1 ? 's' : ''),
-            okButtonProps: { disabled: changesCount === 0 },
+            onCancel: function() { if (!applyLoading) setApplyModalOpen(false); },
+            okText: applyLoading ? 'Applying...' : 'Apply ' + changesCount + ' Assignment' + (changesCount !== 1 ? 's' : ''),
+            okButtonProps: { disabled: changesCount === 0 || applyLoading, loading: applyLoading },
+            cancelButtonProps: { disabled: applyLoading },
+            closable: !applyLoading,
             width: 700,
           },
             h('div', { style: { marginBottom: 16 } },
@@ -9051,6 +9199,268 @@ function UtilitiesPage(props) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  PAGE: Configuration
+// ═══════════════════════════════════════════════════════════════
+function ConfigurationPage(props) {
+  var bundles = props.bundles;
+  var livePolicies = props.livePolicies || [];
+  var terms = props.terms || DEFAULT_TERMS;
+  var reportConfig = props.reportConfig;
+  var onSaveRoleMapping = props.onSaveRoleMapping;
+  var onSavePathPatterns = props.onSavePathPatterns;
+  var onNavigate = props.onNavigate;
+  var B = capFirst(terms.bundle);
+  var P = capFirst(terms.policy);
+
+  var effectiveMapping = reportConfig.roleMapping;
+  var effectivePatterns = reportConfig.pathPatterns;
+  var policyLookup = reportConfig.policyLookup;
+
+  // Custom role input state: { policyId_stageName: string }
+  var _customRoles = useState({});
+  var customRoles = _customRoles[0]; var setCustomRoles = _customRoles[1];
+
+  // Get all unique policy IDs that have bundles, with max stage count
+  var policyRows = useMemo(function() {
+    var ids = {};
+    bundles.forEach(function(b) { if (b.policyId) ids[b.policyId] = true; });
+    return Object.keys(ids).map(function(pid) {
+      var pol = policyLookup[pid];
+      return { key: pid, policyId: pid, policyName: pol ? pol.name : 'Unknown', stages: pol ? pol.stages : [] };
+    });
+  }, [bundles, policyLookup]);
+
+  var maxStages = useMemo(function() {
+    return policyRows.reduce(function(max, r) { return Math.max(max, r.stages.length); }, 0);
+  }, [policyRows]);
+
+  function updateRoleForStage(policyId, stageName, roleLabel) {
+    var newMap = JSON.parse(JSON.stringify(effectiveMapping));
+    if (!newMap[policyId]) newMap[policyId] = {};
+    if (roleLabel) {
+      newMap[policyId][stageName] = roleLabel;
+    } else {
+      delete newMap[policyId][stageName];
+    }
+    onSaveRoleMapping(newMap);
+  }
+
+  // Build stage columns dynamically
+  var stageColumns = [];
+  stageColumns.push({
+    title: P, dataIndex: 'policyName', key: 'policy', width: 200, fixed: 'left',
+    render: function(t) { return h('span', { style: { fontWeight: 500, fontSize: 12 } }, t); }
+  });
+  for (var si = 0; si < maxStages; si++) {
+    (function(idx) {
+      stageColumns.push({
+        title: 'Stage ' + (idx + 1), key: 'stage_' + idx, width: 220,
+        render: function(_, row) {
+          if (idx >= row.stages.length) return h('span', { style: { color: '#D0D0D0', fontSize: 12 } }, '\u2014');
+          var stageName = row.stages[idx];
+          var policyMap = effectiveMapping[row.policyId] || {};
+          var currentRole = policyMap[stageName] || null;
+          var isOther = currentRole && ROLE_OPTIONS.indexOf(currentRole) < 0;
+          var customKey = row.policyId + '_' + stageName;
+
+          return h('div', null,
+            h('div', { style: { fontSize: 11, color: '#65657B', marginBottom: 2, fontWeight: 500 } }, stageName),
+            h(Select, {
+              size: 'small', style: { width: '100%' },
+              value: isOther ? 'Other' : (currentRole || undefined),
+              allowClear: true, placeholder: 'Assign role...',
+              onChange: function(val) {
+                if (val === 'Other') {
+                  // Set a default custom role name or keep existing
+                  var existing = customRoles[customKey] || currentRole || '';
+                  var upd = {}; upd[customKey] = existing; setCustomRoles(Object.assign({}, customRoles, upd));
+                  updateRoleForStage(row.policyId, stageName, existing || 'Custom');
+                } else {
+                  // Clear custom role if switching away from Other
+                  if (customRoles[customKey] !== undefined) {
+                    var cleared = Object.assign({}, customRoles); delete cleared[customKey]; setCustomRoles(cleared);
+                  }
+                  updateRoleForStage(row.policyId, stageName, val || null);
+                }
+              }
+            },
+              ROLE_OPTIONS.map(function(opt) {
+                return h(Select.Option, { key: opt, value: opt }, opt);
+              })
+            ),
+            (isOther || (currentRole === 'Other') || customRoles[customKey] !== undefined)
+              ? h(Input, {
+                  size: 'small', style: { marginTop: 4, fontFamily: 'monospace' },
+                  placeholder: 'Custom role name...',
+                  value: isOther ? currentRole : (customRoles[customKey] || ''),
+                  onChange: function(e) {
+                    var upd = {}; upd[customKey] = e.target.value; setCustomRoles(Object.assign({}, customRoles, upd));
+                  },
+                  onBlur: function(e) {
+                    var val = e.target.value.trim();
+                    if (val) updateRoleForStage(row.policyId, stageName, val);
+                  },
+                  onPressEnter: function(e) {
+                    var val = e.target.value.trim();
+                    if (val) updateRoleForStage(row.policyId, stageName, val);
+                  }
+                })
+              : null
+          );
+        }
+      });
+    })(si);
+  }
+
+  // ── Path Patterns ─────────────────────────────────────────────
+  // Collect all unique role labels currently in use
+  var allRoleLabels = useMemo(function() {
+    var labels = {};
+    Object.keys(effectiveMapping).forEach(function(pid) {
+      var pm = effectiveMapping[pid];
+      Object.keys(pm).forEach(function(sn) { if (pm[sn]) labels[pm[sn]] = true; });
+    });
+    return Object.keys(labels).sort();
+  }, [effectiveMapping]);
+
+  // Path pattern editing: store as { roleLabel: prefixString }
+  var _pathEdits = useState({});
+  var pathEdits = _pathEdits[0]; var setPathEdits = _pathEdits[1];
+
+  function getPathPrefix(roleLabel) {
+    if (pathEdits[roleLabel] !== undefined) return pathEdits[roleLabel];
+    var pat = effectivePatterns[roleLabel];
+    return pat ? (pat.prefix || '') : '';
+  }
+
+  function applyPathPatterns() {
+    var newPat = {};
+    allRoleLabels.forEach(function(rl) {
+      var pfx = getPathPrefix(rl);
+      newPat[rl] = { prefix: pfx || null, label: rl };
+    });
+    onSavePathPatterns(newPat);
+    setPathEdits({});
+    antd.message.success('Path patterns saved');
+  }
+
+  function resetPathPatterns() {
+    onSavePathPatterns(null);
+    setPathEdits({});
+    antd.message.info('Path patterns reset to defaults');
+  }
+
+  // Preview: show how many attachments match each pattern
+  var patternPreview = useMemo(function() {
+    var counts = {};
+    var samples = {};
+    allRoleLabels.forEach(function(rl) { counts[rl] = 0; samples[rl] = []; });
+    counts._unmatched = 0;
+    bundles.forEach(function(b) {
+      (b._attachments || []).forEach(function(a) {
+        if (a.type !== 'Report' || !a.identifier || !a.identifier.filename) return;
+        var fn = a.identifier.filename;
+        var matched = false;
+        allRoleLabels.forEach(function(rl) {
+          var pfx = getPathPrefix(rl);
+          if (pfx && fn.indexOf(pfx) === 0) {
+            counts[rl]++;
+            if (samples[rl].length < 2) samples[rl].push(fn);
+            matched = true;
+          }
+        });
+        if (!matched) counts._unmatched++;
+      });
+    });
+    return { counts: counts, samples: samples };
+  }, [bundles, allRoleLabels, pathEdits, effectivePatterns]);
+
+  return h('div', null,
+    h('div', { className: 'page-header' },
+      h('h1', null, 'Configuration'),
+      h('p', null, 'Report settings, stage-to-role mapping, and file path patterns')
+    ),
+
+    // ── Section 1: Stage → Role Mapping ──────────────────────────
+    h('div', { className: 'metrics-section-header' }, 'Stage \u2192 Role Mapping'),
+    h('div', { style: { fontSize: 12, color: '#8F8FA3', marginBottom: 12, marginTop: -8 } },
+      'Assign a role to each stage in each ' + P.toLowerCase() + '. Choose from standard roles or type a custom label. Used by PDVT and Validation Status reports.'),
+
+    h('div', { className: 'panel' },
+      h('div', { className: 'panel-header' },
+        h('span', { className: 'panel-title' }, 'Stage Mapping by ' + P),
+        h('div', { style: { display: 'flex', gap: 8 } },
+          h(Button, { size: 'small', onClick: function() { onSaveRoleMapping(null); antd.message.info('Role mapping reset to defaults'); } }, 'Reset to Defaults'),
+          h(Button, { size: 'small', type: 'primary', onClick: function() { if (onNavigate) onNavigate('metrics'); } }, 'View Reports \u2192')
+        )
+      ),
+      h('div', { className: 'panel-body' },
+        h(Table, {
+          dataSource: policyRows,
+          columns: stageColumns,
+          rowKey: 'key',
+          pagination: false,
+          size: 'small',
+          scroll: maxStages > 4 ? { x: 200 + maxStages * 220 } : undefined,
+        })
+      )
+    ),
+
+    // ── Section 2: File Path Patterns ──────────────────────────
+    h('div', { className: 'metrics-section-header', style: { marginTop: 24 } }, 'File Path Patterns'),
+    h('div', { style: { fontSize: 12, color: '#8F8FA3', marginBottom: 12, marginTop: -8 } },
+      'Define file path prefixes for each role. Report attachments whose filename starts with a prefix are matched to that role. Used by the Validation Task Status report.'),
+
+    h('div', { className: 'panel' },
+      h('div', { className: 'panel-header' },
+        h('span', { className: 'panel-title' }, 'Path Prefix by Role'),
+        h('div', { style: { display: 'flex', gap: 8 } },
+          h(Button, { size: 'small', onClick: resetPathPatterns }, 'Reset to Defaults'),
+          h(Button, { size: 'small', type: 'primary', onClick: applyPathPatterns }, 'Save Patterns')
+        )
+      ),
+      h('div', { className: 'panel-body' },
+        allRoleLabels.length === 0
+          ? h(EmptyState, { text: 'No roles assigned yet', sub: 'Assign roles to stages above first' })
+          : h('div', null,
+              h('div', { style: { display: 'grid', gridTemplateColumns: '180px 200px 1fr', gap: '8px 16px', alignItems: 'center', marginBottom: 16 } },
+                h('span', { style: { fontWeight: 600, fontSize: 12, color: '#65657B' } }, 'Role'),
+                h('span', { style: { fontWeight: 600, fontSize: 12, color: '#65657B' } }, 'Path Prefix'),
+                h('span', { style: { fontWeight: 600, fontSize: 12, color: '#65657B' } }, 'Matches'),
+                allRoleLabels.map(function(rl) {
+                  return [
+                    h('span', { key: rl + '_label', style: { fontSize: 13 } }, rl),
+                    h(Input, { key: rl + '_input', size: 'small', value: getPathPrefix(rl),
+                      onChange: function(e) { var upd = {}; upd[rl] = e.target.value; setPathEdits(Object.assign({}, pathEdits, upd)); },
+                      placeholder: 'e.g. prod/', style: { fontFamily: 'monospace' }
+                    }),
+                    h('span', { key: rl + '_count', style: { fontSize: 12, color: '#65657B' } },
+                      patternPreview.counts[rl] + ' files' + (patternPreview.samples[rl] && patternPreview.samples[rl].length > 0 ? ' \u2014 e.g. ' + patternPreview.samples[rl][0] : ''))
+                  ];
+                })
+              ),
+              patternPreview.counts._unmatched > 0
+                ? h(Alert, { type: 'info', showIcon: true, message: patternPreview.counts._unmatched + ' report attachment(s) don\'t match any prefix pattern.', style: { fontSize: 12 } })
+                : null
+            )
+      )
+    ),
+
+    // ── Section 3: About ──────────────────────────────────────────
+    h('div', { className: 'metrics-section-header', style: { marginTop: 24 } }, 'About'),
+    h('div', { className: 'panel' },
+      h('div', { className: 'panel-body' },
+        h('div', { style: { fontSize: 12, color: '#65657B', lineHeight: '1.6' } },
+          h('p', null, 'Configuration is stored in your browser\'s localStorage and persists across sessions. It is not shared with other users.'),
+          h('p', null, 'The stage-to-role mapping controls how reports display role assignments. The file path patterns control how the Validation Task Status report matches report attachments to roles.'),
+          h('p', null, 'Use "Reset to Defaults" to revert to heuristic matching based on stage names and the standard prod/qc path convention.')
+        )
+      )
+    )
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  ROOT APP
 // ═══════════════════════════════════════════════════════════════
 function App() {
@@ -9068,6 +9478,21 @@ function App() {
   var _s12 = useState([]); var automationHistory = _s12[0]; var setAutomationHistory = _s12[1];
   var _dbg = useState(function() { try { return localStorage.getItem('sce_debug_mode') === 'true'; } catch(e) { return false; } }); var debugMode = _dbg[0]; var setDebugMode = _dbg[1];
   var toggleDebugMode = useCallback(function(v) { setDebugMode(v); try { localStorage.setItem('sce_debug_mode', v ? 'true' : 'false'); } catch(e) {} }, []);
+
+  // ── Report Configuration (shared across tabs) ─────────────────
+  var _roleMap = useState(function() { return loadStoredJSON(ROLE_MAPPING_KEY); });
+  var storedRoleMapping = _roleMap[0]; var setStoredRoleMapping = _roleMap[1];
+  var _pathPat = useState(function() { return loadStoredJSON(PATH_PATTERN_KEY); });
+  var storedPathPatterns = _pathPat[0]; var setStoredPathPatterns = _pathPat[1];
+
+  function saveRoleMapping(newMap) {
+    setStoredRoleMapping(newMap);
+    try { localStorage.setItem(ROLE_MAPPING_KEY, JSON.stringify(newMap)); } catch(e) {}
+  }
+  function savePathPatterns(newPat) {
+    setStoredPathPatterns(newPat);
+    try { localStorage.setItem(PATH_PATTERN_KEY, JSON.stringify(newPat)); } catch(e) {}
+  }
 
   // ── Live data state ──────────────────────────────────────────
   var _cu = useState(null); var currentUser = _cu[0]; var setCurrentUser = _cu[1];
@@ -9717,6 +10142,45 @@ function App() {
     setDrawerOpen(true);
   }
 
+  // ── Effective report config (computed from stored + defaults) ──
+  var effectiveRoleMapping = useMemo(function() {
+    var defaults = buildDefaultRoleMapping(livePolicies, bundles);
+    if (!storedRoleMapping) return defaults;
+    var merged = {};
+    Object.keys(defaults).forEach(function(pid) { merged[pid] = defaults[pid]; });
+    Object.keys(storedRoleMapping).forEach(function(pid) { merged[pid] = storedRoleMapping[pid]; });
+    return merged;
+  }, [livePolicies, bundles, storedRoleMapping]);
+
+  var effectivePathPatterns = useMemo(function() {
+    if (!storedPathPatterns) return DEFAULT_PATH_PATTERNS;
+    // Merge stored over defaults, keyed by role label
+    var merged = {};
+    Object.keys(DEFAULT_PATH_PATTERNS).forEach(function(k) { merged[k] = DEFAULT_PATH_PATTERNS[k]; });
+    Object.keys(storedPathPatterns).forEach(function(k) { merged[k] = storedPathPatterns[k]; });
+    return merged;
+  }, [storedPathPatterns]);
+
+  // Build policy lookup for config page
+  var policyLookup = useMemo(function() {
+    var map = {};
+    livePolicies.forEach(function(p) { map[p.id] = p; });
+    bundles.forEach(function(b) {
+      if (b.policyId && !map[b.policyId] && b.stages && b.stages.length) {
+        map[b.policyId] = { id: b.policyId, name: b.policyName || 'Unknown', stages: b.stages.map(function(s) { return s.stage ? s.stage.name : ''; }).filter(Boolean) };
+      }
+    });
+    return map;
+  }, [livePolicies, bundles]);
+
+  var reportConfig = useMemo(function() {
+    return {
+      roleMapping: effectiveRoleMapping,
+      pathPatterns: effectivePathPatterns,
+      policyLookup: policyLookup,
+    };
+  }, [effectiveRoleMapping, effectivePathPatterns, policyLookup]);
+
   function renderPage() {
     // Assignment Rules always gets unfiltered bundles (it has its own project selector)
     // All other pages get scopedBundles
@@ -9732,7 +10196,7 @@ function App() {
       case 'findings':
         return h(FindingsPage, { bundles: scopedBundles, loading: loading, terms: terms });
       case 'metrics':
-        return h(MetricsPage, { bundles: scopedBundles, terms: terms, livePolicies: livePolicies });
+        return h(MetricsPage, { bundles: scopedBundles, terms: terms, livePolicies: livePolicies, reportConfig: reportConfig });
       case 'stages':
         return h(StageAssignmentsPage, { bundles: bundles, terms: terms, projectMembersCache: projectMembersCache, onNavigate: setActivePage });
       case 'automation':
@@ -9741,6 +10205,8 @@ function App() {
         return h(RiskOptimizerPage, { bundles: bundles, livePolicies: livePolicies, terms: terms, useDummy: useDummy });
       case 'utilities':
         return h(UtilitiesPage, { bundles: bundles, projects: liveProjects, policies: livePolicies, connected: connected, onRefresh: function() { if (connected) fetchLiveData(); }, terms: terms });
+      case 'config':
+        return h(ConfigurationPage, { bundles: bundles, livePolicies: livePolicies, terms: terms, reportConfig: reportConfig, onSaveRoleMapping: saveRoleMapping, onSavePathPatterns: savePathPatterns, onNavigate: setActivePage });
       default:
         return h(DashboardPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms });
     }
