@@ -505,28 +505,13 @@ function guessWorkCategory(stageName) {
   return null;
 }
 
-// Build default mapping: { policyId: { stageName: roleLabel } }
+// Build empty default mapping: { policyId: {} }
+// Users must explicitly assign categories via Configuration tab
 function buildDefaultRoleMapping(policies, bndls) {
   var map = {};
-  function mapStages(policyId, stageNames) {
-    if (map[policyId]) return;
-    var m = {};
-    stageNames.forEach(function(sName) {
-      var role = guessWorkCategory(sName);
-      if (role) m[sName] = role;
-    });
-    // If nothing matched, assign first stage as Production Programming
-    if (Object.keys(m).length === 0 && stageNames.length > 0) m[stageNames[0]] = 'Production Programming';
-    map[policyId] = m;
-  }
-  policies.forEach(function(p) {
-    if (p.stages && p.stages.length && typeof p.stages[0] === 'string') mapStages(p.id, p.stages);
-  });
+  policies.forEach(function(p) { map[p.id] = {}; });
   bndls.forEach(function(b) {
-    if (!b.policyId || map[b.policyId]) return;
-    if (!b.stages || !b.stages.length) return;
-    var names = b.stages.map(function(s) { return s.stage ? s.stage.name : ''; }).filter(Boolean);
-    if (names.length) mapStages(b.policyId, names);
+    if (b.policyId && !map[b.policyId]) map[b.policyId] = {};
   });
   return map;
 }
@@ -1531,15 +1516,8 @@ function MetricsPage(props) {
   var effectivePatterns = reportConfig.pathPatterns || DEFAULT_PATH_PATTERNS;
 
   // ── PDVT Report Data ─────────────────────────────────────────
-  // Collect all unique role labels across all policies
-  var allRoleLabels = useMemo(function() {
-    var labels = {};
-    Object.keys(effectiveMapping).forEach(function(pid) {
-      var pm = effectiveMapping[pid];
-      Object.keys(pm).forEach(function(sn) { if (pm[sn]) labels[pm[sn]] = true; });
-    });
-    return Object.keys(labels).sort();
-  }, [effectiveMapping]);
+  // Always use the 3 fixed work categories as report columns
+  var allRoleLabels = WORK_CATEGORIES;
 
   var pdvtData = useMemo(function() {
     return bundles.map(function(b) {
@@ -1699,9 +1677,9 @@ function MetricsPage(props) {
   function exportTaskStatus() {
     var statusHeaders = allRoleLabels.map(function(rl) { return rl + ' Status'; });
     var pathHeaders = allRoleLabels.map(function(rl) { return 'Path to ' + rl; });
-    var headers = [B + ' (' + P + ')'].concat(statusHeaders).concat(pathHeaders).concat(['Repo Branch']);
+    var headers = [B, P].concat(statusHeaders).concat(pathHeaders).concat(['Repo Branch']);
     var rows = taskStatusData.map(function(d) {
-      var base = [d.name + ' (' + d.policyName + ')'];
+      var base = [d.name, d.policyName];
       allRoleLabels.forEach(function(rl) { base.push(d.roleStatus[rl]); });
       allRoleLabels.forEach(function(rl) { base.push(d.rolePaths[rl] || (d.roleStatus[rl] === 'NA' ? 'NA' : 'Missing')); });
       base.push(d.repoBranch || '');
@@ -2401,17 +2379,14 @@ function MetricsPage(props) {
         h(Table, {
           dataSource: taskStatusData,
           columns: [
-            { title: B + ' (' + P + ')', key: 'name', width: 250,
-              render: function(_, r) {
-                var display = r.name;
-                if (r.policyName && r.name.indexOf('(' + r.policyName + ')') > 0) {
-                  display = r.name.replace('(' + r.policyName + ')', '').trim();
+            { title: B, dataIndex: 'name', key: 'name', width: 200,
+              render: function(t, r) {
+                var display = t;
+                if (r.policyName && t.indexOf('(' + r.policyName + ')') > 0) {
+                  display = t.replace('(' + r.policyName + ')', '').trim();
                 }
                 var bundle = bundles.find(function(b) { return b.id === r.id; });
-                return h('div', null,
-                  h('a', { style: { fontWeight: 500, color: '#5B21B6', cursor: 'pointer' }, onClick: function(e) { e.preventDefault(); if (onSelectBundle && bundle) onSelectBundle(bundle); } }, display),
-                  h(Tag, { style: { marginLeft: 6, fontSize: 10 } }, r.policyName)
-                );
+                return h('a', { style: { fontWeight: 500, color: '#5B21B6', cursor: 'pointer' }, onClick: function(e) { e.preventDefault(); if (onSelectBundle && bundle) onSelectBundle(bundle); } }, display);
               },
               filterDropdown: function(fProps) {
                 return h('div', { style: { padding: 8 } },
@@ -2425,6 +2400,17 @@ function MetricsPage(props) {
                 );
               },
               onFilter: function(val, rec) { return rec.name.toLowerCase().indexOf(val.toLowerCase()) >= 0; },
+            },
+            { title: P, dataIndex: 'policyName', key: 'category', width: 180,
+              render: function(t) { return h(Tag, null, t); },
+              filters: (function() {
+                var seen = {};
+                return taskStatusData.reduce(function(acc, d) {
+                  if (!seen[d.policyName]) { seen[d.policyName] = true; acc.push({ text: d.policyName, value: d.policyName }); }
+                  return acc;
+                }, []);
+              })(),
+              onFilter: function(val, rec) { return rec.policyName === val; },
             },
           ].concat(allRoleLabels.map(function(rl) {
             return {
@@ -9306,12 +9292,7 @@ function ConfigurationPage(props) {
   // ── Path Patterns ─────────────────────────────────────────────
   // Collect all unique role labels currently in use
   var allRoleLabels = useMemo(function() {
-    var labels = {};
-    Object.keys(effectiveMapping).forEach(function(pid) {
-      var pm = effectiveMapping[pid];
-      Object.keys(pm).forEach(function(sn) { if (pm[sn]) labels[pm[sn]] = true; });
-    });
-    return Object.keys(labels).sort();
+    return WORK_CATEGORIES;
   }, [effectiveMapping]);
 
   // Path pattern editing: store as { roleLabel: prefixString }
@@ -9444,7 +9425,7 @@ function ConfigurationPage(props) {
         h('div', { style: { fontSize: 12, color: '#65657B', lineHeight: '1.6' } },
           h('p', null, 'Configuration is stored in your browser\'s localStorage and persists across sessions. It is not shared with other users.'),
           h('p', null, 'The stage-to-category mapping controls how reports group work by category (Production Programming, QC Programming, Independent Reviewing). The file path patterns control how the Validation Task Status report matches report attachments to categories.'),
-          h('p', null, 'Use "Reset to Defaults" to revert to heuristic matching based on stage names and the standard prod/qc path convention.')
+          h('p', null, 'Use "Reset to Defaults" to clear all category assignments and start fresh.')
         )
       )
     )
