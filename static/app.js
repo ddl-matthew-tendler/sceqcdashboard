@@ -488,20 +488,20 @@ function TopNav(props) {
 var ROLE_MAPPING_KEY = 'sceqc_stage_role_mapping_v2';
 var PATH_PATTERN_KEY = 'sceqc_path_patterns';
 
-var ROLE_OPTIONS = ['Developer', 'Double Programmer', 'Independent Reviewer', 'Other'];
+var WORK_CATEGORIES = ['Production Programming', 'QC Programming', 'Independent Reviewing'];
 
 var DEFAULT_PATH_PATTERNS = {
-  'Developer': { prefix: 'prod/', label: 'Production program' },
-  'Double Programmer': { prefix: 'qc/', label: 'QC / double programming' },
-  'Independent Reviewer': { prefix: null, label: 'Independent review' },
+  'Production Programming': { prefix: 'prod/', label: 'Production program' },
+  'QC Programming': { prefix: 'qc/', label: 'QC / double programming' },
+  'Independent Reviewing': { prefix: null, label: 'Independent review' },
 };
 
-// Heuristic: guess a role label for a stage name
-function guessRoleLabel(stageName) {
+// Heuristic: guess a work category for a stage name
+function guessWorkCategory(stageName) {
   var s = stageName.toLowerCase();
-  if (/double|dp\b|dual/.test(s)) return 'Double Programmer';
-  if (/independent|ir\b|verif|lead/.test(s)) return 'Independent Reviewer';
-  if (/self|develop|author|program|creat/.test(s)) return 'Developer';
+  if (/double|dp\b|dual|qc|first\s*qc|second\s*qc/.test(s)) return 'QC Programming';
+  if (/independent|ir\b|verif|lead|review/.test(s)) return 'Independent Reviewing';
+  if (/self|develop|author|program|creat|prod|mainline|main\s*line/.test(s)) return 'Production Programming';
   return null;
 }
 
@@ -512,11 +512,11 @@ function buildDefaultRoleMapping(policies, bndls) {
     if (map[policyId]) return;
     var m = {};
     stageNames.forEach(function(sName) {
-      var role = guessRoleLabel(sName);
+      var role = guessWorkCategory(sName);
       if (role) m[sName] = role;
     });
-    // If nothing matched, assign first stage as Developer
-    if (Object.keys(m).length === 0 && stageNames.length > 0) m[stageNames[0]] = 'Developer';
+    // If nothing matched, assign first stage as Production Programming
+    if (Object.keys(m).length === 0 && stageNames.length > 0) m[stageNames[0]] = 'Production Programming';
     map[policyId] = m;
   }
   policies.forEach(function(p) {
@@ -1518,6 +1518,7 @@ function MetricsPage(props) {
   var terms = props.terms || DEFAULT_TERMS;
   var livePolicies = props.livePolicies || [];
   var reportConfig = props.reportConfig || {};
+  var onSelectBundle = props.onSelectBundle;
   var B = capFirst(terms.bundle);
   var P = capFirst(terms.policy);
 
@@ -2248,7 +2249,7 @@ function MetricsPage(props) {
     // ── Section 5: Validation Task List (PDVT) ──
     h('div', { className: 'metrics-section-header' }, 'Validation Task List (PDVT)'),
     h('div', { style: { fontSize: 12, color: '#8F8FA3', marginBottom: 12, marginTop: -8 } },
-      'Planned validation tasks with role assignments mapped from ' + P.toLowerCase() + ' stages.'),
+      'Planned validation tasks with categories of work mapped from ' + P.toLowerCase() + ' stages.'),
 
     // PDVT Table
     h('div', { className: 'panel' },
@@ -2264,7 +2265,15 @@ function MetricsPage(props) {
           dataSource: pdvtData,
           columns: [
             { title: B, dataIndex: 'name', key: 'name', width: 220,
-              render: function(t) { return h('span', { style: { fontWeight: 500 } }, t); },
+              render: function(t, rec) {
+                // Strip policy name suffix if present (e.g. "ADCM Dataset (ADaM QC Plan - High Risk)" → "ADCM Dataset")
+                var display = t;
+                if (rec.policyName && t.indexOf('(' + rec.policyName + ')') > 0) {
+                  display = t.replace('(' + rec.policyName + ')', '').trim();
+                }
+                var bundle = bundles.find(function(b) { return b.id === rec.id; });
+                return h('a', { style: { fontWeight: 500, color: '#5B21B6', cursor: 'pointer' }, onClick: function(e) { e.preventDefault(); if (onSelectBundle && bundle) onSelectBundle(bundle); } }, display);
+              },
               filterDropdown: function(fProps) {
                 return h('div', { style: { padding: 8 } },
                   h(Input, { size: 'small', placeholder: 'Search...', value: fProps.selectedKeys[0] || '',
@@ -2394,8 +2403,13 @@ function MetricsPage(props) {
           columns: [
             { title: B + ' (' + P + ')', key: 'name', width: 250,
               render: function(_, r) {
+                var display = r.name;
+                if (r.policyName && r.name.indexOf('(' + r.policyName + ')') > 0) {
+                  display = r.name.replace('(' + r.policyName + ')', '').trim();
+                }
+                var bundle = bundles.find(function(b) { return b.id === r.id; });
                 return h('div', null,
-                  h('span', { style: { fontWeight: 500 } }, r.name),
+                  h('a', { style: { fontWeight: 500, color: '#5B21B6', cursor: 'pointer' }, onClick: function(e) { e.preventDefault(); if (onSelectBundle && bundle) onSelectBundle(bundle); } }, display),
                   h(Tag, { style: { marginLeft: 6, fontSize: 10 } }, r.policyName)
                 );
               },
@@ -9224,10 +9238,6 @@ function ConfigurationPage(props) {
   var effectivePatterns = reportConfig.pathPatterns || {};
   var policyLookup = reportConfig.policyLookup || {};
 
-  // Custom role input state: { policyId_stageName: string }
-  var _customRoles = useState({});
-  var customRoles = _customRoles[0]; var setCustomRoles = _customRoles[1];
-
   // Get all unique policy IDs that have bundles, with max stage count
   var policyRows = useMemo(function() {
     var ids = {};
@@ -9271,53 +9281,22 @@ function ConfigurationPage(props) {
           if (!row.stages || idx >= row.stages.length) return h('span', { style: { color: '#D0D0D0', fontSize: 12 } }, '\u2014');
           var stageName = row.stages[idx];
           var policyMap = effectiveMapping[row.policyId] || {};
-          var currentRole = policyMap[stageName] || null;
-          var isOther = currentRole && ROLE_OPTIONS.indexOf(currentRole) < 0;
-          var customKey = row.policyId + '_' + stageName;
+          var currentCategory = policyMap[stageName] || null;
 
           return h('div', null,
             h('div', { style: { fontSize: 11, color: '#65657B', marginBottom: 2, fontWeight: 500 } }, stageName),
             h(Select, {
               size: 'small', style: { width: '100%' },
-              value: isOther ? 'Other' : (currentRole || undefined),
-              allowClear: true, placeholder: 'Assign role...',
+              value: currentCategory || undefined,
+              allowClear: true, placeholder: 'Select category...',
               onChange: function(val) {
-                if (val === 'Other') {
-                  // Set a default custom role name or keep existing
-                  var existing = customRoles[customKey] || currentRole || '';
-                  var upd = {}; upd[customKey] = existing; setCustomRoles(Object.assign({}, customRoles, upd));
-                  updateRoleForStage(row.policyId, stageName, existing || 'Custom');
-                } else {
-                  // Clear custom role if switching away from Other
-                  if (customRoles[customKey] !== undefined) {
-                    var cleared = Object.assign({}, customRoles); delete cleared[customKey]; setCustomRoles(cleared);
-                  }
-                  updateRoleForStage(row.policyId, stageName, val || null);
-                }
+                updateRoleForStage(row.policyId, stageName, val || null);
               }
             },
-              ROLE_OPTIONS.map(function(opt) {
+              WORK_CATEGORIES.map(function(opt) {
                 return h(Select.Option, { key: opt, value: opt }, opt);
               })
-            ),
-            (isOther || (currentRole === 'Other') || customRoles[customKey] !== undefined)
-              ? h(Input, {
-                  size: 'small', style: { marginTop: 4, fontFamily: 'monospace' },
-                  placeholder: 'Custom role name...',
-                  value: isOther ? currentRole : (customRoles[customKey] || ''),
-                  onChange: function(e) {
-                    var upd = {}; upd[customKey] = e.target.value; setCustomRoles(Object.assign({}, customRoles, upd));
-                  },
-                  onBlur: function(e) {
-                    var val = e.target.value.trim();
-                    if (val) updateRoleForStage(row.policyId, stageName, val);
-                  },
-                  onPressEnter: function(e) {
-                    var val = e.target.value.trim();
-                    if (val) updateRoleForStage(row.policyId, stageName, val);
-                  }
-                })
-              : null
+            )
           );
         }
       });
@@ -9390,19 +9369,19 @@ function ConfigurationPage(props) {
   return h('div', null,
     h('div', { className: 'page-header' },
       h('h1', null, 'Configuration'),
-      h('p', null, 'Report settings, stage-to-role mapping, and file path patterns')
+      h('p', null, 'Report settings, stage-to-category mapping, and file path patterns')
     ),
 
     // ── Section 1: Stage → Role Mapping ──────────────────────────
-    h('div', { className: 'metrics-section-header' }, 'Stage \u2192 Role Mapping'),
+    h('div', { className: 'metrics-section-header' }, 'Stage \u2192 Category of Work'),
     h('div', { style: { fontSize: 12, color: '#8F8FA3', marginBottom: 12, marginTop: -8 } },
-      'Assign a role to each stage in each ' + P.toLowerCase() + '. Choose from standard roles or type a custom label. Used by PDVT and Validation Status reports.'),
+      'Categorize each stage in each ' + P.toLowerCase() + ' as Production Programming, QC Programming, or Independent Reviewing. Used by PDVT and Validation Status reports.'),
 
     h('div', { className: 'panel' },
       h('div', { className: 'panel-header' },
-        h('span', { className: 'panel-title' }, 'Stage Mapping by ' + P),
+        h('span', { className: 'panel-title' }, 'Category of Work by ' + P),
         h('div', { style: { display: 'flex', gap: 8 } },
-          h(Button, { size: 'small', onClick: function() { onSaveRoleMapping(null); antd.message.info('Role mapping reset to defaults'); } }, 'Reset to Defaults'),
+          h(Button, { size: 'small', onClick: function() { onSaveRoleMapping(null); antd.message.info('Categories reset to defaults'); } }, 'Reset to Defaults'),
           h(Button, { size: 'small', type: 'primary', onClick: function() { if (onNavigate) onNavigate('metrics'); } }, 'View Reports \u2192')
         )
       ),
@@ -9421,11 +9400,11 @@ function ConfigurationPage(props) {
     // ── Section 2: File Path Patterns ──────────────────────────
     h('div', { className: 'metrics-section-header', style: { marginTop: 24 } }, 'File Path Patterns'),
     h('div', { style: { fontSize: 12, color: '#8F8FA3', marginBottom: 12, marginTop: -8 } },
-      'Define file path prefixes for each role. Report attachments whose filename starts with a prefix are matched to that role. Used by the Validation Task Status report.'),
+      'Define file path prefixes for each category of work. Report attachments whose filename starts with a prefix are matched to that category. Used by the Validation Task Status report.'),
 
     h('div', { className: 'panel' },
       h('div', { className: 'panel-header' },
-        h('span', { className: 'panel-title' }, 'Path Prefix by Role'),
+        h('span', { className: 'panel-title' }, 'Path Prefix by Category'),
         h('div', { style: { display: 'flex', gap: 8 } },
           h(Button, { size: 'small', onClick: resetPathPatterns }, 'Reset to Defaults'),
           h(Button, { size: 'small', type: 'primary', onClick: applyPathPatterns }, 'Save Patterns')
@@ -9436,7 +9415,7 @@ function ConfigurationPage(props) {
           ? h(EmptyState, { text: 'No roles assigned yet', sub: 'Assign roles to stages above first' })
           : h('div', null,
               h('div', { style: { display: 'grid', gridTemplateColumns: '180px 200px 1fr', gap: '8px 16px', alignItems: 'center', marginBottom: 16 } },
-                h('span', { style: { fontWeight: 600, fontSize: 12, color: '#65657B' } }, 'Role'),
+                h('span', { style: { fontWeight: 600, fontSize: 12, color: '#65657B' } }, 'Category'),
                 h('span', { style: { fontWeight: 600, fontSize: 12, color: '#65657B' } }, 'Path Prefix'),
                 h('span', { style: { fontWeight: 600, fontSize: 12, color: '#65657B' } }, 'Matches'),
                 allRoleLabels.map(function(rl) {
@@ -9464,7 +9443,7 @@ function ConfigurationPage(props) {
       h('div', { className: 'panel-body' },
         h('div', { style: { fontSize: 12, color: '#65657B', lineHeight: '1.6' } },
           h('p', null, 'Configuration is stored in your browser\'s localStorage and persists across sessions. It is not shared with other users.'),
-          h('p', null, 'The stage-to-role mapping controls how reports display role assignments. The file path patterns control how the Validation Task Status report matches report attachments to roles.'),
+          h('p', null, 'The stage-to-category mapping controls how reports group work by category (Production Programming, QC Programming, Independent Reviewing). The file path patterns control how the Validation Task Status report matches report attachments to categories.'),
           h('p', null, 'Use "Reset to Defaults" to revert to heuristic matching based on stage names and the standard prod/qc path convention.')
         )
       )
@@ -10223,7 +10202,7 @@ function App() {
       case 'findings':
         return h(FindingsPage, { bundles: scopedBundles, loading: loading, terms: terms });
       case 'metrics':
-        return h(MetricsPage, { bundles: scopedBundles, terms: terms, livePolicies: livePolicies, reportConfig: reportConfig });
+        return h(MetricsPage, { bundles: scopedBundles, terms: terms, livePolicies: livePolicies, reportConfig: reportConfig, onSelectBundle: handleSelectBundle });
       case 'stages':
         return h(StageAssignmentsPage, { bundles: bundles, terms: terms, projectMembersCache: projectMembersCache, onNavigate: setActivePage });
       case 'automation':
@@ -10262,9 +10241,9 @@ function App() {
           var mc = document.querySelector('.main-content');
           if (mc) mc.scrollTop = 0;
         } }),
-        h('div', { className: 'main-content' },
-          // Universal Scope Bar
-          h('div', { className: 'global-filter-bar' },
+        h('div', { className: 'main-content-wrapper' },
+          // Universal Scope Bar — only on pages that use scoped data
+          ['dashboard', 'tracker', 'milestones', 'approvals', 'findings', 'metrics'].indexOf(activePage) >= 0 ? h('div', { className: 'global-filter-bar' },
             // Saved Views filter group
             h('div', { className: 'global-filter-group' },
               h('span', { className: 'global-filter-label' }, 'Saved Views'),
@@ -10432,7 +10411,7 @@ function App() {
                   } }, 'Clear all')
                 )
               : null
-          ),
+          ) : null,
           // Save preset modal
           h(Modal, {
             title: 'Save Scope View',
@@ -10463,6 +10442,7 @@ function App() {
               )
             )
           ),
+          h('div', { className: 'main-content' },
           loading && bundles.length === 0
             ? h('div', { className: 'page-container' },
                 h(antd.Skeleton, { active: true, title: { width: '30%' }, paragraph: { rows: 0 }, style: { marginBottom: 16 } }),
@@ -10477,7 +10457,8 @@ function App() {
                 )
               )
             : renderPage()
-        )
+          ) // end main-content
+        ) // end main-content-wrapper
       ),
       h(DetailDrawer, {
         bundle: selectedBundle,

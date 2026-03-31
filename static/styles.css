@@ -159,6 +159,19 @@ body {
   color: #543FDE !important;
 }
 
+.main-content-wrapper {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.main-content-wrapper > .global-filter-bar {
+  flex-shrink: 0;
+  margin: 16px 28px 0 28px;
+}
+
 .main-content {
   flex: 1;
   padding: 24px 28px;
