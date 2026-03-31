@@ -1611,11 +1611,6 @@ function MetricsPage(props) {
           }
         });
         rolePaths[rl] = matchedPath;
-
-        // If stage should be completed but no attachment found, mark as Missing
-        if (roleStatus[rl] === 'Completed' && !matchedPath && pathPrefix) {
-          roleStatus[rl] = 'Missing';
-        }
       });
 
       // Get branch from first report attachment
@@ -2419,10 +2414,9 @@ function MetricsPage(props) {
                 var status = r.roleStatus[rl];
                 if (status === 'NA') return h('span', { style: { color: '#B0B0C0', fontSize: 12 } }, 'NA');
                 if (status === 'Completed') return h(Tag, { color: 'green' }, 'Completed');
-                if (status === 'Missing') return h(Tag, { color: 'gold', style: { fontWeight: 600 } }, 'Missing');
                 return h(Tag, { color: 'blue' }, 'Pending');
               },
-              filters: [{ text: 'Completed', value: 'Completed' }, { text: 'Pending', value: 'Pending' }, { text: 'Missing', value: 'Missing' }, { text: 'NA', value: 'NA' }],
+              filters: [{ text: 'Completed', value: 'Completed' }, { text: 'Pending', value: 'Pending' }, { text: 'NA', value: 'NA' }],
               onFilter: function(val, rec) { return rec.roleStatus[rl] === val; },
             };
           })).concat(allRoleLabels.map(function(rl) {
