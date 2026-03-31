@@ -2358,7 +2358,7 @@ function BulkActionBar(props) {
       bulkMember = (pmc[pid] || []).find(function(m) { return m.id === bulkAssignee; });
       return !!bulkMember;
     });
-    var body = { assignee: { id: bulkAssignee, userName: bulkMember ? bulkMember.userName : undefined } };
+    var body = { assignee: { id: bulkAssignee, userName: bulkMember ? bulkMember.userName : undefined, name: bulkMember ? bulkMember.userName : undefined } };
     var assigneeName = bulkMember ? bulkMember.userName : 'Selected user';
 
     // Pre-check: filter out bundles that can't be assigned
@@ -3597,7 +3597,7 @@ function QCTrackerPage(props) {
             onChange: function(userId) {
               if (!currentStageId) { antd.message.error('Missing stage ID'); return; }
               var memberMatch = userId ? members.find(function(mm) { return mm.id === userId; }) : null;
-              var body = { assignee: userId ? { id: userId, userName: memberMatch ? memberMatch.userName : undefined } : null };
+              var body = { assignee: userId ? { id: userId, userName: memberMatch ? memberMatch.userName : undefined, name: memberMatch ? memberMatch.userName : undefined } : null };
               apiPatch('api/bundles/' + record.id + '/stages/' + currentStageId, body)
                 .then(function(resp) {
                   // Check read-back verification BEFORE updating local state
@@ -3881,7 +3881,7 @@ function QCTrackerPage(props) {
                 onChange: function(userId) {
                   if (!stageId) { antd.message.error('Missing stage ID'); return; }
                   var mm = userId ? members.find(function(m) { return m.id === userId; }) : null;
-                  var body = { assignee: userId ? { id: userId, userName: mm ? mm.userName : undefined } : null };
+                  var body = { assignee: userId ? { id: userId, userName: mm ? mm.userName : undefined, name: mm ? mm.userName : undefined } : null };
                   apiPatch('api/bundles/' + record.id + '/stages/' + stageId, body)
                     .then(function(resp) {
                       if (resp.verified === false) {
@@ -4242,7 +4242,7 @@ function DetailDrawer(props) {
                     onChange: function(userId) {
                       if (!stageId) { antd.message.error('Missing stage ID'); return; }
                       var memberObj = userId ? members.find(function(m) { return m.id === userId; }) : null;
-                      apiPatch('api/bundles/' + bundle.id + '/stages/' + stageId, { assignee: userId ? { id: userId, userName: memberObj ? memberObj.userName : undefined } : null })
+                      apiPatch('api/bundles/' + bundle.id + '/stages/' + stageId, { assignee: userId ? { id: userId, userName: memberObj ? memberObj.userName : undefined, name: memberObj ? memberObj.userName : undefined } : null })
                         .then(function(resp) {
                           if (resp && resp.assignee) { stageData.assignee = resp.assignee; } else if (!userId) { stageData.assignee = null; }
                           if (resp && resp.stage && resp.stage.policyVersionId) { bundle._policyVersionId = resp.stage.policyVersionId; }
@@ -5108,7 +5108,7 @@ function StageAssignmentsPage(props) {
       return !!reassignMember;
     });
     var promises = stages.map(function(row) {
-      return apiPatch('api/bundles/' + row.bundleId + '/stages/' + row.stageId, { assignee: { id: reassignMember ? reassignMember.id : gapAssignTarget, userName: gapAssignTarget } })
+      return apiPatch('api/bundles/' + row.bundleId + '/stages/' + row.stageId, { assignee: { id: reassignMember ? reassignMember.id : gapAssignTarget, userName: gapAssignTarget, name: gapAssignTarget } })
         .then(function(resp) {
           return { ok: true, verified: resp && resp.verified, bundleName: row.bundleName };
         })
@@ -5150,7 +5150,7 @@ function StageAssignmentsPage(props) {
         reassignMember = (projectMembersCache[pid] || []).find(function(m) { return m.userName === reassignTarget; });
         return !!reassignMember;
       });
-      return apiPatch('api/bundles/' + row.bundleId + '/stages/' + row.stageId, { assignee: { id: reassignMember ? reassignMember.id : reassignTarget, userName: reassignTarget } })
+      return apiPatch('api/bundles/' + row.bundleId + '/stages/' + row.stageId, { assignee: { id: reassignMember ? reassignMember.id : reassignTarget, userName: reassignTarget, name: reassignTarget } })
         .then(function(resp) {
           if (resp && resp.verified === false) {
             var actualName = resp.actualAssignee ? (resp.actualAssignee.name || resp.actualAssignee.id) : 'nobody';
