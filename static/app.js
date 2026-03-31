@@ -520,7 +520,7 @@ function buildDefaultRoleMapping(policies, bndls) {
     map[policyId] = m;
   }
   policies.forEach(function(p) {
-    if (p.stages && p.stages.length) mapStages(p.id, p.stages);
+    if (p.stages && p.stages.length && typeof p.stages[0] === 'string') mapStages(p.id, p.stages);
   });
   bndls.forEach(function(b) {
     if (!b.policyId || map[b.policyId]) return;
@@ -10174,14 +10174,25 @@ function App() {
   }, [storedPathPatterns]);
 
   // Build policy lookup for config page
+  // Live API policies may not have a stages[] of strings — derive from bundles
   var policyLookup = useMemo(function() {
     var map = {};
-    livePolicies.forEach(function(p) { map[p.id] = p; });
+    livePolicies.forEach(function(p) {
+      map[p.id] = { id: p.id, name: p.name, stages: (p.stages && Array.isArray(p.stages)) ? p.stages : [] };
+    });
+    // Enrich with stage names derived from bundles (bundles have stages as objects with .stage.name)
     bundles.forEach(function(b) {
-      if (b.policyId && !map[b.policyId] && b.stages && b.stages.length) {
-        map[b.policyId] = { id: b.policyId, name: b.policyName || 'Unknown', stages: b.stages.map(function(s) { return s.stage ? s.stage.name : ''; }).filter(Boolean) };
+      if (!b.policyId || !b.stages || !b.stages.length) return;
+      var stageNames = b.stages.map(function(s) { return s.stage ? s.stage.name : ''; }).filter(Boolean);
+      if (!stageNames.length) return;
+      if (!map[b.policyId]) {
+        map[b.policyId] = { id: b.policyId, name: b.policyName || 'Unknown', stages: stageNames };
+      } else if (!map[b.policyId].stages || !map[b.policyId].stages.length) {
+        // Policy exists but has no stages — fill from bundle
+        map[b.policyId].stages = stageNames;
       }
     });
+    console.log('[App policyLookup]', Object.keys(map).map(function(k) { return map[k].name + ': ' + (map[k].stages || []).length + ' stages'; }));
     return map;
   }, [livePolicies, bundles]);
 
