@@ -94,13 +94,15 @@ var MOCK_POLICIES = [
 ];
 
 // Helper to make a stage object
-function makeStages(policyStages) {
+// assignees is an optional array of user objects (or null) matching policyStages order
+function makeStages(policyStages, assignees) {
   return policyStages.map(function(name, idx) {
+    var a = assignees && assignees[idx] ? assignees[idx] : null;
     return {
       stage: { name: name, order: idx },
       stageId: 'stage-' + idx,
-      assignee: null,
-      assignedAt: null,
+      assignee: a ? { id: a.id, name: a.name } : null,
+      assignedAt: a ? '2026-01-20T10:00:00Z' : null,
     };
   });
 }
@@ -149,13 +151,15 @@ var MOCK_PROJECT_TAGS = {
 // ── Bundles (Deliverables) ──────────────────────────────────────
 var MOCK_BUNDLES = [
   // ADaM deliverables — various states
+  // MOCK_POLICIES[0]: ADaM QC Plan - High Risk → ['Self QC', 'Double Programming', 'Study Lead Verification']
+  // MOCK_POLICIES[1]: ADaM QC Plan - Low Risk  → ['Self QC', 'Study Lead Verification']
   {
     id: '056cae0c-b450-4cc1-beb6-54f49188ba89', name: 'ADSL Dataset', state: 'Complete',
     projectId: 'proj-cdiscpilot', projectName: 'CDISC_Pilot_Study_01',
     projectOwner: 'ross_domino',
     policyId: MOCK_POLICIES[0].id, policyName: MOCK_POLICIES[0].name,
     stage: 'Study Lead Verification',
-    stages: makeStages(MOCK_POLICIES[0].stages),
+    stages: makeStages(MOCK_POLICIES[0].stages, [MOCK_USERS.prodProg, MOCK_USERS.qcProg, MOCK_USERS.studyLead]),
     stageAssignee: { id: MOCK_USERS.studyLead.id, name: 'study_lead' },
     commentsCount: 4,
     createdAt: '2026-01-15T09:00:00Z', updatedAt: '2026-02-28T14:30:00Z',
@@ -167,7 +171,7 @@ var MOCK_BUNDLES = [
     projectOwner: 'ross_domino',
     policyId: MOCK_POLICIES[0].id, policyName: MOCK_POLICIES[0].name,
     stage: 'Study Lead Verification',
-    stages: makeStages(MOCK_POLICIES[0].stages),
+    stages: makeStages(MOCK_POLICIES[0].stages, [MOCK_USERS.prodProg, MOCK_USERS.qcProg, MOCK_USERS.studyLead]),
     stageAssignee: { id: MOCK_USERS.studyLead.id, name: 'study_lead' },
     commentsCount: 6,
     createdAt: '2026-01-20T10:00:00Z', updatedAt: '2026-03-05T11:00:00Z',
@@ -179,7 +183,7 @@ var MOCK_BUNDLES = [
     projectOwner: 'ross_domino',
     policyId: MOCK_POLICIES[0].id, policyName: MOCK_POLICIES[0].name,
     stage: 'Study Lead Verification',
-    stages: makeStages(MOCK_POLICIES[0].stages),
+    stages: makeStages(MOCK_POLICIES[0].stages, [MOCK_USERS.ross, MOCK_USERS.qcProg, MOCK_USERS.studyLead]),
     stageAssignee: { id: MOCK_USERS.studyLead.id, name: 'study_lead' },
     commentsCount: 2,
     createdAt: '2026-01-22T08:00:00Z', updatedAt: '2026-03-01T16:00:00Z',
@@ -191,7 +195,7 @@ var MOCK_BUNDLES = [
     projectOwner: 'ross_domino',
     policyId: MOCK_POLICIES[1].id, policyName: MOCK_POLICIES[1].name,
     stage: 'Study Lead Verification',
-    stages: makeStages(MOCK_POLICIES[1].stages),
+    stages: makeStages(MOCK_POLICIES[1].stages, [MOCK_USERS.prodProg, MOCK_USERS.studyLead]),
     stageAssignee: { id: MOCK_USERS.studyLead.id, name: 'study_lead' },
     commentsCount: 1,
     createdAt: '2026-02-01T09:00:00Z', updatedAt: '2026-03-18T10:00:00Z',
@@ -203,7 +207,7 @@ var MOCK_BUNDLES = [
     projectOwner: 'ross_domino',
     policyId: MOCK_POLICIES[1].id, policyName: MOCK_POLICIES[1].name,
     stage: 'Study Lead Verification',
-    stages: makeStages(MOCK_POLICIES[1].stages),
+    stages: makeStages(MOCK_POLICIES[1].stages, [MOCK_USERS.prodProg, MOCK_USERS.studyLead]),
     stageAssignee: { id: MOCK_USERS.studyLead.id, name: 'study_lead' },
     commentsCount: 0,
     createdAt: '2026-02-05T09:00:00Z', updatedAt: '2026-03-19T09:00:00Z',
@@ -215,7 +219,7 @@ var MOCK_BUNDLES = [
     projectOwner: 'ross_domino',
     policyId: MOCK_POLICIES[1].id, policyName: MOCK_POLICIES[1].name,
     stage: 'Study Lead Verification',
-    stages: makeStages(MOCK_POLICIES[1].stages),
+    stages: makeStages(MOCK_POLICIES[1].stages, [MOCK_USERS.ross, MOCK_USERS.studyLead]),
     stageAssignee: { id: MOCK_USERS.studyLead.id, name: 'study_lead' },
     commentsCount: 0,
     createdAt: '2026-02-10T09:00:00Z', updatedAt: '2026-03-20T09:00:00Z',
@@ -228,7 +232,7 @@ var MOCK_BUNDLES = [
     projectOwner: 'ross_domino',
     policyId: MOCK_POLICIES[0].id, policyName: MOCK_POLICIES[0].name,
     stage: 'Double Programming',
-    stages: makeStages(MOCK_POLICIES[0].stages),
+    stages: makeStages(MOCK_POLICIES[0].stages, [MOCK_USERS.ross, MOCK_USERS.qcProg, null]),
     stageAssignee: { id: MOCK_USERS.qcProg.id, name: 'qc_programmer' },
     commentsCount: 3,
     createdAt: '2026-02-20T10:00:00Z', updatedAt: '2026-03-22T15:00:00Z',
@@ -241,7 +245,7 @@ var MOCK_BUNDLES = [
     projectOwner: 'ross_domino',
     policyId: MOCK_POLICIES[2].id, policyName: MOCK_POLICIES[2].name,
     stage: 'Study Lead Verification',
-    stages: makeStages(MOCK_POLICIES[2].stages),
+    stages: makeStages(MOCK_POLICIES[2].stages, [MOCK_USERS.etan, MOCK_USERS.qcProg, MOCK_USERS.studyLead]),
     stageAssignee: { id: MOCK_USERS.studyLead.id, name: 'study_lead' },
     commentsCount: 5,
     createdAt: '2026-02-01T11:00:00Z', updatedAt: '2026-03-10T09:00:00Z',
@@ -253,7 +257,7 @@ var MOCK_BUNDLES = [
     projectOwner: 'ross_domino',
     policyId: MOCK_POLICIES[3].id, policyName: MOCK_POLICIES[3].name,
     stage: 'Study Lead Verification',
-    stages: makeStages(MOCK_POLICIES[3].stages),
+    stages: makeStages(MOCK_POLICIES[3].stages, [MOCK_USERS.etan, MOCK_USERS.studyLead]),
     stageAssignee: { id: MOCK_USERS.studyLead.id, name: 'study_lead' },
     commentsCount: 2,
     createdAt: '2026-02-15T11:00:00Z', updatedAt: '2026-03-21T10:00:00Z',
@@ -265,7 +269,7 @@ var MOCK_BUNDLES = [
     projectOwner: 'ross_domino',
     policyId: MOCK_POLICIES[2].id, policyName: MOCK_POLICIES[2].name,
     stage: 'Double Programming',
-    stages: makeStages(MOCK_POLICIES[2].stages),
+    stages: makeStages(MOCK_POLICIES[2].stages, [MOCK_USERS.etan, MOCK_USERS.qcProg, null]),
     stageAssignee: { id: MOCK_USERS.qcProg.id, name: 'qc_programmer' },
     commentsCount: 1,
     createdAt: '2026-02-25T11:00:00Z', updatedAt: '2026-03-23T14:00:00Z',
@@ -278,7 +282,7 @@ var MOCK_BUNDLES = [
     projectOwner: 'agnes_domino',
     policyId: MOCK_POLICIES[4].id, policyName: MOCK_POLICIES[4].name,
     stage: 'Study Registration and Protocol Lock',
-    stages: makeStages(MOCK_POLICIES[4].stages),
+    stages: makeStages(MOCK_POLICIES[4].stages, [MOCK_USERS.agnes, null, null, null, null, null]),
     stageAssignee: { id: MOCK_USERS.agnes.id, name: 'agnes_domino' },
     commentsCount: 8,
     createdAt: '2026-03-23T01:53:22Z', updatedAt: '2026-03-25T10:00:00Z',
@@ -291,7 +295,7 @@ var MOCK_BUNDLES = [
     projectOwner: 'agnes_domino',
     policyId: MOCK_POLICIES[5].id, policyName: MOCK_POLICIES[5].name,
     stage: 'Model Initiation and Intended Use Declaration',
-    stages: makeStages(MOCK_POLICIES[5].stages),
+    stages: makeStages(MOCK_POLICIES[5].stages, [MOCK_USERS.agnes, MOCK_USERS.ross, null, null, null, null]),
     stageAssignee: { id: MOCK_USERS.agnes.id, name: 'agnes_domino' },
     commentsCount: 3,
     createdAt: '2026-02-18T14:00:00Z', updatedAt: '2026-03-24T09:00:00Z',
@@ -304,7 +308,7 @@ var MOCK_BUNDLES = [
     projectOwner: 'etan_domino',
     policyId: MOCK_POLICIES[6].id, policyName: MOCK_POLICIES[6].name,
     stage: 'Legal & Privacy Review',
-    stages: makeStages(MOCK_POLICIES[6].stages),
+    stages: makeStages(MOCK_POLICIES[6].stages, [MOCK_USERS.etan, MOCK_USERS.ross, MOCK_USERS.agnes, null, null]),
     stageAssignee: { id: MOCK_USERS.etan.id, name: 'etan_domino' },
     commentsCount: 5,
     createdAt: '2026-02-08T10:00:00Z', updatedAt: '2026-03-22T16:00:00Z',
@@ -317,7 +321,7 @@ var MOCK_BUNDLES = [
     projectOwner: 'ross_domino',
     policyId: MOCK_POLICIES[0].id, policyName: MOCK_POLICIES[0].name,
     stage: 'Self QC',
-    stages: makeStages(MOCK_POLICIES[0].stages),
+    stages: makeStages(MOCK_POLICIES[0].stages, [MOCK_USERS.prodProg, null, null]),
     stageAssignee: { id: MOCK_USERS.prodProg.id, name: 'production_programmer' },
     commentsCount: 0,
     createdAt: '2026-03-15T09:00:00Z', updatedAt: '2026-03-24T11:00:00Z',
