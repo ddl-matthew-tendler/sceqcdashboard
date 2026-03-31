@@ -1675,7 +1675,7 @@ function MetricsPage(props) {
   }
 
   function exportPDVT() {
-    var headers = ['Validation Task', 'Category (' + P + ')'].concat(allRoleLabels).concat(['State']);
+    var headers = [B, P].concat(allRoleLabels).concat(['State']);
     var rows = pdvtData.map(function(d) {
       var base = [d.name, d.policyName];
       allRoleLabels.forEach(function(rl) {
@@ -1698,7 +1698,7 @@ function MetricsPage(props) {
   function exportTaskStatus() {
     var statusHeaders = allRoleLabels.map(function(rl) { return rl + ' Status'; });
     var pathHeaders = allRoleLabels.map(function(rl) { return 'Path to ' + rl; });
-    var headers = ['Validation Task (Category)'].concat(statusHeaders).concat(pathHeaders).concat(['Repo Branch']);
+    var headers = [B + ' (' + P + ')'].concat(statusHeaders).concat(pathHeaders).concat(['Repo Branch']);
     var rows = taskStatusData.map(function(d) {
       var base = [d.name + ' (' + d.policyName + ')'];
       allRoleLabels.forEach(function(rl) { base.push(d.roleStatus[rl]); });
@@ -2263,7 +2263,7 @@ function MetricsPage(props) {
         h(Table, {
           dataSource: pdvtData,
           columns: [
-            { title: 'Validation Task', dataIndex: 'name', key: 'name', width: 220,
+            { title: B, dataIndex: 'name', key: 'name', width: 220,
               render: function(t) { return h('span', { style: { fontWeight: 500 } }, t); },
               filterDropdown: function(fProps) {
                 return h('div', { style: { padding: 8 } },
@@ -2392,7 +2392,7 @@ function MetricsPage(props) {
         h(Table, {
           dataSource: taskStatusData,
           columns: [
-            { title: 'Validation Task (Category)', key: 'name', width: 250,
+            { title: B + ' (' + P + ')', key: 'name', width: 250,
               render: function(_, r) {
                 return h('div', null,
                   h('span', { style: { fontWeight: 500 } }, r.name),
@@ -9202,19 +9202,27 @@ function UtilitiesPage(props) {
 //  PAGE: Configuration
 // ═══════════════════════════════════════════════════════════════
 function ConfigurationPage(props) {
+  console.log('[ConfigurationPage] props received:', Object.keys(props));
+  console.log('[ConfigurationPage] bundles:', props.bundles ? props.bundles.length + ' items' : 'MISSING');
+  console.log('[ConfigurationPage] reportConfig:', props.reportConfig ? Object.keys(props.reportConfig) : 'MISSING');
+  if (props.reportConfig) {
+    console.log('[ConfigurationPage] roleMapping:', props.reportConfig.roleMapping ? Object.keys(props.reportConfig.roleMapping).length + ' policies' : 'MISSING');
+    console.log('[ConfigurationPage] pathPatterns:', props.reportConfig.pathPatterns ? Object.keys(props.reportConfig.pathPatterns) : 'MISSING');
+    console.log('[ConfigurationPage] policyLookup:', props.reportConfig.policyLookup ? Object.keys(props.reportConfig.policyLookup).length + ' policies' : 'MISSING');
+  }
   var bundles = props.bundles;
   var livePolicies = props.livePolicies || [];
   var terms = props.terms || DEFAULT_TERMS;
-  var reportConfig = props.reportConfig;
+  var reportConfig = props.reportConfig || {};
   var onSaveRoleMapping = props.onSaveRoleMapping;
   var onSavePathPatterns = props.onSavePathPatterns;
   var onNavigate = props.onNavigate;
   var B = capFirst(terms.bundle);
   var P = capFirst(terms.policy);
 
-  var effectiveMapping = reportConfig.roleMapping;
-  var effectivePatterns = reportConfig.pathPatterns;
-  var policyLookup = reportConfig.policyLookup;
+  var effectiveMapping = reportConfig.roleMapping || {};
+  var effectivePatterns = reportConfig.pathPatterns || {};
+  var policyLookup = reportConfig.policyLookup || {};
 
   // Custom role input state: { policyId_stageName: string }
   var _customRoles = useState({});
@@ -9224,14 +9232,18 @@ function ConfigurationPage(props) {
   var policyRows = useMemo(function() {
     var ids = {};
     bundles.forEach(function(b) { if (b.policyId) ids[b.policyId] = true; });
-    return Object.keys(ids).map(function(pid) {
+    var rows = Object.keys(ids).map(function(pid) {
       var pol = policyLookup[pid];
-      return { key: pid, policyId: pid, policyName: pol ? pol.name : 'Unknown', stages: pol ? pol.stages : [] };
+      var stages = (pol && pol.stages) ? pol.stages : [];
+      console.log('[ConfigurationPage policyRows] pid:', pid, 'pol:', pol ? pol.name : 'MISSING', 'pol.stages:', pol ? pol.stages : 'N/A', 'resolved stages:', stages);
+      return { key: pid, policyId: pid, policyName: pol ? pol.name : 'Unknown', stages: stages };
     });
+    console.log('[ConfigurationPage policyRows] total rows:', rows.length);
+    return rows;
   }, [bundles, policyLookup]);
 
   var maxStages = useMemo(function() {
-    return policyRows.reduce(function(max, r) { return Math.max(max, r.stages.length); }, 0);
+    return policyRows.reduce(function(max, r) { return Math.max(max, (r.stages || []).length); }, 0);
   }, [policyRows]);
 
   function updateRoleForStage(policyId, stageName, roleLabel) {
@@ -9256,7 +9268,7 @@ function ConfigurationPage(props) {
       stageColumns.push({
         title: 'Stage ' + (idx + 1), key: 'stage_' + idx, width: 220,
         render: function(_, row) {
-          if (idx >= row.stages.length) return h('span', { style: { color: '#D0D0D0', fontSize: 12 } }, '\u2014');
+          if (!row.stages || idx >= row.stages.length) return h('span', { style: { color: '#D0D0D0', fontSize: 12 } }, '\u2014');
           var stageName = row.stages[idx];
           var policyMap = effectiveMapping[row.policyId] || {};
           var currentRole = policyMap[stageName] || null;
@@ -10174,6 +10186,10 @@ function App() {
   }, [livePolicies, bundles]);
 
   var reportConfig = useMemo(function() {
+    console.log('[App reportConfig] building reportConfig:',
+      'roleMapping policies:', Object.keys(effectiveRoleMapping).length,
+      'pathPatterns:', Object.keys(effectivePathPatterns),
+      'policyLookup policies:', Object.keys(policyLookup).length);
     return {
       roleMapping: effectiveRoleMapping,
       pathPatterns: effectivePathPatterns,
