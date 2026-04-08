@@ -450,7 +450,7 @@ function TopNav(props) {
   return h('div', { className: 'top-nav' },
     h('img', { src: 'static/domino-logo.svg', className: 'top-nav-logo', alt: 'Domino' }),
     h('div', { className: 'top-nav-divider' }),
-    h('span', { className: 'top-nav-title' }, 'SCE QC Tracker'),
+    h('span', { className: 'top-nav-title' }, 'Study Lead Workspace'),
     h('div', { className: 'top-nav-right' },
       isWhitelabeled
         ? h(Tooltip, { title: B + 's & ' + P + ' terminology active' },
@@ -479,7 +479,7 @@ function TopNav(props) {
           size: 'small',
         })
       ),
-      h('span', { className: 'top-nav-env' }, 'SCE QC Dashboard')
+      h('span', { className: 'top-nav-env' }, 'Study Lead Workspace')
     )
   );
 }
@@ -531,40 +531,110 @@ function loadStoredJSON(key) {
 }
 
 // ── Sidebar ─────────────────────────────────────────────────────
-var NAV_ITEMS = [
+var PRIMARY_NAV_ITEMS = [
   { key: 'tracker', iconName: 'TableOutlined', label: 'QC Tracker' },
+  { key: 'findings', iconName: 'FileSearchOutlined', label: 'Findings in QC' },
+  { key: 'metrics', iconName: 'BarChartOutlined', label: 'Team Metrics' },
+];
+
+var ADVANCED_NAV_ITEMS = [
   { key: 'milestones', iconName: 'FlagOutlined', label: 'Milestones' },
   { key: 'approvals', iconName: 'CheckCircleOutlined', label: 'Approvals' },
-  { key: 'findings', iconName: 'FileSearchOutlined', label: 'Findings & QC' },
-  { key: 'metrics', iconName: 'BarChartOutlined', label: 'Team Metrics' },
   { key: 'stages', iconName: 'ApartmentOutlined', label: 'Stage Manager' },
   { key: 'rules', iconName: 'SettingOutlined', label: 'Bulk Assignment Rules' },
   { key: 'automation', iconName: 'ThunderboltOutlined', label: 'Automation' },
-  { key: 'risk', iconName: 'SlidersOutlined', label: 'Risk Optimizer' },
   { key: 'utilities', iconName: 'ToolOutlined', label: 'Utilities' },
+  { key: 'risk', iconName: 'SlidersOutlined', label: 'Risk Optimizer' },
   { key: 'config', iconName: 'ControlOutlined', label: 'Configuration' },
 ];
+
+// Combined for backward compat (page routing)
+var NAV_ITEMS = PRIMARY_NAV_ITEMS.concat(ADVANCED_NAV_ITEMS);
+
+function SidebarItem(props) {
+  var item = props.item;
+  var active = props.active;
+  var collapsed = props.collapsed;
+  var onNav = props.onNav;
+  var IconComp = icons && icons[item.iconName] ? icons[item.iconName] : null;
+  return h(Tooltip, { key: item.key, title: collapsed ? item.label : null, placement: 'right' },
+    h('div', {
+      className: 'sidebar-item' + (active === item.key ? ' active' : ''),
+      onClick: function() { onNav(item.key); },
+    },
+      h('span', { className: 'sidebar-icon' },
+        IconComp ? h(IconComp, null) : null
+      ),
+      collapsed ? null : h('span', null, item.label)
+    )
+  );
+}
 
 function Sidebar(props) {
   var active = props.active;
   var onNav = props.onNav;
   var collapsed = props.collapsed;
   var onToggleCollapse = props.onToggleCollapse;
+  var _adv = useState(function() {
+    try { return localStorage.getItem('sce_advanced_open') === 'true'; } catch(e) { return false; }
+  });
+  var advancedOpen = _adv[0]; var setAdvancedOpen = _adv[1];
+
+  // Auto-expand if active page is in advanced section
+  useEffect(function() {
+    var isAdvanced = ADVANCED_NAV_ITEMS.some(function(item) { return item.key === active; });
+    if (isAdvanced && !advancedOpen) {
+      setAdvancedOpen(true);
+      try { localStorage.setItem('sce_advanced_open', 'true'); } catch(e) {}
+    }
+  }, [active]);
+
+  function toggleAdvanced() {
+    setAdvancedOpen(function(prev) {
+      var next = !prev;
+      try { localStorage.setItem('sce_advanced_open', String(next)); } catch(e) {}
+      return next;
+    });
+  }
+
+  var DownIcon = icons && icons.DownOutlined ? icons.DownOutlined : null;
+  var RightIcon = icons && icons.RightOutlined ? icons.RightOutlined : null;
+
   return h('div', { className: 'sidebar' + (collapsed ? ' sidebar-collapsed' : '') },
-    NAV_ITEMS.map(function(item) {
-      var IconComp = icons && icons[item.iconName] ? icons[item.iconName] : null;
-      return h(Tooltip, { key: item.key, title: collapsed ? item.label : null, placement: 'right' },
-        h('div', {
-          className: 'sidebar-item' + (active === item.key ? ' active' : ''),
-          onClick: function() { onNav(item.key); },
-        },
-          h('span', { className: 'sidebar-icon' },
-            IconComp ? h(IconComp, null) : null
-          ),
-          collapsed ? null : h('span', null, item.label)
-        )
-      );
+    // Primary nav items
+    PRIMARY_NAV_ITEMS.map(function(item) {
+      return h(SidebarItem, { key: item.key, item: item, active: active, collapsed: collapsed, onNav: onNav });
     }),
+    // Advanced section divider + toggle
+    collapsed
+      ? h(Tooltip, { title: 'Advanced', placement: 'right' },
+          h('div', {
+            className: 'sidebar-advanced-toggle',
+            onClick: toggleAdvanced,
+            style: { padding: '10px 0', textAlign: 'center', cursor: 'pointer', borderTop: '1px solid #E0E0E0', marginTop: 4 },
+          },
+            h('span', { className: 'sidebar-icon', style: { margin: '0 auto' } },
+              icons && icons.SettingOutlined ? h(icons.SettingOutlined, null) : h('span', null, '\u2699')
+            )
+          )
+        )
+      : h('div', {
+          className: 'sidebar-advanced-toggle',
+          onClick: toggleAdvanced,
+        },
+          h('span', { className: 'sidebar-advanced-label' }, 'Advanced'),
+          h('span', { className: 'sidebar-advanced-arrow' },
+            advancedOpen
+              ? (DownIcon ? h(DownIcon, null) : '\u25BE')
+              : (RightIcon ? h(RightIcon, null) : '\u25B8')
+          )
+        ),
+    // Advanced nav items (visible when expanded or when sidebar is collapsed and advanced is toggled)
+    (advancedOpen || collapsed) ? ADVANCED_NAV_ITEMS.map(function(item) {
+      if (collapsed && !advancedOpen) return null;
+      return h(SidebarItem, { key: item.key, item: item, active: active, collapsed: collapsed, onNav: onNav });
+    }) : null,
+    // Collapse toggle at bottom
     h('div', {
       className: 'sidebar-collapse-btn',
       onClick: onToggleCollapse,
@@ -9788,7 +9858,9 @@ function App() {
   }
 
   // Fetch live data from Domino
-  function fetchLiveData() {
+  // fallbackToDummy: if true, silently switch to dummy data on failure (used on initial mount)
+  //                  if false, show an error instead (used when user explicitly toggles dummy off)
+  function fetchLiveData(fallbackToDummy) {
     setLoading(true);
     setError(null);
 
@@ -9994,9 +10066,15 @@ function App() {
         setLoading(false);
       })
       .catch(function(err) {
-        console.error('Failed to fetch live data, falling back to dummy data:', err);
-        setUseDummy(true);
-        loadMockData();
+        console.error('Failed to fetch live data:', err);
+        if (fallbackToDummy) {
+          console.info('Initial load failed — falling back to dummy data');
+          setUseDummy(true);
+          loadMockData();
+        } else {
+          setLoading(false);
+          setError('Could not connect to Domino API. Check that the app is running inside a Domino workspace.');
+        }
       });
   }
 
@@ -10072,7 +10150,7 @@ function App() {
 
   // On mount: try live data first, fall back to dummy
   useEffect(function() {
-    fetchLiveData();
+    fetchLiveData(true);
   }, []);
 
   // Handle dummy data toggle
@@ -10081,7 +10159,7 @@ function App() {
     if (checked) {
       loadMockData();
     } else {
-      fetchLiveData();
+      fetchLiveData(false);
     }
   }
 

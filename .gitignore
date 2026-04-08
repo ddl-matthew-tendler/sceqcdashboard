@@ -68,6 +68,13 @@ Thumbs.db
 *.swp
 *.log
 
+# Debug / support artifacts
+domino_event_log_*.json
+support-bundle-*
+mockup_*.html
+test_*.js
+=1.0.0
+
 # Domino Frontend (ignore contents but keep the folder structure)
 example_domino_frontend_code/*
 !example_domino_frontend_code/.gitkeep
