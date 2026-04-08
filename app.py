@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 load_dotenv()
 
@@ -920,9 +921,25 @@ def debug_auth():
 
 # ── Static files & SPA ────────────────────────────────────────────
 
+# Prevent browser from caching static assets during development — ensures
+# changes to app.js / styles.css / mock_data.js are picked up on every reload.
+class NoCacheStaticMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
+
+app.add_middleware(NoCacheStaticMiddleware)
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @app.get("/")
 def serve_index():
-    return FileResponse("static/index.html")
+    resp = FileResponse("static/index.html")
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    return resp

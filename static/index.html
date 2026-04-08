@@ -22,16 +22,17 @@
 
   <!-- Highcharts -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highcharts/11.2.0/highcharts.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highcharts/11.2.0/highcharts-more.js"></script>
 
   <!-- Inter Font -->
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
 
-  <!-- App styles -->
-  <link href="static/styles.css" rel="stylesheet" />
+  <!-- App styles (v3 — bump version string on every CSS change to bust cache) -->
+  <link href="static/styles.css?v=3" rel="stylesheet" />
 </head>
 <body>
   <div id="root"></div>
-  <script src="static/mock_data.js"></script>
-  <script src="static/app.js"></script>
+  <script src="static/mock_data.js?v=2"></script>
+  <script src="static/app.js?v=3"></script>
 </body>
 </html>
