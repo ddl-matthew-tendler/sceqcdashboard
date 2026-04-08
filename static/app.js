@@ -1381,7 +1381,22 @@ function FindingsPage(props) {
       };
     }).filter(function(s) { return s.data.some(function(v) { return v !== null; }); });
 
-    var monthLabels = months.map(function(m) { return dayjs(m + '-01').format('MMM YYYY'); });
+    // Sample data when fewer than 3 months of real resolution data exist
+    var resolutionSampleData = false;
+    if (months.length < 3 && allFindings.length > 0) {
+      resolutionSampleData = true;
+      // S0 resolves fastest, S2/S3 tick up mid-period then drop
+      var sampleMonths = ['Nov 2025', 'Dec 2025', 'Jan 2026', 'Feb 2026', 'Mar 2026'];
+      resolutionSeries = [
+        { name: 'S0', color: severityColor('S0'), data: [null, 5, 3, 2, 2] },
+        { name: 'S1', color: severityColor('S1'), data: [14, 10, 8, 7, 5] },
+        { name: 'S2', color: severityColor('S2'), data: [18, 12, 16, 11, 9] },
+        { name: 'S3', color: severityColor('S3'), data: [null, 22, 28, 20, null] },
+      ];
+      months = sampleMonths;
+    }
+
+    var monthLabels = resolutionSampleData ? months : months.map(function(m) { return dayjs(m + '-01').format('MMM YYYY'); });
 
     var agingBuckets = ['0-7d', '8-14d', '15-30d', '31-60d', '60+d'];
     var agingSeries = sevKeys.map(function(sev) {
@@ -1395,6 +1410,7 @@ function FindingsPage(props) {
     return {
       months: monthLabels,
       resolutionSeries: resolutionSeries,
+      resolutionSampleData: resolutionSampleData,
       hasResolutionData: resolutionSeries.length > 0 && months.length > 0,
       agingBuckets: agingBuckets,
       agingSeries: agingSeries,
@@ -1642,7 +1658,10 @@ function FindingsPage(props) {
         chartTitle('Resolution Time by Severity', 'Average days from creation to resolution for resolved findings, grouped by the month they were created. Each line is a severity level. A downward trend means findings are being resolved faster over time.'),
         h('div', { className: 'panel-body' },
           resolutionTrendData.hasResolutionData
-            ? h('div', { id: 'chart-findings-resolution-trend', className: 'chart-container' })
+            ? h('div', null,
+                resolutionTrendData.resolutionSampleData ? h(Alert, { type: 'warning', showIcon: true, banner: true, message: 'Sample data shown below.', style: { marginBottom: 8, fontSize: 12 } }) : null,
+                h('div', { id: 'chart-findings-resolution-trend', className: 'chart-container' })
+              )
             : h(EmptyState, { text: 'No resolved findings yet', sub: 'Resolution trends appear once findings are marked Done' })
         )
       ),
