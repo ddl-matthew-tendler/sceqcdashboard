@@ -2862,43 +2862,46 @@ function StagePipeline(props) {
     return f.status !== 'Done' && f.status !== 'WontDo';
   });
 
-  var _pop = useState(null); var popoverStage = _pop[0]; var setPopoverStage = _pop[1];
+  // Progress fraction for the mini label
+  var completedCount = isComplete ? stageNames.length : currentIdx;
+  var progressLabel = isComplete ? 'Done' : completedCount + '/' + stageNames.length;
 
-  return h('div', { className: 'stage-pipeline-row', onClick: function(e) { e.stopPropagation(); } },
-    stageNames.map(function(name, j) {
-      var dotState;
-      if (isComplete || j < currentIdx) dotState = 'completed';
-      else if (j === currentIdx) dotState = hasOpenFindings ? 'blocked' : 'active';
-      else dotState = 'pending';
+  return h('div', { className: 'stage-pipeline-wrapper', onClick: function(e) { e.stopPropagation(); } },
+    h('div', { className: 'stage-pipeline-row' },
+      stageNames.map(function(name, j) {
+        var dotState;
+        if (isComplete || j < currentIdx) dotState = 'completed';
+        else if (j === currentIdx) dotState = hasOpenFindings ? 'blocked' : 'active';
+        else dotState = 'pending';
 
-      var isLast = j === stageNames.length - 1;
-      var lineState = (isComplete || j < currentIdx) ? 'completed' : 'pending';
+        var isLast = j === stageNames.length - 1;
+        var lineState = (isComplete || j < currentIdx) ? 'completed' : 'pending';
 
-      var popContent = h(StagePopoverContent, {
-        bundle: bundle, stageIdx: j, stageName: name, dotState: dotState,
-        onFindingsClick: onFindingsClick,
-        onClose: function() { setPopoverStage(null); },
-      });
+        var popContent = h(StagePopoverContent, {
+          bundle: bundle, stageIdx: j, stageName: name, dotState: dotState,
+          onFindingsClick: onFindingsClick,
+          onClose: function() {},
+        });
 
-      return h('div', { key: j, className: 'stage-pip-item' },
-        h(Popover, {
-          content: popContent,
-          trigger: 'click',
-          open: popoverStage === j,
-          onOpenChange: (function(idx) {
-            return function(visible) { setPopoverStage(visible ? idx : null); };
-          })(j),
-          placement: 'bottom',
-          overlayClassName: 'stage-popover-overlay',
-          arrow: { pointAtCenter: true },
-        },
-          h('div', { className: 'stage-pip-dot ' + dotState })
-        ),
-        !isLast
-          ? h('div', { className: 'stage-pip-line ' + lineState })
-          : null
-      );
-    })
+        return h('div', { key: j, className: 'stage-pip-item' },
+          h(Popover, {
+            content: popContent,
+            trigger: 'hover',
+            mouseEnterDelay: 0.15,
+            mouseLeaveDelay: 0.35,
+            placement: 'bottom',
+            overlayClassName: 'stage-popover-overlay',
+            arrow: { pointAtCenter: true },
+          },
+            h('div', { className: 'stage-pip-dot ' + dotState })
+          ),
+          !isLast
+            ? h('div', { className: 'stage-pip-line ' + lineState })
+            : null
+        );
+      })
+    ),
+    h('span', { className: 'stage-pipeline-label ' + (isComplete ? 'done' : hasOpenFindings ? 'blocked' : '') }, progressLabel)
   );
 }
 
