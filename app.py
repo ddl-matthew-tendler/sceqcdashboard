@@ -607,7 +607,7 @@ def list_projects(limit: int = 50, offset: int = 0):
 
 @app.get("/api/projects/{project_id}/collaborators")
 def list_project_collaborators(project_id: str):
-    result = v4_get(f"/projects/{project_id}/collaborators")
+    result = v4_get(f"/projects/{project_id}/collaborators?getUsers=true")
     # Debug: log collaborator IDs to compare with governance assignee IDs
     members = result if isinstance(result, list) else []
     if members:
