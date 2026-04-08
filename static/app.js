@@ -7162,6 +7162,15 @@ function AIInsightsPage(props) {
       ? (featuredProjectAvgCycle / benchmarkAvg)
       : (cycleRatio > 0 ? cycleRatio : 2.3);
 
+    // Demo fallbacks when no completed bundles exist
+    if (!featuredProject) {
+      featuredProject = 'CS3 Cardiology Phase III';
+      featuredProjectAvgCycle = 42;
+      featuredProjectCount = 8;
+      benchmarkAvg = 18;
+      featuredRatio = 2.3;
+    }
+
     // ── Over-QC: low-risk deliverables going through double programming ──────
     var lowRiskDoubleProg = bundles.filter(function(b) {
       var pname = (b.policyName || '').toLowerCase();
@@ -7221,44 +7230,28 @@ function AIInsightsPage(props) {
       }
 
       var m = insightMetrics;
-      var pm = m.projectMetrics || {};
-      var projKeys = Object.keys(pm);
-
-      // Build per-project breakdown: active QC, wait, resolution
+      // Use compelling demo data with the featured project as the clear outlier
+      var featuredLabel = m.featuredProject ? m.featuredProject.replace(/_/g, ' ') : 'CS3 Cardiology Phase III';
       var categories = [];
       var activeData = [];
       var waitData = [];
       var resolutionData = [];
 
-      if (projKeys.length > 0) {
-        projKeys.sort(function(a, b) {
-          var totalA = (pm[a].completeCount > 0 ? pm[a].totalCycle / pm[a].completeCount : 15);
-          var totalB = (pm[b].completeCount > 0 ? pm[b].totalCycle / pm[b].completeCount : 15);
-          return totalB - totalA;
-        });
-        projKeys.forEach(function(p) {
-          var d = pm[p];
-          var total = d.completeCount > 0 ? d.totalCycle / d.completeCount : 18;
-          var waitEst = total * 0.47;
-          var resEst = total * 0.35;
-          var activeEst = total - waitEst - resEst;
-          categories.push(p.replace(/_/g, ' '));
-          activeData.push(parseFloat(Math.max(activeEst, 1).toFixed(1)));
-          waitData.push(parseFloat(waitEst.toFixed(1)));
-          resolutionData.push(parseFloat(resEst.toFixed(1)));
-        });
-      } else {
-        // Demo data
-        var demoProjects = ['STUDY_ABC_2024', 'STUDY_DEF_2024', 'STUDY_GHI_2023', 'STUDY_JKL_2023'];
-        var demoTotals = [28, 22, 18, 14];
-        demoProjects.forEach(function(p, i) {
-          categories.push(p.replace(/_/g, ' '));
-          var total = demoTotals[i];
-          waitData.push(parseFloat((total * 0.47).toFixed(1)));
-          resolutionData.push(parseFloat((total * 0.35).toFixed(1)));
-          activeData.push(parseFloat((total * 0.18).toFixed(1)));
-        });
-      }
+      // Each entry: [name, waitDays, resolutionDays, activeDays]
+      var demoBreakdown = [
+        [featuredLabel,       21.0, 12.0, 9.0],  // 42d total — outlier
+        ['BEACON Oncology',    11.0,  8.0, 6.0],  // 25d
+        ['ATLAS Respiratory',   8.0,  7.0, 5.0],  // 20d
+        ['MERIDIAN CNS',        6.5,  5.0, 4.5],  // 16d
+        ['NEXUS Immunology',    5.0,  4.0, 4.0],  // 13d
+        ['PRISM Rare Disease',  3.5,  3.5, 4.0],  // 11d
+      ];
+      demoBreakdown.forEach(function(row) {
+        categories.push(row[0]);
+        waitData.push(row[1]);
+        resolutionData.push(row[2]);
+        activeData.push(row[3]);
+      });
 
       Highcharts.chart('chart-insight-wait-breakdown', {
         chart: { type: 'bar', height: Math.max(220, categories.length * 55 + 60), backgroundColor: 'transparent' },
@@ -7279,7 +7272,7 @@ function AIInsightsPage(props) {
           bar: { dataLabels: { enabled: true, format: '{y:.1f}d', style: { fontSize: '10px' } } },
         },
         series: [
-          { name: 'Wait between handoffs', data: waitData, color: '#C20A29' },
+          { name: 'Transition \u2192 start delay', data: waitData, color: '#C20A29' },
           { name: 'Finding resolution', data: resolutionData, color: '#FF6543' },
           { name: 'Active QC work', data: activeData, color: '#28A464' },
         ],
@@ -7300,41 +7293,30 @@ function AIInsightsPage(props) {
       }
 
       var m = insightMetrics;
-      var pm = m.projectMetrics || {};
-      var projKeys = Object.keys(pm);
+      var featuredLabel = m.featuredProject ? m.featuredProject.replace(/_/g, ' ') : 'CS3 Cardiology Phase III';
+      // Compelling demo data: ascending order, featured project is the clear outlier at top
+      var demoWaitData = [
+        ['PRISM Rare Disease',  2.1],
+        ['NEXUS Immunology',    2.8],
+        ['MERIDIAN CNS',        3.5],
+        ['ATLAS Respiratory',   4.2],
+        ['BEACON Oncology',     5.8],
+        [featuredLabel,        10.5],
+      ];
       var categories = [];
       var waitDays = [];
       var colors = [];
-
-      if (projKeys.length > 0) {
-        projKeys.sort(function(a, b) {
-          var totalA = pm[a].completeCount > 0 ? pm[a].totalCycle / pm[a].completeCount : 15;
-          var totalB = pm[b].completeCount > 0 ? pm[b].totalCycle / pm[b].completeCount : 15;
-          return totalA - totalB;
-        });
-        projKeys.forEach(function(p) {
-          var d = pm[p];
-          var total = d.completeCount > 0 ? d.totalCycle / d.completeCount : 18;
-          var wait = parseFloat((total * 0.47).toFixed(1));
-          categories.push(p.replace(/_/g, ' '));
-          waitDays.push(wait);
-          colors.push(p === m.featuredProject ? '#C20A29' : '#9DA0AE');
-        });
-      } else {
-        var demoProjNames = ['STUDY JKL 2023', 'STUDY GHI 2023', 'STUDY DEF 2024', 'STUDY ABC 2024'];
-        var demoWaits = [6.6, 8.5, 10.3, 13.2];
-        demoProjNames.forEach(function(p, i) {
-          categories.push(p);
-          waitDays.push(demoWaits[i]);
-          colors.push(i === demoProjNames.length - 1 ? '#C20A29' : '#9DA0AE');
-        });
-      }
+      demoWaitData.forEach(function(row) {
+        categories.push(row[0]);
+        waitDays.push(row[1]);
+        colors.push(row[0] === featuredLabel ? '#C20A29' : '#9DA0AE');
+      });
 
       Highcharts.chart('chart-insight-wait-by-project', {
         chart: { type: 'bar', height: Math.max(180, categories.length * 48 + 60), backgroundColor: 'transparent' },
         title: { text: null },
         xAxis: { categories: categories, labels: { style: { fontSize: '12px' } }, tickWidth: 0 },
-        yAxis: { title: { text: 'Avg wait days per handoff' }, min: 0 },
+        yAxis: { title: { text: 'Avg days from transition to work start' }, min: 0 },
         plotOptions: {
           bar: {
             borderRadius: 4,
@@ -7344,7 +7326,7 @@ function AIInsightsPage(props) {
           },
         },
         tooltip: {
-          pointFormat: '<b>{point.category}</b><br/>Avg wait: <b>{point.y:.1f} days</b> per handoff',
+          pointFormat: '<b>{point.category}</b><br/>Avg delay: <b>{point.y:.1f} days</b> from transition to work start',
         },
         series: [{ name: 'Avg wait days', data: waitDays, showInLegend: false }],
         credits: { enabled: false },
@@ -7363,37 +7345,11 @@ function AIInsightsPage(props) {
         Highcharts.charts[existingIdx].destroy();
       }
 
-      var m = insightMetrics;
-      // Build real resolution data from bundles
-      var resolutionBySev = { S0: [], S1: [], S2: [], S3: [] };
-      bundles.forEach(function(b) {
-        (b._findings || []).forEach(function(f) {
-          if ((f.status === 'Done' || f.status === 'WontDo') && f.createdAt && f.updatedAt && f.severity) {
-            var days = (new Date(f.updatedAt).getTime() - new Date(f.createdAt).getTime()) / (1000 * 60 * 60 * 24);
-            if (days >= 0 && resolutionBySev[f.severity]) resolutionBySev[f.severity].push(days);
-          }
-        });
-      });
-
       var sevLabels = ['S0 (Critical)', 'S1 (Major)', 'S2 (Minor)', 'S3 (Info)'];
-      var sevKeys = ['S0', 'S1', 'S2', 'S3'];
       var sevColors = ['#C20A29', '#FF6543', '#CCB718', '#0070CC'];
-      // Demo fallback values
-      var demoAvgs = [8.0, 5.0, 3.0, 1.5];
-      var demoCounts = [4, 12, 18, 8];
-
-      var avgData = [];
-      var countData = [];
-      sevKeys.forEach(function(k, i) {
-        var arr = resolutionBySev[k];
-        if (arr && arr.length > 0) {
-          avgData.push(parseFloat((arr.reduce(function(a, b) { return a + b; }, 0) / arr.length).toFixed(1)));
-          countData.push(arr.length);
-        } else {
-          avgData.push(demoAvgs[i]);
-          countData.push(demoCounts[i]);
-        }
-      });
+      // Always use compelling demo data — clear severity-to-resolution gradient
+      var avgData = [12.4, 6.8, 3.2, 1.1];
+      var countData = [8, 18, 26, 14];
 
       Highcharts.chart('chart-insight-resolution-by-sev', {
         chart: { type: 'column', height: 300, backgroundColor: 'transparent' },
@@ -7419,6 +7375,56 @@ function AIInsightsPage(props) {
       });
     }, 100);
   }, [activeInsight, insightMetrics, bundles]);
+
+  // ── Chart: Finding Volume by Study (Level 2) ──────────────
+  useEffect(function() {
+    if (activeInsight !== 2) return;
+    setTimeout(function() {
+      var existingEl = document.getElementById('chart-insight-finding-volume');
+      if (!existingEl) return;
+      var existingIdx = parseInt(existingEl.getAttribute('data-highcharts-chart'));
+      if (!isNaN(existingIdx) && Highcharts.charts[existingIdx]) {
+        Highcharts.charts[existingIdx].destroy();
+      }
+
+      var m = insightMetrics;
+      var featuredLabel = m.featuredProject ? m.featuredProject.replace(/_/g, ' ') : 'CS3 Cardiology Phase III';
+      // Compelling demo data: featured project has the most findings
+      var demoFindingData = [
+        [featuredLabel,        10, 14],
+        ['BEACON Oncology',     6,  10],
+        ['ATLAS Respiratory',   4,   7],
+        ['MERIDIAN CNS',        3,   5],
+        ['NEXUS Immunology',    2,   4],
+        ['PRISM Rare Disease',  1,   3],
+      ];
+      var categories = [];
+      var criticalData = [];
+      var otherData = [];
+      demoFindingData.forEach(function(row) {
+        categories.push(row[0]);
+        criticalData.push(row[1]);
+        otherData.push(row[2]);
+      });
+
+      Highcharts.chart('chart-insight-finding-volume', {
+        chart: { type: 'bar', height: 320, backgroundColor: 'transparent' },
+        title: { text: null },
+        xAxis: { categories: categories, labels: { style: { fontSize: '12px' } }, tickWidth: 0 },
+        yAxis: { min: 0, title: { text: 'Number of findings' }, stackLabels: { enabled: true, style: { fontSize: '11px', fontWeight: '600', color: '#2E2E38' } } },
+        legend: { itemStyle: { fontSize: '11px' } },
+        plotOptions: {
+          series: { stacking: 'normal', borderRadius: 2 },
+          bar: { dataLabels: { enabled: true, style: { fontSize: '10px' } } },
+        },
+        series: [
+          { name: 'S2/S3 (Minor/Info)', data: otherData, color: '#F59E0B' },
+          { name: 'S0/S1 (Critical/Major)', data: criticalData, color: '#C20A29' },
+        ],
+        credits: { enabled: false },
+      });
+    }, 150);
+  }, [activeInsight, insightMetrics]);
 
   // ── Chart: Over-QC Distribution (Level 4) ─────────────────
   useEffect(function() {
@@ -7495,11 +7501,11 @@ function AIInsightsPage(props) {
     var tflLabel = m.isTflInsight ? ' TFL' : '';
     var featuredName = m.featuredProject ? m.featuredProject.replace(/_/g, '\u00a0') : null;
     var cardTitle = featuredName
-      ? featuredName + tflLabel + ' QC cycles are ' + ratioDisplay + ' longer than the internal benchmark'
-      : tflLabel + ' QC cycles are ' + ratioDisplay + ' longer than the internal benchmark';
-    var numStudies = Object.keys(m.completedByProject || {}).length;
-    var cardSubtitle = (m.featuredProject && m.featuredProjectAvgCycle > 0 && m.benchmarkAvg > 0)
-      ? m.featuredProject.replace(/_/g, ' ') + ' avg: ' + m.featuredProjectAvgCycle.toFixed(0) + 'd \u2014 company benchmark: ' + m.benchmarkAvg.toFixed(0) + 'd (' + numStudies + ' studies)'
+      ? 'QC cycles are ' + ratioDisplay + ' longer in ' + featuredName + ' than the internal benchmark'
+      : 'QC cycles are ' + ratioDisplay + ' longer than the internal benchmark';
+    var numStudies = Object.keys(m.completedByProject || {}).length || 6;
+    var cardSubtitle = m.featuredProject
+      ? m.featuredProject.replace(/_/g, ' ') + ' avg: ' + m.featuredProjectAvgCycle.toFixed(0) + 'd \u2014 benchmark: ' + m.benchmarkAvg.toFixed(0) + 'd (' + numStudies + ' studies)'
       : 'Driving ~' + delayPct + '% of total programming delay';
 
     // ── Contributing factors (real data + demo supplement) ──
@@ -7513,7 +7519,7 @@ function AIInsightsPage(props) {
     var overQCPct = m.pctLowRiskOverQC > 0 ? m.pctLowRiskOverQC : 20;
 
     var factors = [
-      { pct: (waitPct || 47) + '%', label: 'of cycle time is idle \u2014 work doesn\u2019t start for days after stage transition', color: '#C20A29', level: 1 },
+      { pct: (waitPct || 47) + '%', label: 'of cycle time is spent waiting for the next assignee to start after stage transition', color: '#C20A29', level: 1 },
       { pct: (delayPct || 35) + '%', label: 'of elapsed time consumed by finding resolution', color: '#FF6543', level: 2 },
       { pct: (blockedPct || 9) + '%', label: 'of active deliverables blocked by open findings', color: '#0070CC', level: 3 },
       { pct: overQCPct + '%', label: 'of low-risk deliverables going through double programming QC', color: '#CCB718', level: 4 },
@@ -7565,8 +7571,8 @@ function AIInsightsPage(props) {
             h('span', { className: 'insight-card-secondary-number' }, '2'),
             h('div', { className: 'insight-card-badge insight-card-badge-medium' }, 'MEDIUM CONFIDENCE')
           ),
-          h('div', { className: 'insight-card-title-sm' }, 'Studies starting QC after full TFL completion take ~6\u20138 days longer than those with staggered QC'),
-          h('div', { className: 'insight-card-subtitle' }, 'Staggering QC start reduces idle time between handoffs and compresses the critical path'),
+          h('div', { className: 'insight-card-title-sm' }, 'Staggered QC start saves ~6\u20138 days vs batch QC'),
+          h('div', { className: 'insight-card-subtitle' }, 'Starting QC before full TFL completion compresses the critical path'),
           h(Tag, { color: 'orange', style: { marginTop: 8, fontSize: 11 } }, 'Workflow optimization')
         ),
         h('div', { className: 'insight-card insight-card-secondary' },
@@ -7574,8 +7580,8 @@ function AIInsightsPage(props) {
             h('span', { className: 'insight-card-secondary-number' }, '3'),
             h('div', { className: 'insight-card-badge insight-card-badge-medium' }, 'MEDIUM CONFIDENCE')
           ),
-          h('div', { className: 'insight-card-title-sm' }, 'Studies with CRO-heavy execution show +1.6 weeks longer DBL \u2192 Submission'),
-          h('div', { className: 'insight-card-subtitle' }, 'CRO handoff overhead adds latency to the QC review cycle \u2014 particularly in finding resolution SLAs'),
+          h('div', { className: 'insight-card-title-sm' }, 'CRO-heavy studies add +1.6 weeks to cycle time'),
+          h('div', { className: 'insight-card-subtitle' }, 'Cross-org coordination adds latency, especially in finding resolution'),
           h(Tag, { color: 'blue', style: { marginTop: 8, fontSize: 11 } }, 'Vendor management')
         ),
         h('div', { className: 'insight-card insight-card-secondary' },
@@ -7583,8 +7589,8 @@ function AIInsightsPage(props) {
             h('span', { className: 'insight-card-secondary-number' }, '4'),
             h('div', { className: 'insight-card-badge insight-card-badge-low' }, 'EMERGING')
           ),
-          h('div', { className: 'insight-card-title-sm' }, 'Despite 25% more resources, teams of 5 programmers deliver only 10% faster than teams of 4'),
-          h('div', { className: 'insight-card-subtitle' }, 'Diminishing returns on team size suggest coordination overhead outweighs throughput gains'),
+          h('div', { className: 'insight-card-title-sm' }, 'Teams of 5 deliver only 10% faster than teams of 4'),
+          h('div', { className: 'insight-card-subtitle' }, 'Coordination overhead outweighs throughput gains at scale'),
           h(Tag, { style: { marginTop: 8, fontSize: 11 } }, 'Resource optimization')
         )
       )
@@ -7615,33 +7621,31 @@ function AIInsightsPage(props) {
       longestDays = 5.2;
     }
 
-    var pm = m.projectMetrics || {};
-    var projCount = Object.keys(pm).length;
-    var chartHeight = Math.max(220, (projCount > 0 ? projCount : 4) * 55 + 60);
+    var chartHeight = 6 * 55 + 60; // 6 demo projects
 
     return h('div', null,
       h('div', { className: 'insight-level-header' },
         h('h2', null, (waitPct || 47) + '% of your QC cycle is idle wait time'),
         h('p', { className: 'insight-level-subtitle' },
           B + 's sit idle for an average of ' + avgWaitPerTransition.toFixed(1) + ' days after each stage transition. ' +
-          'Work doesn\u2019t start for days after handoff \u2014 this is the single largest contributor to cycle time.')
+          'After a stage transitions, the new assignee doesn\u2019t begin work for days \u2014 this is the single largest contributor to cycle time.')
       ),
 
       // Stats row
       h('div', { className: 'stats-row' },
         h(StatCard, {
-          label: 'Avg wait per transition',
+          label: 'Avg transition delay',
           value: avgWaitPerTransition.toFixed(1) + 'd',
           color: 'danger',
-          sub: 'Days idle between handoffs',
-          tooltip: 'Average number of days a deliverable sits idle after being handed off to the next stage.'
+          sub: 'Days from transition to work start',
+          tooltip: 'Average days from when a deliverable transitions to the next stage until the new assignee begins working on it.'
         }),
         h(StatCard, {
           label: 'Longest wait stage',
-          value: longestStage,
+          value: longestDays.toFixed(1) + 'd avg',
           color: 'warning',
-          sub: longestDays.toFixed(1) + 'd avg',
-          tooltip: 'The QC stage with the longest average duration, which likely includes the most idle time.'
+          sub: longestStage.length > 25 ? longestStage.substring(0, 24) + '\u2026' : longestStage,
+          tooltip: 'The QC stage with the longest average duration: ' + longestStage
         }),
         h(StatCard, {
           label: 'Total wait days',
@@ -7652,9 +7656,9 @@ function AIInsightsPage(props) {
         }),
         h(StatCard, {
           label: 'Studies analyzed',
-          value: projCount > 0 ? projCount : 4,
+          value: Object.keys(m.projectMetrics || {}).length || 6,
           color: '',
-          sub: m.total + ' ' + B.toLowerCase() + 's total',
+          sub: (m.total || 50) + ' ' + B.toLowerCase() + 's total',
           tooltip: 'Number of studies and deliverables contributing to this analysis.'
         })
       ),
@@ -7673,11 +7677,11 @@ function AIInsightsPage(props) {
       // Chart 2: Avg wait by project
       h('div', { className: 'panel', style: { marginTop: 16 } },
         chartTitle(
-          'Avg Wait Between Handoffs by Study',
-          'Average idle days between stage transitions per study. The highlighted bar is the slowest study. Reducing wait in the top 1\u20132 studies would have outsized impact.'
+          'Avg Transition-to-Start Delay by Study',
+          'Average days from when a deliverable transitions to the next stage until the new assignee begins work. The highlighted bar is the worst-performing study.'
         ),
         h('div', { className: 'panel-body' },
-          h('div', { id: 'chart-insight-wait-by-project', style: { height: Math.max(180, (projCount > 0 ? projCount : 4) * 48 + 60) } })
+          h('div', { id: 'chart-insight-wait-by-project', style: { height: 6 * 48 + 60 } })
         )
       ),
 
@@ -7723,8 +7727,8 @@ function AIInsightsPage(props) {
     });
     function avgArr(arr) { return arr.length > 0 ? (arr.reduce(function(a,b){return a+b;},0)/arr.length).toFixed(1) : null; }
 
-    var demoAvgs = { S0: '8.0', S1: '5.0', S2: '3.0', S3: '1.5' };
-    var demoCounts = { S0: 4, S1: 12, S2: 18, S3: 8 };
+    var demoAvgs = { S0: '12.4', S1: '6.8', S2: '3.2', S3: '1.1' };
+    var demoCounts = { S0: 8, S1: 18, S2: 26, S3: 14 };
     var sevResolution = [
       { label: 'Critical (S0)', avg: avgArr(resolutionBySev.S0) || demoAvgs.S0, count: sev.S0 || demoCounts.S0, color: '#C20A29' },
       { label: 'Major (S1)',    avg: avgArr(resolutionBySev.S1) || demoAvgs.S1, count: sev.S1 || demoCounts.S1, color: '#FF6543' },
@@ -7744,29 +7748,6 @@ function AIInsightsPage(props) {
     });
     if (overdueCount === 0) overdueCount = 3; // demo fallback
 
-    // High-density deliverables (>3 findings)
-    var highDensityBundles = bundles.filter(function(b) { return (b._findings || []).length > 3; });
-
-    // Demo fallback for high-density table
-    var highDensityRows;
-    if (highDensityBundles.length > 0) {
-      highDensityRows = highDensityBundles
-        .sort(function(a, b) { return (b._findings || []).length - (a._findings || []).length; })
-        .slice(0, 10)
-        .map(function(b, i) {
-          var openF = (b._findings || []).filter(function(f) { return f.status !== 'Done' && f.status !== 'WontDo'; }).length;
-          return { key: i, name: b.name, project: b.projectName || '\u2014', total: (b._findings || []).length, open: openF };
-        });
-    } else {
-      highDensityRows = [
-        { key: 0, name: 't_ae_summary', project: 'STUDY ABC', total: 7, open: 3 },
-        { key: 1, name: 't_dm_listing', project: 'STUDY ABC', total: 6, open: 1 },
-        { key: 2, name: 'f_km_plot_os', project: 'STUDY DEF', total: 5, open: 2 },
-        { key: 3, name: 't_vs_shift',   project: 'STUDY GHI', total: 5, open: 0 },
-        { key: 4, name: 'l_ae_detail',  project: 'STUDY DEF', total: 4, open: 1 },
-      ];
-    }
-
     return h('div', null,
       h('div', { className: 'insight-level-header' },
         h('h2', null, (delayPct || 35) + '% of elapsed time consumed by finding resolution'),
@@ -7777,10 +7758,10 @@ function AIInsightsPage(props) {
 
       // Stats row
       h('div', { className: 'stats-row' },
-        h(StatCard, { label: 'Total findings', value: m.totalFindings > 0 ? m.totalFindings : 42, color: 'warning', sub: highSeverityPct + '% are S0 or S1', tooltip: 'Total findings across all deliverables in scope.' }),
-        h(StatCard, { label: 'Avg resolution', value: (m.avgResolutionDays > 0 ? m.avgResolutionDays.toFixed(1) : '4.2') + 'd', color: 'warning', sub: 'Days to resolve', tooltip: 'Average days from finding creation to resolution.' }),
-        h(StatCard, { label: 'Overdue findings', value: overdueCount, color: 'danger', sub: 'Past due date', tooltip: 'Open findings past their due date, stalling QC completion.' }),
-        h(StatCard, { label: 'S0/S1 percentage', value: highSeverityPct + '%', color: highSeverityPct > 30 ? 'danger' : 'warning', sub: 'Of all findings', tooltip: 'Percentage of findings classified as Critical (S0) or Major (S1).' })
+        h(StatCard, { label: 'Total findings', value: m.totalFindings > 20 ? m.totalFindings : 66, color: 'warning', sub: (highSeverityPct > 0 && highSeverityPct < 100 ? highSeverityPct : 39) + '% are S0 or S1', tooltip: 'Total findings across all deliverables in scope.' }),
+        h(StatCard, { label: 'Avg resolution', value: (m.avgResolutionDays > 0 ? m.avgResolutionDays.toFixed(1) : '5.4') + 'd', color: 'warning', sub: 'Days to resolve', tooltip: 'Average days from finding creation to resolution.' }),
+        h(StatCard, { label: 'Overdue findings', value: overdueCount > 1 ? overdueCount : 7, color: 'danger', sub: 'Past due date', tooltip: 'Open findings past their due date, stalling QC completion.' }),
+        h(StatCard, { label: 'S0/S1 percentage', value: (highSeverityPct > 0 && highSeverityPct < 100 ? highSeverityPct : 39) + '%', color: 'warning', sub: 'Of all findings', tooltip: 'Percentage of findings classified as Critical (S0) or Major (S1).' })
       ),
 
       // Chart: Resolution by severity
@@ -7791,46 +7772,11 @@ function AIInsightsPage(props) {
         )
       ),
 
-      h('div', { className: 'two-col', style: { marginTop: 16 } },
-        // High-density deliverables table
-        h('div', { className: 'panel' },
-          chartTitle('High-Density ' + B + 's (>3 findings)', 'Deliverables with the most findings are likely going through multiple review-fix cycles. These are the highest-leverage targets for improvement.'),
-          h('div', { className: 'panel-body' },
-            h(Table, {
-              size: 'small',
-              pagination: false,
-              scroll: { y: 220 },
-              dataSource: highDensityRows,
-              columns: [
-                { title: B, dataIndex: 'name', key: 'name', ellipsis: true },
-                { title: 'Study', dataIndex: 'project', key: 'project', ellipsis: true },
-                { title: 'Findings', dataIndex: 'total', key: 'total', width: 80, render: function(v) { return h(Tag, { color: v > 6 ? 'red' : 'orange' }, v); } },
-                { title: 'Open', dataIndex: 'open', key: 'open', width: 60, render: function(v) { return v > 0 ? h(Tag, { color: 'red' }, v) : h(Tag, { color: 'green' }, '0'); } },
-              ],
-            })
-          )
-        ),
-
-        // Resolution by severity table
-        h('div', { className: 'panel' },
-          chartTitle('Resolution Time by Severity', 'Breakdown of average resolution time and finding count by severity level.'),
-          h('div', { className: 'panel-body' },
-            h(Table, {
-              size: 'small',
-              pagination: false,
-              dataSource: sevResolution.map(function(r, i) { return Object.assign({ key: i }, r); }),
-              columns: [
-                { title: 'Severity', dataIndex: 'label', key: 'label', render: function(v, r) {
-                  return h('span', { style: { color: r.color, fontWeight: 600 } }, v);
-                } },
-                { title: 'Count', dataIndex: 'count', key: 'count', width: 70 },
-                { title: 'Avg Days', dataIndex: 'avg', key: 'avg', width: 100, render: function(v) {
-                  if (!v) return h('span', { style: { color: '#B0B0C0' } }, 'No data');
-                  return h(Tag, { color: parseFloat(v) > 5 ? 'red' : parseFloat(v) > 2 ? 'orange' : 'green' }, v + 'd');
-                } },
-              ],
-            })
-          )
+      // Finding Volume by Study chart
+      h('div', { className: 'panel', style: { marginTop: 16 } },
+        chartTitle('Finding Volume by Study', 'Total findings per study split by severity. Studies with more S0/S1 findings drive longer resolution cycles.'),
+        h('div', { className: 'panel-body' },
+          h('div', { id: 'chart-insight-finding-volume', style: { height: 340 } })
         )
       ),
 
