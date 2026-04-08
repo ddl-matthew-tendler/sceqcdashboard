@@ -3307,7 +3307,7 @@ function AttachmentsDrawer(props) {
     { title: 'Type', dataIndex: 'type', key: 'type', width: 150,
       render: function(t) {
         var colors = { DatasetSnapshotFile: 'blue', Report: 'green', ModelVersion: 'purple', Endpoint: 'orange', FlowArtifact: 'cyan', NetAppVolumeSnapshotFile: 'default' };
-        var labels = { DatasetSnapshotFile: 'Dataset Snapshot', NetAppVolumeSnapshotFile: 'NetApp Volume', FlowArtifact: 'Flow Artifact', ModelVersion: 'Model Version' };
+        var labels = { DatasetSnapshotFile: 'Dataset Snapshot', NetAppVolumeSnapshotFile: 'NetApp Volume', FlowArtifact: 'Flow Artifact', ModelVersion: 'Model Version', Report: 'Code' };
         var label = labels[t] || (t || '').replace(/([A-Z])/g, ' $1').trim();
         return h(Tag, { color: colors[t] || 'default', style: { fontSize: 10, whiteSpace: 'normal', lineHeight: '16px' } }, label);
       }
@@ -4875,13 +4875,13 @@ function DetailDrawer(props) {
   var initialView = props.initialView || null;
   var debugMode = props.debugMode || false;
 
-  var _view = useState('stage-timeline');
+  var _view = useState('attachments');
   var activeView = _view[0];
   var setActiveView = _view[1];
 
-  // Reset to initialView (or Stage Timeline) when a new bundle is selected
+  // Reset to initialView (or Attachments) when a new bundle is selected
   var bundleId = bundle ? (bundle.id || bundle.name) : null;
-  useEffect(function() { setActiveView(initialView || 'stage-timeline'); }, [bundleId, initialView]);
+  useEffect(function() { setActiveView(initialView || 'attachments'); }, [bundleId, initialView]);
 
   if (!bundle) return null;
 
@@ -4898,12 +4898,12 @@ function DetailDrawer(props) {
   var staleCount = countStaleAttachments(bundle);
 
   var viewOptions = [
+    { value: 'attachments', label: 'Attachments' + (attachCount > 0 ? ' (' + attachCount + ')' : '') + (staleCount > 0 ? ' \u26A0' : '') },
     { value: 'stage-timeline', label: 'Stage Timeline' },
     { value: 'overview', label: B + ' Overview' },
     { value: 'findings', label: 'Findings' + (findingsCount > 0 ? ' (' + findingsCount + ')' : '') },
     { value: 'approvals', label: 'Approvals' + (approvalsCount > 0 ? ' (' + approvalsCount + ')' : '') },
     { value: 'gates', label: 'Gates' + (gatesCount > 0 ? ' (' + gatesCount + ')' : '') },
-    { value: 'attachments', label: 'Attachments' + (attachCount > 0 ? ' (' + attachCount + ')' : '') + (staleCount > 0 ? ' \u26A0' : '') },
   ];
 
   // ── View: Stage Timeline ────────────────────────────────────
@@ -5077,7 +5077,7 @@ function DetailDrawer(props) {
       bundle._attachments.map(function(att, i) {
         var id = att.identifier || {};
         var fname = id.filename || id.name || 'Unnamed';
-        var typeLabels = { DatasetSnapshotFile: 'Dataset Snapshot', NetAppVolumeSnapshotFile: 'NetApp Volume', FlowArtifact: 'Flow Artifact', ModelVersion: 'Model Version' };
+        var typeLabels = { DatasetSnapshotFile: 'Dataset Snapshot', NetAppVolumeSnapshotFile: 'NetApp Volume', FlowArtifact: 'Flow Artifact', ModelVersion: 'Model Version', Report: 'Code' };
         var typeColors = { DatasetSnapshotFile: 'blue', Report: 'green', ModelVersion: 'purple', Endpoint: 'orange', FlowArtifact: 'cyan', NetAppVolumeSnapshotFile: 'default' };
         var typeLabel = typeLabels[att.type] || (att.type || '').replace(/([A-Z])/g, ' $1').trim();
         var explorerLink = deUrl && isDataExplorerFile(fname) ? buildDataExplorerUrl(deUrl, att) : null;
