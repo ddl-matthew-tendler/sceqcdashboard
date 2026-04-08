@@ -1655,13 +1655,18 @@ function FindingsPage(props) {
 
     h('div', { className: 'two-col', style: { marginTop: 20 } },
       h('div', { className: 'panel' },
-        chartTitle('Resolution Time by Severity', 'Average days from creation to resolution for resolved findings, grouped by the month they were created. Each line is a severity level. A downward trend means findings are being resolved faster over time.'),
+        h('div', { className: 'panel-header' },
+          h('span', { className: 'panel-title' }, 'Resolution Time by Severity'),
+          h(Tooltip, {
+            title: (resolutionTrendData.resolutionSampleData ? 'Sample data shown below. ' : '') + 'Average days from creation to resolution for resolved findings, grouped by the month they were created. Each line is a severity level. A downward trend means findings are being resolved faster over time.',
+            placement: 'right', overlayStyle: { maxWidth: 320 }
+          },
+            h('span', { style: { marginLeft: 6, cursor: 'help', color: resolutionTrendData.resolutionSampleData ? '#CCB718' : '#B0B0C0', fontSize: 13 } }, '\u24D8')
+          )
+        ),
         h('div', { className: 'panel-body' },
           resolutionTrendData.hasResolutionData
-            ? h('div', null,
-                resolutionTrendData.resolutionSampleData ? h(Alert, { type: 'warning', showIcon: true, banner: true, message: 'Sample data shown below.', style: { marginBottom: 8, fontSize: 12 } }) : null,
-                h('div', { id: 'chart-findings-resolution-trend', className: 'chart-container' })
-              )
+            ? h('div', { id: 'chart-findings-resolution-trend', className: 'chart-container' })
             : h(EmptyState, { text: 'No resolved findings yet', sub: 'Resolution trends appear once findings are marked Done' })
         )
       ),
