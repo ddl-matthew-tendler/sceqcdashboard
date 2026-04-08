@@ -1120,6 +1120,49 @@ body {
   background: #F5F5F8;
 }
 
+/* ── Sidebar: Advanced Section ────────────────────────── */
+.sidebar-advanced-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 20px;
+  margin-top: 4px;
+  cursor: pointer;
+  border-top: 1px solid #F0F0F0;
+  transition: background 0.15s;
+  user-select: none;
+}
+
+.sidebar-advanced-toggle:hover {
+  background: #F5F5F8;
+}
+
+.sidebar-advanced-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #B0B0C0;
+}
+
+.sidebar-advanced-arrow {
+  font-size: 10px;
+  color: #B0B0C0;
+  display: flex;
+  align-items: center;
+}
+
+.sidebar-advanced-arrow .anticon {
+  font-size: 10px;
+}
+
+.sidebar-collapsed .sidebar-advanced-toggle {
+  padding: 8px 0;
+  justify-content: center;
+  border-top: 1px solid #F0F0F0;
+  margin-top: 4px;
+}
+
 /* ── Assignment Rules ──────────────────────────────── */
 .rules-preview-skip { opacity: 0.45; }
 .page-subtitle { color: #65657B; font-size: 13px; margin-top: 2px; }

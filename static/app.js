@@ -763,11 +763,15 @@ function ColumnVisibilityDropdown(props) {
 // ── Stat Card ───────────────────────────────────────────────────
 function StatCard(props) {
   var cls = 'stat-card' + (props.onClick ? ' stat-card-clickable' : '') + (props.active ? ' stat-card-active' : '');
-  return h('div', { className: cls, onClick: props.onClick || null },
-    h('div', { className: 'stat-card-label' }, props.label),
+  var card = h('div', { className: cls, onClick: props.onClick || null },
+    h('div', { className: 'stat-card-label' },
+      props.label,
+      props.tooltip ? h('span', { style: { marginLeft: 4, cursor: 'help', color: '#B0B0C0', fontSize: 11 } }, '\u24D8') : null
+    ),
     h('div', { className: 'stat-card-value ' + (props.color || '') }, props.value),
     props.sub ? h('div', { className: 'stat-card-sub' }, props.sub) : null
   );
+  return props.tooltip ? h(Tooltip, { title: props.tooltip, placement: 'top', overlayStyle: { maxWidth: 280 } }, card) : card;
 }
 
 // (ConnectionBanner removed — replaced by Dummy Data toggle in TopNav)
@@ -1458,11 +1462,28 @@ function FindingsPage(props) {
           due.format('MMM D, YYYY'), overdue ? ' (overdue)' : '');
       },
     },
+    { title: 'Time Open', dataIndex: 'createdAt', key: 'timeOpen', width: 120,
+      sorter: function(a, b) { return (a.createdAt || '').localeCompare(b.createdAt || ''); },
+      defaultSortOrder: 'ascend',
+      render: function(d, r) {
+        if (!d) return '\u2013';
+        // Show resolved findings differently
+        var isResolved = r.status === 'Done' || r.status === 'WontDo';
+        if (isResolved) {
+          return h('span', { style: { color: '#28A464', fontSize: 12 } }, 'Resolved');
+        }
+        var created = dayjs(d);
+        var daysOpen = dayjs().diff(created, 'day');
+        var color = daysOpen > 14 ? '#C20A29' : daysOpen > 7 ? '#F59E0B' : '#65657B';
+        var label = daysOpen === 0 ? 'Today' : daysOpen === 1 ? '1 day open' : daysOpen + ' days open';
+        return h('span', { style: { color: color, fontSize: 12, fontWeight: daysOpen > 14 ? 600 : 400 } }, label);
+      },
+    },
   ];
 
   return h('div', null,
     h('div', { className: 'page-header' },
-      h('h1', null, 'Findings & QC'),
+      h('h1', null, 'Findings in QC'),
       h('p', null, 'Quality issues and review findings across all ' + B.toLowerCase() + 's')
     ),
 
@@ -2171,10 +2192,10 @@ function MetricsPage(props) {
     // ── Section 1: Findings & Quality ──
     h('div', { className: 'metrics-section-header' }, 'Findings & Quality'),
     h('div', { className: 'stats-row' },
-      h(StatCard, { label: 'Total Findings', value: metrics.totalFindings, color: 'primary', sub: metrics.totalComments + ' comments' }),
-      h(StatCard, { label: 'Open', value: metrics.openFindings, color: metrics.openFindings > 0 ? 'danger' : 'success', sub: metrics.overdueFindings > 0 ? metrics.overdueFindings + ' overdue' : 'None overdue' }),
-      h(StatCard, { label: 'Resolved', value: metrics.resolvedFindings, color: 'success', sub: metrics.resolutionRate + '% resolution rate' }),
-      h(StatCard, { label: 'Critical (S0)', value: metrics.findingsBySev.S0, color: metrics.findingsBySev.S0 > 0 ? 'danger' : '', sub: 'Highest severity' })
+      h(StatCard, { label: 'Total Findings', value: metrics.totalFindings, color: 'primary', sub: metrics.totalComments + ' comments', tooltip: 'Total number of QC findings raised across all deliverables in scope.' }),
+      h(StatCard, { label: 'Open', value: metrics.openFindings, color: metrics.openFindings > 0 ? 'danger' : 'success', sub: metrics.overdueFindings > 0 ? metrics.overdueFindings + ' overdue' : 'None overdue', tooltip: 'Findings not yet resolved (excludes Done and Won\'t Do). Overdue = past due date.' }),
+      h(StatCard, { label: 'Resolved', value: metrics.resolvedFindings, color: 'success', sub: metrics.resolutionRate + '% resolution rate', tooltip: 'Findings marked Done or Won\'t Do. Resolution rate = resolved / total.' }),
+      h(StatCard, { label: 'Critical (S0)', value: metrics.findingsBySev.S0, color: metrics.findingsBySev.S0 > 0 ? 'danger' : '', sub: 'Highest severity', tooltip: 'S0-severity findings requiring immediate attention. These block QC completion.' })
     ),
     h('div', { className: 'two-col' },
       h('div', { className: 'panel' },
@@ -2198,12 +2219,13 @@ function MetricsPage(props) {
     // ── Section 2: Time-to-QC Completion ──
     h('div', { className: 'metrics-section-header' }, 'Time-to-QC Completion'),
     h('div', { className: 'stats-row' },
-      h(StatCard, { label: 'Avg Cycle Time', value: metrics.avgCycleTime + 'd', color: 'primary', sub: 'Creation to completion' }),
-      h(StatCard, { label: 'Median Cycle Time', value: metrics.medianCycleTime + 'd', sub: metrics.cycleTimes.length + ' completed ' + B.toLowerCase() + 's' }),
+      h(StatCard, { label: 'Avg Cycle Time', value: metrics.avgCycleTime + 'd', color: 'primary', sub: 'Creation to completion', tooltip: 'Average days from deliverable creation to completion. Based on completed deliverables only.' }),
+      h(StatCard, { label: 'Median Cycle Time', value: metrics.medianCycleTime + 'd', sub: metrics.cycleTimes.length + ' completed ' + B.toLowerCase() + 's', tooltip: 'Median days from creation to completion. Less affected by outliers than the average.' }),
       h(StatCard, { label: 'Active ' + B + 's', value: metrics.active, color: 'info', sub: 'Currently in progress',
+        tooltip: 'Deliverables currently in an active QC stage. Click to see the list.',
         active: metricsFilter && metricsFilter.type === 'active',
         onClick: function() { setMetricsFilter(metricsFilter && metricsFilter.type === 'active' ? null : { type: 'active' }); } }),
-      h(StatCard, { label: 'Completion Rate', value: metrics.completionRate + '%', color: metrics.completionRate >= 50 ? 'success' : 'warning', sub: metrics.complete + ' of ' + bundles.length + ' complete' })
+      h(StatCard, { label: 'Completion Rate', value: metrics.completionRate + '%', color: metrics.completionRate >= 50 ? 'success' : 'warning', sub: metrics.complete + ' of ' + bundles.length + ' complete', tooltip: 'Percentage of deliverables that have reached Complete state.' })
     ),
     h('div', { className: 'two-col' },
       h('div', { className: 'panel' },
@@ -2232,16 +2254,18 @@ function MetricsPage(props) {
     h('div', { style: { fontSize: 12, color: '#8F8FA3', marginBottom: 12, marginTop: -8 } },
       'Finding density is used as a proxy for rework. Higher density indicates more review-fix-review cycles per ' + B.toLowerCase() + '.'),
     h('div', { className: 'stats-row' },
-      h(StatCard, { label: 'Avg Finding Density', value: metrics.avgFindingDensity, color: parseFloat(metrics.avgFindingDensity) > 1 ? 'warning' : '', sub: 'Findings per ' + B.toLowerCase() }),
+      h(StatCard, { label: 'Avg Finding Density', value: metrics.avgFindingDensity, color: parseFloat(metrics.avgFindingDensity) > 1 ? 'warning' : '', sub: 'Findings per ' + B.toLowerCase(), tooltip: 'Average number of findings per deliverable. Higher density suggests more review-fix-review cycles.' }),
       h(StatCard, { label: 'Active Rework', value: metrics.reworkBundles.length, color: metrics.reworkBundles.length > 0 ? 'danger' : 'success',
         sub: 'Open + resolved findings',
+        tooltip: 'Deliverables with both open and resolved findings — indicating iterative rework is in progress.',
         active: metricsFilter && metricsFilter.type === 'rework',
         onClick: function() { setMetricsFilter(metricsFilter && metricsFilter.type === 'rework' ? null : { type: 'rework' }); } }),
       h(StatCard, { label: 'Overdue Findings', value: metrics.overdueFindings, color: metrics.overdueFindings > 0 ? 'danger' : 'success',
         sub: 'Past due date',
+        tooltip: 'Open findings past their due date. May indicate stuck rework or resource bottlenecks.',
         active: metricsFilter && metricsFilter.type === 'overdue',
         onClick: function() { setMetricsFilter(metricsFilter && metricsFilter.type === 'overdue' ? null : { type: 'overdue' }); } }),
-      h(StatCard, { label: B + 's with Findings', value: metrics.bundlesWithFindings, sub: 'Of ' + bundles.length + ' total' })
+      h(StatCard, { label: B + 's with Findings', value: metrics.bundlesWithFindings, sub: 'Of ' + bundles.length + ' total', tooltip: 'Number of deliverables that have at least one QC finding raised against them.' })
     ),
     h('div', { className: 'panel' },
       chartTitle('Finding Density by ' + P, 'Average number of findings per ' + B.toLowerCase() + ' for each ' + P.toLowerCase() + '. Calculated as total findings \u00F7 number of ' + B.toLowerCase() + 's with findings. Higher density suggests more review-fix-review cycles (rework).'),
