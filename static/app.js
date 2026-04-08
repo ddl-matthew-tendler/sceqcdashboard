@@ -450,7 +450,7 @@ function TopNav(props) {
   return h('div', { className: 'top-nav' },
     h('img', { src: 'static/domino-logo.svg', className: 'top-nav-logo', alt: 'Domino' }),
     h('div', { className: 'top-nav-divider' }),
-    h('span', { className: 'top-nav-title' }, 'Study Lead Workspace'),
+    h('span', { className: 'top-nav-title' }, 'Study Lead QC Hub'),
     h('div', { className: 'top-nav-right' },
       isWhitelabeled
         ? h(Tooltip, { title: B + 's & ' + P + ' terminology active' },
@@ -479,7 +479,7 @@ function TopNav(props) {
           size: 'small',
         })
       ),
-      h('span', { className: 'top-nav-env' }, 'Study Lead Workspace')
+      h('span', { className: 'top-nav-env' }, 'Study Lead QC Hub')
     )
   );
 }
@@ -533,7 +533,7 @@ function loadStoredJSON(key) {
 // ── Sidebar ─────────────────────────────────────────────────────
 var PRIMARY_NAV_ITEMS = [
   { key: 'tracker', iconName: 'TableOutlined', label: 'QC Tracker' },
-  { key: 'findings', iconName: 'FileSearchOutlined', label: 'Findings in QC' },
+  { key: 'findings', iconName: 'FileSearchOutlined', label: 'Findings' },
   { key: 'metrics', iconName: 'BarChartOutlined', label: 'Team Metrics' },
 ];
 
@@ -785,6 +785,16 @@ function EmptyState(props) {
   );
 }
 
+
+// ── Chart Title with Info Tooltip ───────────────────────────────
+function chartTitle(title, tooltip) {
+  return h('div', { className: 'panel-header' },
+    h('span', { className: 'panel-title' }, title),
+    h(Tooltip, { title: tooltip, placement: 'right', overlayStyle: { maxWidth: 320 } },
+      h('span', { style: { marginLeft: 6, cursor: 'help', color: '#B0B0C0', fontSize: 13 } }, '\u24D8')
+    )
+  );
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  PAGE: Dashboard
@@ -1315,12 +1325,81 @@ function FindingsPage(props) {
     var bySev = { S0: 0, S1: 0, S2: 0, S3: 0 };
     var byStatus = { ToDo: 0, InProgress: 0, InReview: 0, Done: 0, WontDo: 0 };
     var open = 0;
+    var totalDaysOpen = 0;
+    var openWithDate = 0;
     allFindings.forEach(function(f) {
       if (bySev[f.severity] !== undefined) bySev[f.severity]++;
       if (byStatus[f.status] !== undefined) byStatus[f.status]++;
-      if (f.status !== 'Done' && f.status !== 'WontDo') open++;
+      if (f.status !== 'Done' && f.status !== 'WontDo') {
+        open++;
+        if (f.createdAt) {
+          totalDaysOpen += dayjs().diff(dayjs(f.createdAt), 'day');
+          openWithDate++;
+        }
+      }
     });
-    return { bySev: bySev, byStatus: byStatus, open: open, total: allFindings.length };
+    var avgDaysOpen = openWithDate > 0 ? Math.round(totalDaysOpen / openWithDate) : 0;
+    return { bySev: bySev, byStatus: byStatus, open: open, total: allFindings.length, avgDaysOpen: avgDaysOpen };
+  }, [allFindings]);
+
+  // Resolution trend + aging data for charts
+  var resolutionTrendData = useMemo(function() {
+    var monthSevDays = {}; // { 'YYYY-MM': { S0: [days], S1: [days], ... } }
+    var openBySevBucket = { S0: {}, S1: {}, S2: {}, S3: {} };
+    var sevKeys = ['S0', 'S1', 'S2', 'S3'];
+
+    allFindings.forEach(function(f) {
+      var isResolved = f.status === 'Done' || f.status === 'WontDo';
+
+      if (isResolved && f.createdAt && f.updatedAt) {
+        var month = dayjs(f.createdAt).format('YYYY-MM');
+        var days = dayjs(f.updatedAt).diff(dayjs(f.createdAt), 'day');
+        if (!monthSevDays[month]) monthSevDays[month] = { S0: [], S1: [], S2: [], S3: [] };
+        if (monthSevDays[month][f.severity]) {
+          monthSevDays[month][f.severity].push(days);
+        }
+      }
+
+      if (!isResolved && f.createdAt && f.severity) {
+        var daysOpen = dayjs().diff(dayjs(f.createdAt), 'day');
+        var bucket = daysOpen <= 7 ? '0-7d' : daysOpen <= 14 ? '8-14d' : daysOpen <= 30 ? '15-30d' : daysOpen <= 60 ? '31-60d' : '60+d';
+        if (!openBySevBucket[f.severity]) openBySevBucket[f.severity] = {};
+        openBySevBucket[f.severity][bucket] = (openBySevBucket[f.severity][bucket] || 0) + 1;
+      }
+    });
+
+    var months = Object.keys(monthSevDays).sort();
+    var resolutionSeries = sevKeys.map(function(sev) {
+      return {
+        name: sev,
+        color: severityColor(sev),
+        data: months.map(function(m) {
+          var arr = monthSevDays[m][sev];
+          if (!arr || arr.length === 0) return null;
+          return Math.round(arr.reduce(function(s, v) { return s + v; }, 0) / arr.length);
+        })
+      };
+    }).filter(function(s) { return s.data.some(function(v) { return v !== null; }); });
+
+    var monthLabels = months.map(function(m) { return dayjs(m + '-01').format('MMM YYYY'); });
+
+    var agingBuckets = ['0-7d', '8-14d', '15-30d', '31-60d', '60+d'];
+    var agingSeries = sevKeys.map(function(sev) {
+      return {
+        name: sev,
+        color: severityColor(sev),
+        data: agingBuckets.map(function(b) { return openBySevBucket[sev][b] || 0; })
+      };
+    }).filter(function(s) { return s.data.some(function(v) { return v > 0; }); });
+
+    return {
+      months: monthLabels,
+      resolutionSeries: resolutionSeries,
+      hasResolutionData: resolutionSeries.length > 0 && months.length > 0,
+      agingBuckets: agingBuckets,
+      agingSeries: agingSeries,
+      hasAgingData: agingSeries.length > 0
+    };
   }, [allFindings]);
 
   // Filtered findings for table
@@ -1397,6 +1476,50 @@ function FindingsPage(props) {
       credits: { enabled: false },
     });
   }, [allFindings, findingStats]);
+
+  // Resolution Time by Severity Over Time (line chart)
+  useEffect(function() {
+    var el = document.getElementById('chart-findings-resolution-trend');
+    if (!el || !resolutionTrendData.hasResolutionData) return;
+    Highcharts.chart('chart-findings-resolution-trend', {
+      chart: { type: 'line', height: 260, backgroundColor: 'transparent' },
+      title: { text: null },
+      xAxis: {
+        categories: resolutionTrendData.months,
+        labels: { style: { fontSize: '10px' }, rotation: resolutionTrendData.months.length > 6 ? -45 : 0 }
+      },
+      yAxis: { title: { text: 'Avg Days to Resolve' }, allowDecimals: false, min: 0 },
+      plotOptions: {
+        line: { marker: { radius: 4 }, lineWidth: 2, connectNulls: false }
+      },
+      tooltip: { shared: true, valueSuffix: ' days' },
+      series: resolutionTrendData.resolutionSeries,
+      credits: { enabled: false },
+      legend: { enabled: true, align: 'center', verticalAlign: 'bottom' }
+    });
+  }, [allFindings, resolutionTrendData]);
+
+  // Open Finding Aging by Severity (stacked column)
+  useEffect(function() {
+    var el = document.getElementById('chart-findings-aging');
+    if (!el || !resolutionTrendData.hasAgingData) return;
+    Highcharts.chart('chart-findings-aging', {
+      chart: { type: 'column', height: 260, backgroundColor: 'transparent' },
+      title: { text: null },
+      xAxis: {
+        categories: resolutionTrendData.agingBuckets,
+        labels: { style: { fontSize: '11px' } }
+      },
+      yAxis: { title: { text: 'Open Findings' }, allowDecimals: false, stackLabels: { enabled: true } },
+      plotOptions: {
+        column: { stacking: 'normal', borderRadius: 3 }
+      },
+      tooltip: { shared: true },
+      series: resolutionTrendData.agingSeries,
+      credits: { enabled: false },
+      legend: { enabled: true, align: 'center', verticalAlign: 'bottom' }
+    });
+  }, [allFindings, resolutionTrendData]);
 
   // Build column filter option lists
   var findingBundleOptions = useMemo(function() {
@@ -1483,7 +1606,7 @@ function FindingsPage(props) {
 
   return h('div', null,
     h('div', { className: 'page-header' },
-      h('h1', null, 'Findings in QC'),
+      h('h1', null, 'Findings'),
       h('p', null, 'Quality issues and review findings across all ' + B.toLowerCase() + 's')
     ),
 
@@ -1491,7 +1614,8 @@ function FindingsPage(props) {
       h(StatCard, { label: 'Total Findings', value: findingStats.total, color: 'primary', active: !findingFilter, onClick: function() { setFindingFilter(null); } }),
       h(StatCard, { label: 'Open', value: findingStats.open, color: findingStats.open > 0 ? 'warning' : 'success', active: findingFilter && findingFilter.type === 'open', onClick: function() { setFindingFilter(findingFilter && findingFilter.type === 'open' ? null : { type: 'open' }); } }),
       h(StatCard, { label: 'Critical (S0)', value: findingStats.bySev.S0, color: findingStats.bySev.S0 > 0 ? 'danger' : '', active: findingFilter && findingFilter.type === 'critical', onClick: function() { setFindingFilter(findingFilter && findingFilter.type === 'critical' ? null : { type: 'critical' }); } }),
-      h(StatCard, { label: 'Resolved', value: findingStats.byStatus.Done, color: 'success', active: findingFilter && findingFilter.type === 'resolved', onClick: function() { setFindingFilter(findingFilter && findingFilter.type === 'resolved' ? null : { type: 'resolved' }); } })
+      h(StatCard, { label: 'Resolved', value: findingStats.byStatus.Done, color: 'success', active: findingFilter && findingFilter.type === 'resolved', onClick: function() { setFindingFilter(findingFilter && findingFilter.type === 'resolved' ? null : { type: 'resolved' }); } }),
+      h(StatCard, { label: 'Avg Time Open', value: findingStats.avgDaysOpen + 'd', color: findingStats.avgDaysOpen > 14 ? 'danger' : findingStats.avgDaysOpen > 7 ? 'warning' : 'success', tooltip: 'Average number of days that currently open findings have been open. Lower is better.', sub: findingStats.open + ' open findings' })
     ),
 
     h('div', { className: 'two-col' },
@@ -1509,6 +1633,25 @@ function FindingsPage(props) {
           allFindings.length > 0
             ? h('div', { id: 'chart-findings-status', className: 'chart-container' })
             : h(EmptyState, { text: 'No findings' })
+        )
+      )
+    ),
+
+    h('div', { className: 'two-col', style: { marginTop: 20 } },
+      h('div', { className: 'panel' },
+        chartTitle('Resolution Time by Severity', 'Average days from creation to resolution for resolved findings, grouped by the month they were created. Each line is a severity level. A downward trend means findings are being resolved faster over time.'),
+        h('div', { className: 'panel-body' },
+          resolutionTrendData.hasResolutionData
+            ? h('div', { id: 'chart-findings-resolution-trend', className: 'chart-container' })
+            : h(EmptyState, { text: 'No resolved findings yet', sub: 'Resolution trends appear once findings are marked Done' })
+        )
+      ),
+      h('div', { className: 'panel' },
+        chartTitle('Open Finding Age Distribution', 'Shows how long currently open findings have been open, broken down by severity. Findings in higher age buckets may need attention.'),
+        h('div', { className: 'panel-body' },
+          resolutionTrendData.hasAgingData
+            ? h('div', { id: 'chart-findings-aging', className: 'chart-container' })
+            : h(EmptyState, { text: 'No open findings' })
         )
       )
     ),
@@ -2172,15 +2315,7 @@ function MetricsPage(props) {
     });
   }, [metrics]);
 
-  // Helper: chart title with info tooltip
-  function chartTitle(title, tooltip) {
-    return h('div', { className: 'panel-header' },
-      h('span', { className: 'panel-title' }, title),
-      h(Tooltip, { title: tooltip, placement: 'right', overlayStyle: { maxWidth: 320 } },
-        h('span', { style: { marginLeft: 6, cursor: 'help', color: '#B0B0C0', fontSize: 13 } }, '\u24D8')
-      )
-    );
-  }
+  // chartTitle helper is now at file scope (shared with FindingsPage)
 
   // ── Render ──────────────────────────────────────────────────
   return h('div', null,
@@ -10299,8 +10434,9 @@ function App() {
 
   return h(ConfigProvider, { theme: dominoTheme },
     h('div', null,
-      h(TopNav, { terms: terms, useDummy: useDummy, onToggleDummy: handleToggleDummy, connected: connected, debugMode: debugMode, onToggleDebug: toggleDebugMode }),
-      h('div', { className: 'app-layout' },
+      // TopNav commented out — Domino platform provides its own top bar for hosted apps
+      // h(TopNav, { terms: terms, useDummy: useDummy, onToggleDummy: handleToggleDummy, connected: connected, debugMode: debugMode, onToggleDebug: toggleDebugMode }),
+      h('div', { className: 'app-layout app-layout-no-topnav' },
         h(Sidebar, { active: activePage, collapsed: sidebarCollapsed, onToggleCollapse: function() {
           setSidebarCollapsed(function(c) {
             var next = !c;

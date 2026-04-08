@@ -72,6 +72,10 @@ body {
   height: calc(100vh - 44px);
   overflow: hidden;
 }
+/* When Domino platform provides its own top bar, use full viewport height */
+.app-layout.app-layout-no-topnav {
+  height: 100vh;
+}
 
 .sidebar {
   width: 220px;
