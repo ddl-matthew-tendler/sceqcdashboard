@@ -1391,6 +1391,15 @@ body {
   font-size: 13px;
   color: #65657B;
 }
+.insight-card-secondary .insight-card-subtitle {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: #8F8FA3;
+}
+.insight-card-secondary .insight-card-title-sm {
+  font-size: 14px;
+  line-height: 1.35;
+}
 .insight-card-action {
   display: flex;
   align-items: center;
@@ -1431,6 +1440,18 @@ body {
   font-weight: 700;
   color: #2E2E38;
   margin-bottom: 4px;
+}
+.insight-level-project-tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: #5B54D6;
+  background: #EEEAFF;
+  padding: 3px 10px;
+  border-radius: 4px;
+  margin-bottom: 6px;
 }
 .insight-level-subtitle {
   font-size: 14px;

@@ -7623,8 +7623,11 @@ function AIInsightsPage(props) {
 
     var chartHeight = 6 * 55 + 60; // 6 demo projects
 
+    var featuredLabel = m.featuredProject ? m.featuredProject.replace(/_/g, ' ') : 'CDISC01 CSR';
+
     return h('div', null,
       h('div', { className: 'insight-level-header' },
+        h('div', { className: 'insight-level-project-tag' }, featuredLabel),
         h('h2', null, (waitPct || 47) + '% of your QC cycle is idle wait time'),
         h('p', { className: 'insight-level-subtitle' },
           B + 's sit idle for an average of ' + avgWaitPerTransition.toFixed(1) + ' days after each stage transition. ' +
@@ -7748,8 +7751,11 @@ function AIInsightsPage(props) {
     });
     if (overdueCount === 0) overdueCount = 3; // demo fallback
 
+    var featuredLabel = m.featuredProject ? m.featuredProject.replace(/_/g, ' ') : 'CDISC01 CSR';
+
     return h('div', null,
       h('div', { className: 'insight-level-header' },
+        h('div', { className: 'insight-level-project-tag' }, featuredLabel),
         h('h2', null, (delayPct || 35) + '% of elapsed time consumed by finding resolution'),
         h('p', { className: 'insight-level-subtitle' },
           'Finding resolution is the second-largest time sink. High-severity findings (S0/S1) take significantly longer ' +
@@ -7844,8 +7850,11 @@ function AIInsightsPage(props) {
     var oldestBlocked = blockedRows.length > 0 ? blockedRows[0].daysStuck + 'd' : '14d';
     var oldestName = blockedRows.length > 0 ? blockedRows[0].name : 't_ae_summary';
 
+    var featuredLabel = m.featuredProject ? m.featuredProject.replace(/_/g, ' ') : 'CDISC01 CSR';
+
     return h('div', null,
       h('div', { className: 'insight-level-header' },
+        h('div', { className: 'insight-level-project-tag' }, featuredLabel),
         h('h2', null, (blockedPct || 9) + '% of active deliverables are blocked by open findings'),
         h('p', { className: 'insight-level-subtitle' },
           blockedCount + ' ' + B.toLowerCase() + 's currently have unresolved findings preventing them from progressing. ' +
@@ -7976,12 +7985,15 @@ function AIInsightsPage(props) {
       ];
     }
 
+    var featuredLabel = m.featuredProject ? m.featuredProject.replace(/_/g, ' ') : 'CDISC01 CSR';
+
     return h('div', null,
       h('div', { className: 'insight-level-header' },
+        h('div', { className: 'insight-level-project-tag' }, featuredLabel),
         h('h2', null, overQCPct + '% of low-risk deliverables are going through double programming QC'),
         h('p', { className: 'insight-level-subtitle' },
-          'Low-risk deliverables (those with minimal findings history and straightforward specifications) are being routed through ' +
-          'the same rigorous double programming QC as high-risk outputs. This creates unnecessary overhead without proportional quality benefit.')
+          'Low-risk deliverables with minimal findings history are being routed through ' +
+          'the same rigorous double programming QC as high-risk outputs \u2014 unnecessary overhead without proportional quality benefit.')
       ),
 
       // Stats row
