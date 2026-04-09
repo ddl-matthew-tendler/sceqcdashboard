@@ -1434,6 +1434,26 @@ body {
 /* Level headers */
 .insight-level-header {
   margin-bottom: 16px;
+  position: relative;
+}
+.insight-level-next-btn {
+  position: absolute;
+  top: 0;
+  right: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #5B54D6;
+  cursor: pointer;
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid #E0DEF7;
+  background: #FAFAFF;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.insight-level-next-btn:hover {
+  background: #EEEAFF;
+  border-color: #5B54D6;
 }
 .insight-level-header h2 {
   font-size: 20px;

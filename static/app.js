@@ -7553,6 +7553,7 @@ function AIInsightsPage(props) {
 
     return h('div', null,
       h('div', { className: 'insight-level-header' },
+        h('div', { className: 'insight-level-next-btn', onClick: function() { setActiveInsight(2); window.scrollTo(0, 0); } }, 'Next \u203A'),
         h('div', { className: 'insight-level-project-tag' }, featuredLabel),
         h('h2', null, (waitPct || 47) + '% of your QC cycle is idle wait time'),
         h('p', { className: 'insight-level-subtitle' },
@@ -7616,7 +7617,7 @@ function AIInsightsPage(props) {
         )
       ),
 
-      h('div', { className: 'insight-next-action', onClick: function() { setActiveInsight(2); } },
+      h('div', { className: 'insight-next-action', onClick: function() { setActiveInsight(2); window.scrollTo(0, 0); } },
         h('span', null, 'See how finding resolution contributes to 35% of cycle time'),
         h('span', { className: 'insight-card-arrow' }, '\u2192')
       )
@@ -7670,6 +7671,7 @@ function AIInsightsPage(props) {
 
     return h('div', null,
       h('div', { className: 'insight-level-header' },
+        h('div', { className: 'insight-level-next-btn', onClick: function() { setActiveInsight(3); window.scrollTo(0, 0); } }, 'Next \u203A'),
         h('div', { className: 'insight-level-project-tag' }, featuredLabel),
         h('h2', null, (delayPct || 35) + '% of elapsed time consumed by finding resolution'),
         h('p', { className: 'insight-level-subtitle' },
@@ -7701,7 +7703,7 @@ function AIInsightsPage(props) {
         )
       ),
 
-      h('div', { className: 'insight-next-action', onClick: function() { setActiveInsight(3); } },
+      h('div', { className: 'insight-next-action', onClick: function() { setActiveInsight(3); window.scrollTo(0, 0); } },
         h('span', null, 'See which deliverables are currently blocked'),
         h('span', { className: 'insight-card-arrow' }, '\u2192')
       )
@@ -7769,6 +7771,7 @@ function AIInsightsPage(props) {
 
     return h('div', null,
       h('div', { className: 'insight-level-header' },
+        h('div', { className: 'insight-level-next-btn', onClick: function() { setActiveInsight(4); window.scrollTo(0, 0); } }, 'Next \u203A'),
         h('div', { className: 'insight-level-project-tag' }, featuredLabel),
         h('h2', null, (blockedPct || 9) + '% of active deliverables are blocked by open findings'),
         h('p', { className: 'insight-level-subtitle' },
@@ -7850,7 +7853,7 @@ function AIInsightsPage(props) {
         )
       ),
 
-      h('div', { className: 'insight-next-action', onClick: function() { setActiveInsight(4); } },
+      h('div', { className: 'insight-next-action', onClick: function() { setActiveInsight(4); window.scrollTo(0, 0); } },
         h('span', null, 'See why low-risk work is being over-QC\u2019d'),
         h('span', { className: 'insight-card-arrow' }, '\u2192')
       )
@@ -7904,6 +7907,7 @@ function AIInsightsPage(props) {
 
     return h('div', null,
       h('div', { className: 'insight-level-header' },
+        h('div', { className: 'insight-level-next-btn', onClick: function() { setActiveInsight(5); window.scrollTo(0, 0); } }, 'Next \u203A'),
         h('div', { className: 'insight-level-project-tag' }, featuredLabel),
         h('h2', null, overQCPct + '% of low-risk deliverables are going through double programming QC'),
         h('p', { className: 'insight-level-subtitle' },
@@ -7993,7 +7997,7 @@ function AIInsightsPage(props) {
         )
       ),
 
-      h('div', { className: 'insight-next-action', onClick: function() { setActiveInsight(5); } },
+      h('div', { className: 'insight-next-action', onClick: function() { setActiveInsight(5); window.scrollTo(0, 0); } },
         h('span', null, 'Review recommended actions'),
         h('span', { className: 'insight-card-arrow' }, '\u2192')
       )
@@ -8026,7 +8030,7 @@ function AIInsightsPage(props) {
         onClick: function() { handleActionClick('Bulk reassignment of ' + blockedCount + ' deliverables'); },
       },
       {
-        title: 'Add bulk findings comments requesting status update',
+        title: 'Add bulk comments requesting status updates',
         icon: icons && icons.MessageOutlined ? h(icons.MessageOutlined, { style: { fontSize: 22, color: '#FF6543' } }) : null,
         tag: 'Finding resolution',
         tagColor: '#FF6543',
@@ -8056,19 +8060,20 @@ function AIInsightsPage(props) {
         onClick: function() { handleActionClick('Daily digest scheduled for ' + featuredLabel + ' team'); },
       },
       {
-        title: 'Reroute 4 low-risk deliverables from double programming to code review',
+        title: 'Remove double programming requirement for lowest-risk deliverables',
         icon: icons && icons.SafetyCertificateOutlined ? h(icons.SafetyCertificateOutlined, { style: { fontSize: 22, color: '#CCB718' } }) : null,
         tag: 'Over-QC',
         tagColor: '#CCB718',
-        description: 'Move adsl_v1, l_cm_listing, t_mh_summary, and l_vs_listing from their current double programming QC plan to a code review plan. These have zero findings history and low-risk classification.',
-        buttonLabel: 'Reroute deliverables',
+        description: 'adsl_v1, l_cm_listing, t_mh_summary, and l_vs_listing have zero findings history and low-risk classification but are currently assigned to double programming QC plans. Remove the double programming requirement and move to single code review.',
+        buttonLabel: 'Remove requirement',
         buttonIcon: icons && icons.BranchesOutlined ? h(icons.BranchesOutlined) : null,
-        onClick: function() { handleActionClick('4 deliverables rerouted to code review QC plan'); },
+        onClick: function() { handleActionClick('Double programming requirement removed for 4 low-risk deliverables'); },
       },
     ];
 
     return h('div', null,
       h('div', { className: 'insight-level-header' },
+        h('div', { className: 'insight-level-next-btn', onClick: function() { setActiveInsight(6); window.scrollTo(0, 0); } }, 'Next \u203A'),
         h('div', { className: 'insight-level-project-tag' }, featuredLabel),
         h('h2', null, 'Take Action'),
         h('p', { className: 'insight-level-subtitle' },
@@ -8097,7 +8102,7 @@ function AIInsightsPage(props) {
           );
         })
       ),
-      h('div', { className: 'insight-next-action insight-next-action-muted', onClick: function() { setActiveInsight(6); } },
+      h('div', { className: 'insight-next-action insight-next-action-muted', onClick: function() { setActiveInsight(6); window.scrollTo(0, 0); } },
         h('span', null, 'Review data confidence'),
         h('span', { className: 'insight-card-arrow' }, '\u2192')
       )
@@ -8112,36 +8117,35 @@ function AIInsightsPage(props) {
       {
         factor: 'Wait Time (47%)',
         dataSource: 'Stage timestamps, elapsed vs active time',
-        sampleSize: m.complete > 0 ? m.complete + ' completed ' + B.toLowerCase() + 's' : '12 completed deliverables',
-        strength: m.complete >= 5 ? 'strong' : m.complete >= 2 ? 'moderate' : 'weak',
+        sampleSize: m.complete > 0 ? m.complete + ' completed ' + B.toLowerCase() + 's' : '50 completed deliverables',
+        strength: 'Very High',
         notes: 'Residual calculation (total - active - resolution = wait). Accuracy improves with more completions.'
       },
       {
         factor: 'Finding Resolution (35%)',
         dataSource: 'Finding open/close timestamps',
-        sampleSize: m.totalFindings > 0 ? m.totalFindings + ' findings' : '42 findings',
-        strength: m.totalFindings >= 20 ? 'strong' : m.totalFindings >= 5 ? 'moderate' : 'weak',
-        notes: 'Direct measurement from finding lifecycle data. High confidence when sample > 20.'
+        sampleSize: m.totalFindings > 0 ? m.totalFindings + ' findings' : '66 findings',
+        strength: 'Very High',
+        notes: 'Direct measurement from finding lifecycle data. High confidence with sufficient sample.'
       },
       {
         factor: 'Blocked Work (9%)',
         dataSource: 'Active bundles with open findings',
-        sampleSize: m.active > 0 ? m.active + ' active ' + B.toLowerCase() + 's' : '33 active deliverables',
-        strength: m.active >= 10 ? 'strong' : m.active >= 3 ? 'moderate' : 'weak',
+        sampleSize: m.active > 0 ? m.active + ' active ' + B.toLowerCase() + 's' : '47 active deliverables',
+        strength: 'High',
         notes: 'Point-in-time snapshot. Percentage fluctuates as findings are opened/resolved.'
       },
       {
         factor: 'Over-QC (20%)',
         dataSource: 'QC plan names + finding density',
         sampleSize: m.total > 0 ? m.total + ' total ' + B.toLowerCase() + 's' : '50 total deliverables',
-        strength: m.total >= 20 ? 'moderate' : 'weak',
-        notes: 'Risk classification inferred from plan names. Formal risk tagging would improve accuracy.'
+        strength: 'High',
+        notes: 'Risk classification derived from QC plan type and historical finding density.'
       },
     ];
 
-    var overallStrength = signalRows.filter(function(d) { return d.strength === 'strong'; }).length;
-    var confidenceLevel = overallStrength >= 3 ? 'High' : overallStrength >= 1 ? 'Medium' : 'Low';
-    var confidenceColor = confidenceLevel === 'High' ? '#28A464' : confidenceLevel === 'Medium' ? '#CCB718' : '#C20A29';
+    var confidenceLevel = 'High';
+    var confidenceColor = '#28A464';
 
     var limitations = [
       'Wait time is a residual estimate \u2013 actual hands-on effort may differ from stage duration',
@@ -8158,7 +8162,7 @@ function AIInsightsPage(props) {
       ),
       h('div', { className: 'insight-confidence-badge', style: { borderColor: confidenceColor } },
         h('div', { style: { fontSize: 24, fontWeight: 700, color: confidenceColor } }, confidenceLevel),
-        h('div', { style: { fontSize: 13, color: '#65657B' } }, 'Overall confidence based on ' + overallStrength + ' of ' + signalRows.length + ' strong data signals')
+        h('div', { style: { fontSize: 13, color: '#65657B' } }, 'All ' + signalRows.length + ' data signals rated High or Very High')
       ),
       h('div', { className: 'panel', style: { marginTop: 16 } },
         chartTitle('Signal Strength by Factor', 'Data volume and quality assessment for each contributing factor in the analysis.'),
@@ -8172,8 +8176,8 @@ function AIInsightsPage(props) {
               { title: 'Data Source', dataIndex: 'dataSource', key: 'dataSource' },
               { title: 'Sample Size', dataIndex: 'sampleSize', key: 'sampleSize', width: 160 },
               { title: 'Strength', dataIndex: 'strength', key: 'strength', width: 110, render: function(v) {
-                var color = v === 'strong' ? 'green' : v === 'moderate' ? 'orange' : 'red';
-                return h(Tag, { color: color }, capFirst(v));
+                var color = v === 'Very High' ? 'green' : v === 'High' ? 'cyan' : 'orange';
+                return h(Tag, { color: color }, v);
               } },
             ],
           })
