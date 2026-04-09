@@ -7555,10 +7555,10 @@ function AIInsightsPage(props) {
       h('div', { className: 'insight-level-header' },
         h('div', { className: 'insight-level-next-btn', onClick: function() { setActiveInsight(2); window.scrollTo(0, 0); } }, 'Next \u203A'),
         h('div', { className: 'insight-level-project-tag' }, featuredLabel),
-        h('h2', null, (waitPct || 47) + '% of your QC cycle is idle wait time'),
+        h('h2', null, (waitPct || 47) + '% above benchmark in transition-to-start time'),
         h('p', { className: 'insight-level-subtitle' },
-          B + 's sit idle for an average of ' + avgWaitPerTransition.toFixed(1) + ' days after each stage transition. ' +
-          'After a stage transitions, the new assignee doesn\u2019t begin work for days \u2013 this is the single largest contributor to cycle time.')
+          B + 's sit idle for an average of ' + avgWaitPerTransition.toFixed(1) + ' days after each stage transition before the new assignee begins work. ' +
+          'This is the single largest contributor to cycle time.')
       ),
 
       // Stats row
@@ -7618,7 +7618,7 @@ function AIInsightsPage(props) {
       ),
 
       h('div', { className: 'insight-next-action', onClick: function() { setActiveInsight(2); window.scrollTo(0, 0); } },
-        h('span', null, 'See how finding resolution contributes to 35% of cycle time'),
+        h('span', null, 'See how finding resolution is 35% above benchmark'),
         h('span', { className: 'insight-card-arrow' }, '\u2192')
       )
     );
@@ -7673,9 +7673,9 @@ function AIInsightsPage(props) {
       h('div', { className: 'insight-level-header' },
         h('div', { className: 'insight-level-next-btn', onClick: function() { setActiveInsight(3); window.scrollTo(0, 0); } }, 'Next \u203A'),
         h('div', { className: 'insight-level-project-tag' }, featuredLabel),
-        h('h2', null, (delayPct || 35) + '% of elapsed time consumed by finding resolution'),
+        h('h2', null, (delayPct || 35) + '% above benchmark in finding resolution time'),
         h('p', { className: 'insight-level-subtitle' },
-          'Finding resolution is the second-largest time sink. High-severity findings (S0/S1) take significantly longer ' +
+          'Finding resolution is the second-largest contributor to cycle time. High-severity findings (S0/S1) take significantly longer ' +
           'to resolve and often require multiple review cycles.')
       ),
 
@@ -7773,7 +7773,7 @@ function AIInsightsPage(props) {
       h('div', { className: 'insight-level-header' },
         h('div', { className: 'insight-level-next-btn', onClick: function() { setActiveInsight(4); window.scrollTo(0, 0); } }, 'Next \u203A'),
         h('div', { className: 'insight-level-project-tag' }, featuredLabel),
-        h('h2', null, (blockedPct || 9) + '% of active deliverables are blocked by open findings'),
+        h('h2', null, (blockedPct || 9) + '% of active deliverables blocked by open findings'),
         h('p', { className: 'insight-level-subtitle' },
           blockedCount + ' ' + B.toLowerCase() + 's currently have unresolved findings preventing them from progressing. ' +
           'The longest-blocked deliverable (' + oldestName + ') has been stuck for ' + oldestBlocked + '.')
@@ -7909,7 +7909,7 @@ function AIInsightsPage(props) {
       h('div', { className: 'insight-level-header' },
         h('div', { className: 'insight-level-next-btn', onClick: function() { setActiveInsight(5); window.scrollTo(0, 0); } }, 'Next \u203A'),
         h('div', { className: 'insight-level-project-tag' }, featuredLabel),
-        h('h2', null, overQCPct + '% of low-risk deliverables are going through double programming QC'),
+        h('h2', null, overQCPct + '% of low-risk deliverables going through double programming QC'),
         h('p', { className: 'insight-level-subtitle' },
           'Low-risk deliverables with minimal findings history are being routed through ' +
           'the same rigorous double programming QC as high-risk outputs \u2013 unnecessary overhead without proportional quality benefit.')
@@ -8081,13 +8081,14 @@ function AIInsightsPage(props) {
       ),
       h('div', { className: 'insight-actions-list' },
         actions.map(function(a, i) {
-          return h('div', { key: i, className: 'insight-action-card insight-action-card-clickable' },
+          return h('div', { key: i, className: 'insight-action-card insight-action-card-clickable', style: { borderLeftWidth: 3, borderLeftColor: a.tagColor } },
             h('div', { className: 'insight-action-card-header' },
               h('div', { className: 'insight-action-card-number' }, i + 1),
-              a.icon,
-              h('div', { style: { flex: 1 } },
-                h('div', { className: 'insight-action-card-title' }, a.title),
-                h(Tag, { color: a.tagColor, style: { fontSize: 10, marginBottom: 6 } }, a.tag),
+              h('div', { style: { flex: 1, minWidth: 0 } },
+                h('div', { className: 'insight-action-card-title-row' },
+                  h('div', { className: 'insight-action-card-title' }, a.title),
+                  h(Tag, { color: a.tagColor, style: { fontSize: 10, lineHeight: '18px', margin: 0 } }, a.tag)
+                ),
                 h('div', { className: 'insight-action-card-desc' }, a.description)
               )
             ),
@@ -8096,7 +8097,8 @@ function AIInsightsPage(props) {
                 type: 'primary',
                 icon: a.buttonIcon,
                 onClick: a.onClick,
-                style: { borderRadius: 6 },
+                size: 'small',
+                style: { borderRadius: 6, fontWeight: 500 },
               }, a.buttonLabel)
             )
           );

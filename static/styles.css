@@ -1579,51 +1579,60 @@ body {
   gap: 12px;
 }
 .insight-action-card {
-  border: 1px solid #E0E0E0;
-  border-radius: 8px;
-  padding: 20px;
+  border: 1px solid #E8E8EE;
+  border-radius: 10px;
+  padding: 0;
   background: #fff;
-  transition: border-color 0.15s;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  overflow: hidden;
 }
 .insight-action-card:hover {
-  border-color: #543FDE;
+  border-color: #C4BFF0;
+  box-shadow: 0 2px 8px rgba(84, 63, 222, 0.08);
 }
 .insight-action-card-header {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: 14px;
+  padding: 18px 20px 14px;
 }
 .insight-action-card-number {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: #F5F3FF;
   color: #543FDE;
   font-weight: 700;
-  font-size: 14px;
+  font-size: 13px;
   border-radius: 50%;
   flex-shrink: 0;
+  margin-top: 1px;
+}
+.insight-action-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
 }
 .insight-action-card-title {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   color: #2E2E38;
-  margin-bottom: 4px;
+  line-height: 1.35;
 }
 .insight-action-card-desc {
-  font-size: 13px;
+  font-size: 12.5px;
   color: #65657B;
-  line-height: 1.5;
+  line-height: 1.55;
 }
 .insight-action-card-footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid #F5F5F8;
+  justify-content: flex-end;
+  padding: 10px 20px 14px;
 }
 
 /* Confidence badge */
