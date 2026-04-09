@@ -1434,7 +1434,13 @@ body {
 }
 .insight-level-subtitle {
   font-size: 14px;
-  color: #65657B;
+  color: #3D3D50;
+  line-height: 1.55;
+  background: linear-gradient(135deg, #F0EDFF 0%, #E8F4FD 100%);
+  border-left: 4px solid #5B54D6;
+  border-radius: 0 8px 8px 0;
+  padding: 12px 16px;
+  margin-top: 8px;
 }
 
 /* Next action link */

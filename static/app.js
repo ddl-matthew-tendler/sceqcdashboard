@@ -7164,7 +7164,7 @@ function AIInsightsPage(props) {
 
     // Demo fallbacks when no completed bundles exist
     if (!featuredProject) {
-      featuredProject = 'CS3 Cardiology Phase III';
+      featuredProject = 'CDISC01_CSR';
       featuredProjectAvgCycle = 42;
       featuredProjectCount = 8;
       benchmarkAvg = 18;
@@ -7231,7 +7231,7 @@ function AIInsightsPage(props) {
 
       var m = insightMetrics;
       // Use compelling demo data with the featured project as the clear outlier
-      var featuredLabel = m.featuredProject ? m.featuredProject.replace(/_/g, ' ') : 'CS3 Cardiology Phase III';
+      var featuredLabel = m.featuredProject ? m.featuredProject.replace(/_/g, ' ') : 'CDISC01 CSR';
       var categories = [];
       var activeData = [];
       var waitData = [];
@@ -7239,12 +7239,12 @@ function AIInsightsPage(props) {
 
       // Each entry: [name, waitDays, resolutionDays, activeDays]
       var demoBreakdown = [
-        [featuredLabel,       21.0, 12.0, 9.0],  // 42d total — outlier
-        ['BEACON Oncology',    11.0,  8.0, 6.0],  // 25d
-        ['ATLAS Respiratory',   8.0,  7.0, 5.0],  // 20d
-        ['MERIDIAN CNS',        6.5,  5.0, 4.5],  // 16d
-        ['NEXUS Immunology',    5.0,  4.0, 4.0],  // 13d
-        ['PRISM Rare Disease',  3.5,  3.5, 4.0],  // 11d
+        [featuredLabel,              21.0, 12.0, 9.0],  // 42d total — outlier
+        ['LS-GovernanceDemo-AY',     11.0,  8.0, 6.0],  // 25d
+        ['AM',                        8.0,  7.0, 5.0],  // 20d
+        ['Scalable RWE Migraine',     6.5,  5.0, 4.5],  // 16d
+        ['Landingproject',            5.0,  4.0, 4.0],  // 13d
+        ['quick-start',               3.5,  3.5, 4.0],  // 11d
       ];
       demoBreakdown.forEach(function(row) {
         categories.push(row[0]);
@@ -7293,15 +7293,15 @@ function AIInsightsPage(props) {
       }
 
       var m = insightMetrics;
-      var featuredLabel = m.featuredProject ? m.featuredProject.replace(/_/g, ' ') : 'CS3 Cardiology Phase III';
+      var featuredLabel = m.featuredProject ? m.featuredProject.replace(/_/g, ' ') : 'CDISC01 CSR';
       // Compelling demo data: ascending order, featured project is the clear outlier at top
       var demoWaitData = [
-        ['PRISM Rare Disease',  2.1],
-        ['NEXUS Immunology',    2.8],
-        ['MERIDIAN CNS',        3.5],
-        ['ATLAS Respiratory',   4.2],
-        ['BEACON Oncology',     5.8],
-        [featuredLabel,        10.5],
+        ['quick-start',               2.1],
+        ['Landingproject',            2.8],
+        ['Scalable RWE Migraine',     3.5],
+        ['AM',                        4.2],
+        ['LS-GovernanceDemo-AY',      5.8],
+        [featuredLabel,              10.5],
       ];
       var categories = [];
       var waitDays = [];
@@ -7388,15 +7388,15 @@ function AIInsightsPage(props) {
       }
 
       var m = insightMetrics;
-      var featuredLabel = m.featuredProject ? m.featuredProject.replace(/_/g, ' ') : 'CS3 Cardiology Phase III';
+      var featuredLabel = m.featuredProject ? m.featuredProject.replace(/_/g, ' ') : 'CDISC01 CSR';
       // Compelling demo data: featured project has the most findings
       var demoFindingData = [
-        [featuredLabel,        10, 14],
-        ['BEACON Oncology',     6,  10],
-        ['ATLAS Respiratory',   4,   7],
-        ['MERIDIAN CNS',        3,   5],
-        ['NEXUS Immunology',    2,   4],
-        ['PRISM Rare Disease',  1,   3],
+        [featuredLabel,               10, 14],
+        ['LS-GovernanceDemo-AY',       6, 10],
+        ['AM',                         4,  7],
+        ['Scalable RWE Migraine',      3,  5],
+        ['Landingproject',             2,  4],
+        ['quick-start',                1,  3],
       ];
       var categories = [];
       var criticalData = [];
