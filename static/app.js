@@ -11129,10 +11129,11 @@ function App() {
       && !!active.myCurrentStage === filterMyCurrentStage
       && !!active.myFutureStage === filterMyFutureStage
       && !!active.myPriorStage === filterMyPriorStage
+      && JSON.stringify(active.states || []) === JSON.stringify(scopeStates)
       && JSON.stringify(active.hiddenCols || ['policy']) === JSON.stringify(appHiddenCols)
       && JSON.stringify(active.shownStageCols || []) === JSON.stringify(appShownStageCols);
     if (!same) setActivePresetName(null);
-  }, [scopeProjects, scopeTags, filterMyCurrentStage, filterMyFutureStage, filterMyPriorStage, appHiddenCols, appShownStageCols]);
+  }, [scopeProjects, scopeTags, filterMyCurrentStage, filterMyFutureStage, filterMyPriorStage, scopeStates, appHiddenCols, appShownStageCols]);
   var _sc4 = useState(null); var scopeCurrentUser = _sc4[0]; var setScopeCurrentUser = _sc4[1];
   var _sidebarCollapsed = useState(function() { try { return localStorage.getItem('sce_sidebar_collapsed') === 'true'; } catch(e) { return false; } });
   var sidebarCollapsed = _sidebarCollapsed[0]; var setSidebarCollapsed = _sidebarCollapsed[1];
@@ -11283,7 +11284,8 @@ function App() {
     });
   }, [bundles, scopeProjects, scopeTags, scopeStates, filterMyCurrentStage, filterMyFutureStage, filterMyPriorStage, scopeCurrentUser, projectTagsMap]);
 
-  var hasScopeFilters = scopeProjects.length > 0 || scopeTags.length > 0 || scopeStates.length > 0 || filterMyCurrentStage || filterMyFutureStage || filterMyPriorStage;
+  var hasColumnCustomization = JSON.stringify(appHiddenCols) !== JSON.stringify(['policy']) || appShownStageCols.length > 0;
+  var hasScopeFilters = scopeProjects.length > 0 || scopeTags.length > 0 || scopeStates.length > 0 || filterMyCurrentStage || filterMyFutureStage || filterMyPriorStage || hasColumnCustomization;
 
   // Load mock/dummy data
   function loadMockData() {
@@ -11793,6 +11795,7 @@ function App() {
                 onChange: function(val) {
                   if (!val) {
                     setScopeProjects([]); setScopeTags([]); setScopeStates([]); setFilterMyCurrentStage(false); setFilterMyFutureStage(false); setFilterMyPriorStage(false);
+                    setAppHiddenCols(['policy']); setAppShownStageCols([]);
                     setActivePresetName(null);
                     return;
                   }
@@ -11947,6 +11950,7 @@ function App() {
                   h(Tag, { color: 'purple' }, scopedBundles.length + ' of ' + bundles.length + ' ' + terms.bundle.toLowerCase() + 's'),
                   h(Button, { type: 'link', size: 'small', onClick: function() {
                     setScopeProjects([]); setScopeTags([]); setScopeStates([]); setFilterMyCurrentStage(false); setFilterMyFutureStage(false); setFilterMyPriorStage(false);
+                    setAppHiddenCols(['policy']); setAppShownStageCols([]);
                     setActivePresetName(null);
                   } }, 'Clear all')
                 )
@@ -11960,25 +11964,47 @@ function App() {
             onOk: function() { handleSavePreset(presetNameInput); },
             okText: scopePresets.some(function(p) { return p.name === presetNameInput.trim(); }) ? 'Overwrite' : 'Save',
             okButtonProps: { disabled: !presetNameInput.trim() },
-            width: 400,
+            width: 420,
           },
             h('div', null,
-              h('div', { style: { marginBottom: 8, fontSize: 13, color: '#555' } }, 'Give this scope view a name. It will save the current project, tag, and assignment filters.'),
+              h('div', { style: { marginBottom: 8, fontSize: 13, color: '#555' } }, 'Give this scope view a name. It will save the current filters, state, and column visibility settings.'),
               h(antd.Input, {
                 placeholder: 'e.g. "My Active Work" or "Project X Overview"',
                 value: presetNameInput,
                 onChange: function(e) { setPresetNameInput(e.target.value); },
-                onPressEnter: function() { handleSavePreset(presetNameInput); },
+                onPressEnter: function() { if (presetNameInput.trim()) handleSavePreset(presetNameInput); },
                 autoFocus: true,
               }),
               scopePresets.some(function(p) { return p.name === presetNameInput.trim(); })
                 ? h('div', { style: { marginTop: 8, fontSize: 12, color: '#FAAD14' } }, 'A view with this name already exists and will be overwritten.')
                 : null,
-              h('div', { style: { marginTop: 12, fontSize: 12, color: '#8F8FA3' } },
-                'Current scope: ',
-                scopeProjects.length ? scopeProjects.length + ' project(s), ' : '',
-                scopeTags.length ? scopeTags.length + ' tag(s), ' : '',
-                [filterMyCurrentStage && 'current', filterMyFutureStage && 'upcoming'].filter(Boolean).join(', ') || 'no assignment filter'
+              // Existing views list for quick overwrite
+              scopePresets.length > 0
+                ? h('div', { style: { marginTop: 14 } },
+                    h('div', { style: { fontSize: 12, color: '#8F8FA3', marginBottom: 6 } }, 'Or update an existing view:'),
+                    h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: 6 } },
+                      scopePresets.map(function(p) {
+                        var isSelected = presetNameInput.trim() === p.name;
+                        return h(Tag, {
+                          key: p.name,
+                          color: isSelected ? 'purple' : 'default',
+                          style: { cursor: 'pointer', userSelect: 'none', fontSize: 12 },
+                          onClick: function() { setPresetNameInput(p.name); },
+                        }, (defaultPresetName === p.name ? '★ ' : '') + p.name);
+                      })
+                    )
+                  )
+                : null,
+              h('div', { style: { marginTop: 14, fontSize: 12, color: '#8F8FA3', lineHeight: '1.6' } },
+                'Will save: ',
+                [
+                  scopeProjects.length ? scopeProjects.length + ' project(s)' : null,
+                  scopeTags.length ? scopeTags.length + ' tag(s)' : null,
+                  scopeStates.length ? scopeStates.length + ' state(s)' : null,
+                  filterMyCurrentStage ? 'current stage' : null,
+                  filterMyFutureStage ? 'upcoming stages' : null,
+                  hasColumnCustomization ? 'column layout' : null,
+                ].filter(Boolean).join(', ') || 'default settings'
               )
             )
           ),
