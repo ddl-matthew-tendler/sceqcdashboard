@@ -798,11 +798,12 @@ function EmptyState(props) {
 
 
 // ── Chart Title with Info Tooltip ───────────────────────────────
-function chartTitle(title, tooltip) {
+function chartTitle(title, tooltip, sampleData) {
+  var tip = sampleData ? 'Sample data. ' + tooltip : tooltip;
   return h('div', { className: 'panel-header' },
     h('span', { className: 'panel-title' }, title),
-    h(Tooltip, { title: tooltip, placement: 'right', overlayStyle: { maxWidth: 320 } },
-      h('span', { style: { marginLeft: 6, cursor: 'help', color: '#B0B0C0', fontSize: 13 } }, '\u24D8')
+    h(Tooltip, { title: tip, placement: 'right', overlayStyle: { maxWidth: 320 } },
+      h('span', { style: { marginLeft: 6, cursor: 'help', color: sampleData ? '#CCB718' : '#B0B0C0', fontSize: 13 } }, '\u24D8')
     )
   );
 }
@@ -1666,15 +1667,7 @@ function FindingsPage(props) {
 
     h('div', { className: 'two-col', style: { marginTop: 20 } },
       h('div', { className: 'panel' },
-        h('div', { className: 'panel-header' },
-          h('span', { className: 'panel-title' }, 'Resolution Time by Severity'),
-          h(Tooltip, {
-            title: (resolutionTrendData.resolutionSampleData ? 'Sample data shown below. ' : '') + 'Average days from creation to resolution for resolved findings, grouped by the month they were created. Each line is a severity level. A downward trend means findings are being resolved faster over time.',
-            placement: 'right', overlayStyle: { maxWidth: 320 }
-          },
-            h('span', { style: { marginLeft: 6, cursor: 'help', color: resolutionTrendData.resolutionSampleData ? '#CCB718' : '#B0B0C0', fontSize: 13 } }, '\u24D8')
-          )
-        ),
+        chartTitle('Resolution Time by Severity', 'Average days from creation to resolution for resolved findings, grouped by the month they were created. Each line is a severity level. A downward trend means findings are being resolved faster over time.', resolutionTrendData.resolutionSampleData),
         h('div', { className: 'panel-body' },
           resolutionTrendData.hasResolutionData
             ? h('div', { id: 'chart-findings-resolution-trend', className: 'chart-container' })
@@ -2399,13 +2392,10 @@ function MetricsPage(props) {
     ),
     h('div', { className: 'two-col' },
       h('div', { className: 'panel' },
-        chartTitle('Avg Cycle Time by ' + P, 'Average number of days from creation to completion for each ' + P.toLowerCase() + '. Calculated as (last updated date \u2212 created date) for completed ' + B.toLowerCase() + 's only. Higher values may indicate bottlenecks.'),
+        chartTitle('Avg Cycle Time by ' + P, 'Average number of days from creation to completion for each ' + P.toLowerCase() + '. Calculated as (last updated date \u2212 created date) for completed ' + B.toLowerCase() + 's only. Higher values may indicate bottlenecks.', metrics.cycleTimeSampleData),
         h('div', { className: 'panel-body' },
           Object.keys(metrics.cycleByPolicy).length > 0
-            ? h('div', null,
-                metrics.cycleTimeSampleData ? h(Alert, { type: 'warning', showIcon: true, banner: true, message: 'Sample data shown below. No completed ' + B.toLowerCase() + 's are available yet.', style: { marginBottom: 8, fontSize: 12 } }) : null,
-                h('div', { id: 'chart-cycle-by-policy', className: 'chart-container' })
-              )
+            ? h('div', { id: 'chart-cycle-by-policy', className: 'chart-container' })
             : h(EmptyState, { text: 'No completed ' + B.toLowerCase() + 's yet' })
         )
       ),
@@ -4030,10 +4020,10 @@ function QCTrackerPage(props) {
   var _fd2 = useState(null); var findingsDrawerBundle = _fd2[0]; var setFindingsDrawerBundle = _fd2[1];
   // Column widths state (resizable)
   var _cw = useState({}); var colWidths = _cw[0]; var setColWidths = _cw[1];
-  // Hidden columns state
-  var _hc = useState(['policy']); var hiddenCols = _hc[0]; var setHiddenCols = _hc[1];
+  // Hidden columns state (lifted to App for saved-view persistence)
+  var hiddenCols = props.hiddenCols; var setHiddenCols = props.setHiddenCols;
   // Per-stage assignee columns: hidden by default; track which ones the user has turned on
-  var _sc2 = useState([]); var shownStageCols = _sc2[0]; var setShownStageCols = _sc2[1];
+  var shownStageCols = props.shownStageCols; var setShownStageCols = props.setShownStageCols;
 
   // Derive filter options from scoped bundles (project/tag scope handled at App level)
   var policyOptions = useMemo(function() {
@@ -11046,6 +11036,10 @@ function App() {
   var _sc3c = useState(_initDefault ? !!_initDefault.myPriorStage : false); var filterMyPriorStage = _sc3c[0]; var setFilterMyPriorStage = _sc3c[1];
   var _sc4 = useState(_initDefault ? (_initDefault.states || []) : []); var scopeStates = _sc4[0]; var setScopeStates = _sc4[1];
 
+  // Column visibility state (lifted from QCTrackerPage so presets can save/restore it)
+  var _appHc = useState(_initDefault ? (_initDefault.hiddenCols || ['policy']) : ['policy']); var appHiddenCols = _appHc[0]; var setAppHiddenCols = _appHc[1];
+  var _appSsc = useState(_initDefault ? (_initDefault.shownStageCols || []) : []); var appShownStageCols = _appSsc[0]; var setAppShownStageCols = _appSsc[1];
+
   // Helper: get current scope state as a preset object
   function getCurrentScopeState(name) {
     return {
@@ -11056,6 +11050,8 @@ function App() {
       myFutureStage: filterMyFutureStage,
       myPriorStage: filterMyPriorStage,
       states: scopeStates,
+      hiddenCols: appHiddenCols,
+      shownStageCols: appShownStageCols,
     };
   }
 
@@ -11067,6 +11063,8 @@ function App() {
     setFilterMyFutureStage(!!preset.myFutureStage);
     setFilterMyPriorStage(!!preset.myPriorStage);
     setScopeStates(preset.states || []);
+    setAppHiddenCols(preset.hiddenCols || ['policy']);
+    setAppShownStageCols(preset.shownStageCols || []);
     setActivePresetName(preset.name);
   }
 
@@ -11130,9 +11128,11 @@ function App() {
       && JSON.stringify(active.tags || []) === JSON.stringify(scopeTags)
       && !!active.myCurrentStage === filterMyCurrentStage
       && !!active.myFutureStage === filterMyFutureStage
-      && !!active.myPriorStage === filterMyPriorStage;
+      && !!active.myPriorStage === filterMyPriorStage
+      && JSON.stringify(active.hiddenCols || ['policy']) === JSON.stringify(appHiddenCols)
+      && JSON.stringify(active.shownStageCols || []) === JSON.stringify(appShownStageCols);
     if (!same) setActivePresetName(null);
-  }, [scopeProjects, scopeTags, filterMyCurrentStage, filterMyFutureStage, filterMyPriorStage]);
+  }, [scopeProjects, scopeTags, filterMyCurrentStage, filterMyFutureStage, filterMyPriorStage, appHiddenCols, appShownStageCols]);
   var _sc4 = useState(null); var scopeCurrentUser = _sc4[0]; var setScopeCurrentUser = _sc4[1];
   var _sidebarCollapsed = useState(function() { try { return localStorage.getItem('sce_sidebar_collapsed') === 'true'; } catch(e) { return false; } });
   var sidebarCollapsed = _sidebarCollapsed[0]; var setSidebarCollapsed = _sidebarCollapsed[1];
@@ -11729,7 +11729,7 @@ function App() {
     // All other pages get scopedBundles
     switch (activePage) {
       case 'tracker':
-        return h(QCTrackerPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, selectedBundle: selectedBundle, terms: terms, projectMembersCache: projectMembersCache, dataExplorerUrl: dataExplorerUrl, connected: connected, policies: livePolicies, debugMode: debugMode, onRefresh: function() { if (connected) fetchLiveData(); } });
+        return h(QCTrackerPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, selectedBundle: selectedBundle, terms: terms, projectMembersCache: projectMembersCache, dataExplorerUrl: dataExplorerUrl, connected: connected, policies: livePolicies, debugMode: debugMode, hiddenCols: appHiddenCols, setHiddenCols: setAppHiddenCols, shownStageCols: appShownStageCols, setShownStageCols: setAppShownStageCols, onRefresh: function() { if (connected) fetchLiveData(); } });
       case 'rules':
         return h(AssignmentRulesPage, { bundles: bundles, setBundles: setBundles, assignmentRules: assignmentRules, setAssignmentRules: setAssignmentRules, terms: terms, projectMembersCache: projectMembersCache, livePolicies: livePolicies, onNavigate: setActivePage });
       case 'milestones':
