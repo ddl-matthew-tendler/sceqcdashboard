@@ -1,5 +1,5 @@
 /* ================================================================
-   SCE QC Tracker — Domino App
+   SCE QC Tracker -Domino App
    For pharma stat programming milestones and QC tracking
    ================================================================ */
 
@@ -131,7 +131,7 @@ function openDataExplorer(url, path, e) {
 // lower version is flagged as stale.
 
 function computeSnapshotStaleness(allAttachments) {
-  // Phase 1: Build version index — find max version per source
+  // Phase 1: Build version index -find max version per source
   var datasetMaxVersions = {};   // key: datasetId || datasetName → { maxVersion, maxSnapshotTime, latestBundleId }
   var volumeMaxVersions = {};    // key: volumeId || volumeName → { maxVersion, maxSnapshotTime, latestBundleId }
 
@@ -785,7 +785,7 @@ function StatCard(props) {
   return props.tooltip ? h(Tooltip, { title: props.tooltip, placement: 'top', overlayStyle: { maxWidth: 280 } }, card) : card;
 }
 
-// (ConnectionBanner removed — replaced by Dummy Data toggle in TopNav)
+// (ConnectionBanner removed -replaced by Dummy Data toggle in TopNav)
 
 // ── Empty State ─────────────────────────────────────────────────
 function EmptyState(props) {
@@ -1075,7 +1075,7 @@ function MilestonesPage(props) {
                       var label = words.length > 2 ? words.slice(0, 2).join(' ') : stage;
                       var url = getDominoBundleUrl(bundle, { stageName: stage });
                       var tooltipTitle = idx <= currentIdx
-                        ? stage + ' — Click to open in Domino'
+                        ? stage + ' -Click to open in Domino'
                         : stage;
                       return h(Tooltip, { key: stage, title: tooltipTitle },
                         h('div', {
@@ -1763,7 +1763,7 @@ function FindingsPage(props) {
 //   that don't exist yet. Instead, we use FINDING DENSITY as a defensible proxy:
 //     Finding Density = findings per deliverable (higher = more review-fix-review cycles)
 //     Bundles with In-Progress Rework = bundles that have BOTH resolved AND open findings
-//       (indicates the QC process found issues, some were fixed, but more surfaced — iterative rework)
+//       (indicates the QC process found issues, some were fixed, but more surfaced -iterative rework)
 //     Overdue Findings = open findings past their dueDate (stuck in rework loop)
 //   These proxies are standard in pharma QC analytics where full audit trails aren't available.
 //
@@ -2427,7 +2427,7 @@ function MetricsPage(props) {
       h(StatCard, { label: 'Avg Finding Density', value: metrics.avgFindingDensity, color: parseFloat(metrics.avgFindingDensity) > 1 ? 'warning' : '', sub: 'Findings per ' + B.toLowerCase(), tooltip: 'Average number of findings per deliverable. Higher density suggests more review-fix-review cycles.' }),
       h(StatCard, { label: 'Active Rework', value: metrics.reworkBundles.length, color: metrics.reworkBundles.length > 0 ? 'danger' : 'success',
         sub: 'Open + resolved findings',
-        tooltip: 'Deliverables with both open and resolved findings — indicating iterative rework is in progress.',
+        tooltip: 'Deliverables with both open and resolved findings -indicating iterative rework is in progress.',
         active: metricsFilter && metricsFilter.type === 'rework',
         onClick: function() { setMetricsFilter(metricsFilter && metricsFilter.type === 'rework' ? null : { type: 'rework' }); } }),
       h(StatCard, { label: 'Overdue Findings', value: metrics.overdueFindings, color: metrics.overdueFindings > 0 ? 'danger' : 'success',
@@ -2999,7 +2999,7 @@ function BulkActionBar(props) {
   });
   var selectedPids = Object.keys(selectedProjectIds);
 
-  // Combine all project members for bulk assignment — annotate with project coverage
+  // Combine all project members for bulk assignment -annotate with project coverage
   var seen = {};
   var memberOptions = [];
   Object.keys(pmc).forEach(function(pid) {
@@ -3016,12 +3016,12 @@ function BulkActionBar(props) {
     var coveredCount = selectedPids.filter(function(pid) { return entry.projectIds[pid]; }).length;
     var label = (m.firstName || '') + ' ' + (m.lastName || '') + ' (' + m.userName + ')';
     if (selectedPids.length > 0 && coveredCount < selectedPids.length) {
-      label += ' — ' + coveredCount + '/' + selectedPids.length + ' projects';
+      label += ' -' + coveredCount + '/' + selectedPids.length + ' projects';
     }
     memberOptions.push({ label: label, value: id });
   });
 
-  // Build stage options from selected bundles — positional only (names vary across QC plans)
+  // Build stage options from selected bundles -positional only (names vary across QC plans)
   var maxStages = 0;
   selectedKeys.forEach(function(bundleId) {
     var bundle = bundles.find(function(b) { return b.id === bundleId; });
@@ -3043,7 +3043,7 @@ function BulkActionBar(props) {
       });
       var targetIdx;
       if (bulkStage === 'current') {
-        // Find the current (active) stage — stage matching bundle.stage name, or first stage
+        // Find the current (active) stage -stage matching bundle.stage name, or first stage
         targetIdx = -1;
         if (bundle.stage) {
           targetIdx = stageNames.indexOf(bundle.stage);
@@ -3092,14 +3092,14 @@ function BulkActionBar(props) {
     var skipped = [];
     var eligible = [];
     validTargets.forEach(function(t) {
-      // Skip archived/complete bundles — Domino silently rejects these
+      // Skip archived/complete bundles -Domino silently rejects these
       var state = (t.bundle.state || '').toLowerCase();
       if (state === 'archived') {
-        skipped.push({ bundleName: t.bundleName, reason: 'Archived — reactivate in Domino first' });
+        skipped.push({ bundleName: t.bundleName, reason: 'Archived -reactivate in Domino first' });
         return;
       }
       if (state === 'complete') {
-        skipped.push({ bundleName: t.bundleName, reason: 'Complete — reopen in Domino first' });
+        skipped.push({ bundleName: t.bundleName, reason: 'Complete -reopen in Domino first' });
         return;
       }
       // Skip if assignee isn't a collaborator on the bundle's project
@@ -3116,7 +3116,7 @@ function BulkActionBar(props) {
       antd.notification.error({
         message: 'Cannot assign any of the selected ' + B.toLowerCase() + 's',
         description: h('div', null,
-          skipped.map(function(s, i) { return h('p', { key: i, style: { fontSize: 12 } }, '\u2022 ' + s.bundleName + ' — ' + s.reason); }),
+          skipped.map(function(s, i) { return h('p', { key: i, style: { fontSize: 12 } }, '\u2022 ' + s.bundleName + ' -' + s.reason); }),
           h('p', { style: { marginTop: 8, color: '#65657B', fontSize: 12 } }, 'Domino requires: active ' + B.toLowerCase() + ', and assignee must be a project collaborator.')
         ),
         duration: 15,
@@ -3129,7 +3129,7 @@ function BulkActionBar(props) {
         .then(function(resp) {
           if (resp.verified === false) {
             var actualName = resp.actualAssignee ? (resp.actualAssignee.name || resp.actualAssignee.id) : 'nobody';
-            return { success: false, bundleName: t.bundleName, stageName: t.stageName, reason: 'Domino did not persist — assignee is still ' + actualName + '. They may need to be added as a collaborator on project ' + (t.bundle.projectName || '') + '.' };
+            return { success: false, bundleName: t.bundleName, stageName: t.stageName, reason: 'Domino did not persist -assignee is still ' + actualName + '. They may need to be added as a collaborator on project ' + (t.bundle.projectName || '') + '.' };
           }
           // Only update local state after verification succeeds
           if (resp && resp.assignee && t.stageData) {
@@ -3139,7 +3139,7 @@ function BulkActionBar(props) {
         })
         .catch(function(err) {
           var detail = err.message || String(err);
-          var reason = detail.indexOf('403') !== -1 ? 'Permission denied — check project collaborator settings' : detail.indexOf('404') !== -1 ? 'Not found' : parseServerError(detail);
+          var reason = detail.indexOf('403') !== -1 ? 'Permission denied -check project collaborator settings' : detail.indexOf('404') !== -1 ? 'Not found' : parseServerError(detail);
           return { success: false, bundleName: t.bundleName, stageName: t.stageName, error: detail, reason: reason };
         });
     });
@@ -3155,13 +3155,13 @@ function BulkActionBar(props) {
       // Build skipped section if any were pre-filtered
       var skippedSection = skippedCount > 0 ? [
         h('p', { style: { fontWeight: 500, marginTop: 8, fontSize: 12, color: '#8F8FA3' } }, 'Skipped (' + skippedCount + '):'),
-        skipped.map(function(s, i) { return h('p', { key: 'skip-' + i, style: { marginLeft: 8, fontSize: 11, color: '#8F8FA3' } }, '\u2022 ' + s.bundleName + ' — ' + s.reason); })
+        skipped.map(function(s, i) { return h('p', { key: 'skip-' + i, style: { marginLeft: 8, fontSize: 11, color: '#8F8FA3' } }, '\u2022 ' + s.bundleName + ' -' + s.reason); })
       ] : [];
 
       if (failed.length === 0 && succeeded.length > 0) {
         var stageLabel = bulkStage === 'current' ? 'current stage' : 'Stage ' + (parseInt(bulkStage, 10) + 1);
         var msg = 'Assigned ' + stageLabel + ' on ' + succeeded.length + ' ' + B.toLowerCase() + (succeeded.length > 1 ? 's' : '');
-        msg += verified.length === succeeded.length ? ' — all verified in Domino' : ' (verification pending for ' + (succeeded.length - verified.length) + ')';
+        msg += verified.length === succeeded.length ? ' -all verified in Domino' : ' (verification pending for ' + (succeeded.length - verified.length) + ')';
         if (skippedCount > 0) msg += '. ' + skippedCount + ' skipped.';
         antd.message.success(msg);
         if (skippedCount > 0) {
@@ -3177,7 +3177,7 @@ function BulkActionBar(props) {
           description: h('div', null,
             verified.length > 0 ? h('p', null, verified.length + ' verified in Domino') : null,
             h('p', { style: { fontWeight: 500, marginTop: 4 } }, 'Failed (' + failed.length + '):'),
-            failed.map(function(f, i) { return h('p', { key: i, style: { marginLeft: 8, fontSize: 12 } }, '\u2022 ' + f.bundleName + ' / ' + f.stageName + ' — ' + f.reason); }),
+            failed.map(function(f, i) { return h('p', { key: i, style: { marginLeft: 8, fontSize: 12 } }, '\u2022 ' + f.bundleName + ' / ' + f.stageName + ' -' + f.reason); }),
             skippedSection,
             h('p', { style: { marginTop: 8, color: '#65657B', fontSize: 12 } }, 'Tip: Ensure the assignee is a collaborator on each ' + B.toLowerCase() + '\'s Domino project.')
           ),
@@ -3187,7 +3187,7 @@ function BulkActionBar(props) {
         antd.notification.error({
           message: 'All ' + failed.length + ' assignments failed',
           description: h('div', null,
-            failed.map(function(f, i) { return h('p', { key: i, style: { fontSize: 12 } }, '\u2022 ' + f.bundleName + ' / ' + f.stageName + ' — ' + f.reason); }),
+            failed.map(function(f, i) { return h('p', { key: i, style: { fontSize: 12 } }, '\u2022 ' + f.bundleName + ' / ' + f.stageName + ' -' + f.reason); }),
             skippedSection,
             h('p', { style: { marginTop: 8, color: '#65657B', fontSize: 12 } }, 'Domino requires: active ' + B.toLowerCase() + ' state, and assignee must be a project collaborator.')
           ),
@@ -3379,7 +3379,7 @@ function AttachmentsDrawer(props) {
             )
           );
         }
-        // Current version — show green
+        // Current version -show green
         if (s && !s.isStale && s.latestVersion > 1) {
           return h(Tooltip, { title: 'Current version (latest known: v' + s.latestVersion + ')' },
             h(Tag, { color: 'green', style: { fontSize: 10, margin: 0 } }, 'v' + ver)
@@ -3518,7 +3518,7 @@ function CSVUploadDrawer(props) {
     var savedMapping = null;
     try { var sm = localStorage.getItem('sce_csv_column_mapping'); if (sm) savedMapping = JSON.parse(sm); } catch(e) {}
     if (savedMapping && headers.some(function(h) { return Object.values(savedMapping).indexOf(h) >= 0; })) {
-      // Saved mapping has at least one matching header — use it
+      // Saved mapping has at least one matching header -use it
       var merged = {};
       Object.keys(savedMapping).forEach(function(k) {
         if (headers.indexOf(savedMapping[k]) >= 0) merged[k] = savedMapping[k];
@@ -3681,7 +3681,7 @@ function CSVUploadDrawer(props) {
     return errors;
   }, [step, mapping, defaultPolicy, defaultProject, csvRows, previewRows]);
 
-  // Upload function — 1-by-1 with concurrency control
+  // Upload function -1-by-1 with concurrency control
   function startUpload() {
     if (!connected) {
       antd.message.warning('Cannot upload in dummy mode. Connect to a Domino instance first.');
@@ -4144,7 +4144,7 @@ function QCTrackerPage(props) {
     return result;
   }, [filtered, searchText, shownStageCols]);
 
-  // Stats (computed from all bundles, not filtered — so stat cards show true totals)
+  // Stats (computed from all bundles, not filtered -so stat cards show true totals)
   var stats = useMemo(function() {
     var openFindings = 0; var totalFindings = 0; var unassigned = 0; var complete = 0; var archived = 0;
     bundles.forEach(function(b) {
@@ -4170,10 +4170,10 @@ function QCTrackerPage(props) {
     setActiveStatCard(null);
   }
 
-  // Clickable stat cards — toggle filter when clicked
+  // Clickable stat cards -toggle filter when clicked
   function handleStatClick(type) {
     if (activeStatCard === type) {
-      // Click the same card again — deselect
+      // Click the same card again -deselect
       clearFilters();
       return;
     }
@@ -4388,7 +4388,7 @@ function QCTrackerPage(props) {
                       });
                     }
                     if (resp.verified === true) {
-                      antd.message.success('Assignee updated — verified in Domino');
+                      antd.message.success('Assignee updated -verified in Domino');
                     } else {
                       antd.message.success('Assignee updated (verification pending)');
                     }
@@ -4402,7 +4402,7 @@ function QCTrackerPage(props) {
                   var friendlyDetail = parseServerError(detail);
                   antd.notification.error({
                     message: 'Reassignment failed for ' + bundleName,
-                    description: detail.indexOf('403') !== -1 ? 'You do not have permission to reassign this stage. Check that you are a collaborator on the project.' : detail.indexOf('404') !== -1 ? 'This deliverable or stage was not found. It may have been deleted — try refreshing the page.' : friendlyDetail,
+                    description: detail.indexOf('403') !== -1 ? 'You do not have permission to reassign this stage. Check that you are a collaborator on the project.' : detail.indexOf('404') !== -1 ? 'This deliverable or stage was not found. It may have been deleted -try refreshing the page.' : friendlyDetail,
                     duration: 8,
                   });
                 });
@@ -4437,7 +4437,7 @@ function QCTrackerPage(props) {
         var stale = countStaleAttachments(record);
         var clickHandler = function(e) { e.stopPropagation(); if (onSelectBundle) onSelectBundle(record, 'attachments'); };
         if (stale > 0) {
-          return h(Tooltip, { title: count + ' attachment' + (count > 1 ? 's' : '') + ' \u2014 ' + stale + ' outdated snapshot' + (stale > 1 ? 's' : '') + '. Click to review.' },
+          return h(Tooltip, { title: count + ' attachment' + (count > 1 ? 's' : '') + ' \u2013 ' + stale + ' outdated snapshot' + (stale > 1 ? 's' : '') + '. Click to review.' },
             h('span', {
               style: { display: 'inline-flex', alignItems: 'center', gap: 2, cursor: 'pointer' },
               onClick: clickHandler,
@@ -4622,7 +4622,7 @@ function QCTrackerPage(props) {
                         stageObj.assignee = userId
                           ? (mm ? { id: mm.id, name: mm.userName, firstName: mm.firstName, lastName: mm.lastName } : { id: userId })
                           : null;
-                        antd.message.success(resp.verified === true ? 'Assignee updated — verified in Domino' : 'Assignee updated (verification pending)');
+                        antd.message.success(resp.verified === true ? 'Assignee updated -verified in Domino' : 'Assignee updated (verification pending)');
                       }
                       setRerenderKey(function(k) { return k + 1; });
                     })
@@ -4630,7 +4630,7 @@ function QCTrackerPage(props) {
                       var detail = err.message || String(err);
                       antd.notification.error({
                         message: 'Reassignment failed',
-                        description: detail.indexOf('403') !== -1 ? 'Permission denied — check project collaborator access.' : parseServerError(detail),
+                        description: detail.indexOf('403') !== -1 ? 'Permission denied -check project collaborator access.' : parseServerError(detail),
                         duration: 8,
                       });
                     });
@@ -4651,7 +4651,7 @@ function QCTrackerPage(props) {
   // All columns combined (per-stage pairs appended; hidden by default via shownStageCols)
   var allColumns = columns.concat(perStageCols);
 
-  // Charts — Status Distribution donut + Deliverables by Stage bar
+  // Charts -Status Distribution donut + Deliverables by Stage bar
   useEffect(function() {
     if (bundles.length === 0) return;
     var el = document.getElementById('qc-chart-status');
@@ -4735,7 +4735,7 @@ function QCTrackerPage(props) {
       terms: terms,
     }),
 
-    // Stat cards — clickable with toggle highlight + subtitles
+    // Stat cards -clickable with toggle highlight + subtitles
     h('div', { className: 'stats-row' },
       h('div', { className: 'stat-card-clickable' + (activeStatCard === 'total' ? ' stat-card-active' : ''), onClick: function() { handleStatClick('total'); } },
         h(StatCard, { label: 'Total ' + capFirst(B) + 's', value: stats.total, color: 'primary' })),
@@ -4749,7 +4749,7 @@ function QCTrackerPage(props) {
         h(StatCard, { label: 'Complete', value: stats.complete, color: 'success' }))
     ),
 
-    // Charts row — compact
+    // Charts row -compact
     h('div', { className: 'two-col', style: { marginBottom: 16 } },
       h('div', { className: 'panel' },
         h('div', { className: 'panel-header' }, h('span', { className: 'panel-title' }, capFirst(B) + ' Status Distribution')),
@@ -4974,7 +4974,7 @@ function DetailDrawer(props) {
                           if (resp && resp.assignee) { stageData.assignee = resp.assignee; } else if (!userId) { stageData.assignee = null; }
                           if (resp && resp.stage && resp.stage.policyVersionId) { bundle._policyVersionId = resp.stage.policyVersionId; }
                           if (resp.verified === true) {
-                            antd.message.success('Stage reassigned — verified');
+                            antd.message.success('Stage reassigned -verified');
                           } else if (resp.verified === false) {
                             var dbg = resp._debug || {};
                             var attempts = dbg.attempts || [];
@@ -5422,16 +5422,16 @@ function AssignmentRulesPage(props) {
         return;
       }
       if (!t.memberId) {
-        skipped.push({ bundleName: t.bundleName, reason: 'Assignee "' + t.memberUserName + '" not found in project members — they may need to be added as a collaborator' });
+        skipped.push({ bundleName: t.bundleName, reason: 'Assignee "' + t.memberUserName + '" not found in project members -they may need to be added as a collaborator' });
         return;
       }
       var state = (t.bundle.state || '').toLowerCase();
       if (state === 'archived') {
-        skipped.push({ bundleName: t.bundleName, reason: 'Archived — reactivate in Domino first' });
+        skipped.push({ bundleName: t.bundleName, reason: 'Archived -reactivate in Domino first' });
         return;
       }
       if (state === 'complete') {
-        skipped.push({ bundleName: t.bundleName, reason: 'Complete — reopen in Domino first' });
+        skipped.push({ bundleName: t.bundleName, reason: 'Complete -reopen in Domino first' });
         return;
       }
       eligible.push(t);
@@ -5442,7 +5442,7 @@ function AssignmentRulesPage(props) {
       antd.notification.error({
         message: 'Cannot apply any rules',
         description: h('div', null,
-          skipped.map(function(s, i) { return h('p', { key: i, style: { fontSize: 12 } }, '\u2022 ' + s.bundleName + ' — ' + s.reason); })
+          skipped.map(function(s, i) { return h('p', { key: i, style: { fontSize: 12 } }, '\u2022 ' + s.bundleName + ' -' + s.reason); })
         ),
         duration: 15,
       });
@@ -5456,7 +5456,7 @@ function AssignmentRulesPage(props) {
         .then(function(resp) {
           if (resp.verified === false) {
             var actualName = resp.actualAssignee ? (resp.actualAssignee.name || resp.actualAssignee.id) : 'nobody';
-            return { success: false, bundleName: t.bundleName, stageName: t.stageName, reason: 'Domino did not persist — assignee is still ' + actualName + '. They may need to be added as a collaborator.' };
+            return { success: false, bundleName: t.bundleName, stageName: t.stageName, reason: 'Domino did not persist -assignee is still ' + actualName + '. They may need to be added as a collaborator.' };
           }
           // Update local state after verification
           if (resp && resp.assignee && t.stageData) {
@@ -5466,7 +5466,7 @@ function AssignmentRulesPage(props) {
         })
         .catch(function(err) {
           var detail = err.message || String(err);
-          var reason = detail.indexOf('403') !== -1 ? 'Permission denied — check project collaborator settings' : detail.indexOf('404') !== -1 ? B + ' or stage not found' : parseServerError(detail);
+          var reason = detail.indexOf('403') !== -1 ? 'Permission denied -check project collaborator settings' : detail.indexOf('404') !== -1 ? B + ' or stage not found' : parseServerError(detail);
           return { success: false, bundleName: t.bundleName, stageName: t.stageName, reason: reason };
         });
     });
@@ -5485,12 +5485,12 @@ function AssignmentRulesPage(props) {
 
       var skippedSection = skipped.length > 0 ? [
         h('p', { style: { fontWeight: 500, marginTop: 8, fontSize: 12, color: '#8F8FA3' } }, 'Skipped (' + skipped.length + '):'),
-        skipped.map(function(s, i) { return h('p', { key: 'skip-' + i, style: { marginLeft: 8, fontSize: 11, color: '#8F8FA3' } }, '\u2022 ' + s.bundleName + ' — ' + s.reason); })
+        skipped.map(function(s, i) { return h('p', { key: 'skip-' + i, style: { marginLeft: 8, fontSize: 11, color: '#8F8FA3' } }, '\u2022 ' + s.bundleName + ' -' + s.reason); })
       ] : [];
 
       if (failed.length === 0 && succeeded.length > 0) {
         var msg = 'Applied rules: assigned ' + succeeded.length + ' stage' + (succeeded.length !== 1 ? 's' : '');
-        msg += verified.length === succeeded.length ? ' — all verified in Domino' : ' (verification pending for ' + (succeeded.length - verified.length) + ')';
+        msg += verified.length === succeeded.length ? ' -all verified in Domino' : ' (verification pending for ' + (succeeded.length - verified.length) + ')';
         if (skipped.length > 0) msg += '. ' + skipped.length + ' skipped.';
         antd.message.success(msg);
         if (skipped.length > 0) {
@@ -5506,7 +5506,7 @@ function AssignmentRulesPage(props) {
           description: h('div', null,
             verified.length > 0 ? h('p', null, verified.length + ' verified in Domino') : null,
             h('p', { style: { fontWeight: 500, marginTop: 4 } }, 'Failed (' + failed.length + '):'),
-            failed.map(function(f, i) { return h('p', { key: i, style: { marginLeft: 8, fontSize: 12 } }, '\u2022 ' + f.bundleName + ' / ' + f.stageName + ' — ' + f.reason); }),
+            failed.map(function(f, i) { return h('p', { key: i, style: { marginLeft: 8, fontSize: 12 } }, '\u2022 ' + f.bundleName + ' / ' + f.stageName + ' -' + f.reason); }),
             skippedSection,
             h('p', { style: { marginTop: 8, color: '#65657B', fontSize: 12 } }, 'Tip: Ensure the assignee is a collaborator on the ' + B.toLowerCase() + '\'s Domino project.')
           ),
@@ -5516,7 +5516,7 @@ function AssignmentRulesPage(props) {
         antd.notification.error({
           message: 'All ' + eligible.length + ' assignments failed',
           description: h('div', null,
-            failed.map(function(f, i) { return h('p', { key: i, style: { marginLeft: 8, fontSize: 12 } }, '\u2022 ' + f.bundleName + ' / ' + f.stageName + ' — ' + f.reason); }),
+            failed.map(function(f, i) { return h('p', { key: i, style: { marginLeft: 8, fontSize: 12 } }, '\u2022 ' + f.bundleName + ' / ' + f.stageName + ' -' + f.reason); }),
             skippedSection
           ),
           duration: 15,
@@ -5994,20 +5994,20 @@ function StageAssignmentsPage(props) {
       var successCount = successes.length;
       if (failures.length === 0) {
         var msg = 'Reassigned ' + selectedStages.length + ' stage' + (selectedStages.length !== 1 ? 's' : '');
-        msg += verified.length === successCount ? ' — all verified in Domino' : ' (verification pending for ' + (successCount - verified.length) + ')';
+        msg += verified.length === successCount ? ' -all verified in Domino' : ' (verification pending for ' + (successCount - verified.length) + ')';
         antd.message.success(msg);
         if (props.onRefresh) props.onRefresh();
       } else if (successCount > 0) {
         antd.notification.warning({
           message: successCount + ' of ' + selectedStages.length + ' stages reassigned' + (verified.length > 0 ? ' (' + verified.length + ' verified)' : ''),
-          description: 'Failed (' + failures.length + '): ' + failures.map(function(f) { return f.bundleName + ' / ' + f.stageName + ' — ' + f.reason; }).join('; '),
+          description: 'Failed (' + failures.length + '): ' + failures.map(function(f) { return f.bundleName + ' / ' + f.stageName + ' -' + f.reason; }).join('; '),
           duration: 10,
         });
         if (props.onRefresh) props.onRefresh();
       } else {
         antd.notification.error({
           message: 'All ' + failures.length + ' reassignments failed',
-          description: failures.map(function(f) { return f.bundleName + ' / ' + f.stageName + ' — ' + f.reason; }).join('; '),
+          description: failures.map(function(f) { return f.bundleName + ' / ' + f.stageName + ' -' + f.reason; }).join('; '),
           duration: 10,
         });
       }
@@ -6282,10 +6282,10 @@ function StageAssignmentsPage(props) {
       )
     ),
 
-    // Gap Assign Modal — opened by clicking unassigned count in coverage gaps
+    // Gap Assign Modal -opened by clicking unassigned count in coverage gaps
     h(Modal, {
       title: gapAssignRow
-        ? 'Assign ' + gapAssignRow.unassigned + ' Unassigned — ' + gapAssignRow.stageName
+        ? 'Assign ' + gapAssignRow.unassigned + ' Unassigned -' + gapAssignRow.stageName
         : 'Assign Stages',
       open: !!gapAssignRow,
       onOk: handleGapAssign,
@@ -6898,7 +6898,7 @@ function AutomationRulesPage(props) {
 //  RISK OPTIMIZER
 // ═══════════════════════════════════════════════════════════════
 
-// Default risk classification config — user can edit via the Config panel
+// Default risk classification config -user can edit via the Config panel
 var DEFAULT_RISK_CONFIG = {
   highRisk: {
     label: 'High',
@@ -7218,69 +7218,6 @@ function AIInsightsPage(props) {
     };
   }, [bundles]);
 
-  // ── Chart: Wait Time Breakdown by Study (Level 1) ──────────
-  useEffect(function() {
-    if (activeInsight !== 1) return;
-    setTimeout(function() {
-      var existingEl = document.getElementById('chart-insight-wait-breakdown');
-      if (!existingEl) return;
-      var existingIdx = parseInt(existingEl.getAttribute('data-highcharts-chart'));
-      if (!isNaN(existingIdx) && Highcharts.charts[existingIdx]) {
-        Highcharts.charts[existingIdx].destroy();
-      }
-
-      var m = insightMetrics;
-      // Use compelling demo data with the featured project as the clear outlier
-      var featuredLabel = m.featuredProject ? m.featuredProject.replace(/_/g, ' ') : 'CDISC01 CSR';
-      var categories = [];
-      var activeData = [];
-      var waitData = [];
-      var resolutionData = [];
-
-      // Each entry: [name, waitDays, resolutionDays, activeDays]
-      var demoBreakdown = [
-        [featuredLabel,              21.0, 12.0, 9.0],  // 42d total — outlier
-        ['LS-GovernanceDemo-AY',     11.0,  8.0, 6.0],  // 25d
-        ['AM',                        8.0,  7.0, 5.0],  // 20d
-        ['Scalable RWE Migraine',     6.5,  5.0, 4.5],  // 16d
-        ['Landingproject',            5.0,  4.0, 4.0],  // 13d
-        ['quick-start',               3.5,  3.5, 4.0],  // 11d
-      ];
-      demoBreakdown.forEach(function(row) {
-        categories.push(row[0]);
-        waitData.push(row[1]);
-        resolutionData.push(row[2]);
-        activeData.push(row[3]);
-      });
-
-      Highcharts.chart('chart-insight-wait-breakdown', {
-        chart: { type: 'bar', height: Math.max(220, categories.length * 55 + 60), backgroundColor: 'transparent' },
-        title: { text: null },
-        xAxis: {
-          categories: categories,
-          labels: { style: { fontSize: '11px' } },
-          tickWidth: 0,
-        },
-        yAxis: {
-          min: 0,
-          title: { text: 'Days' },
-          stackLabels: { enabled: true, format: '{total:.0f}d', style: { fontSize: '11px', fontWeight: '600', color: '#2E2E38' } },
-        },
-        legend: { reversed: true, itemStyle: { fontSize: '11px' } },
-        plotOptions: {
-          series: { stacking: 'normal', borderRadius: 2 },
-          bar: { dataLabels: { enabled: true, format: '{y:.1f}d', style: { fontSize: '10px' } } },
-        },
-        series: [
-          { name: 'Transition \u2192 start delay', data: waitData, color: '#C20A29' },
-          { name: 'Finding resolution', data: resolutionData, color: '#FF6543' },
-          { name: 'Active QC work', data: activeData, color: '#28A464' },
-        ],
-        credits: { enabled: false },
-      });
-    }, 100);
-  }, [activeInsight, insightMetrics]);
-
   // ── Chart: Wait by Project horizontal bar (Level 1) ───────
   useEffect(function() {
     if (activeInsight !== 1) return;
@@ -7347,7 +7284,7 @@ function AIInsightsPage(props) {
 
       var sevLabels = ['S0 (Critical)', 'S1 (Major)', 'S2 (Minor)', 'S3 (Info)'];
       var sevColors = ['#C20A29', '#FF6543', '#CCB718', '#0070CC'];
-      // Always use compelling demo data — clear severity-to-resolution gradient
+      // Always use compelling demo data -clear severity-to-resolution gradient
       var avgData = [12.4, 6.8, 3.2, 1.1];
       var countData = [8, 18, 26, 14];
 
@@ -7505,7 +7442,7 @@ function AIInsightsPage(props) {
       : 'QC cycles are ' + ratioDisplay + ' longer than the internal benchmark';
     var numStudies = Object.keys(m.completedByProject || {}).length || 6;
     var cardSubtitle = m.featuredProject
-      ? m.featuredProject.replace(/_/g, ' ') + ' avg: ' + m.featuredProjectAvgCycle.toFixed(0) + 'd \u2014 benchmark: ' + m.benchmarkAvg.toFixed(0) + 'd (' + numStudies + ' studies)'
+      ? m.featuredProject.replace(/_/g, ' ') + ' avg: ' + m.featuredProjectAvgCycle.toFixed(0) + 'd \u2013 benchmark: ' + m.benchmarkAvg.toFixed(0) + 'd (' + numStudies + ' studies)'
       : 'Driving ~' + delayPct + '% of total programming delay';
 
     // ── Contributing factors (real data + demo supplement) ──
@@ -7519,26 +7456,17 @@ function AIInsightsPage(props) {
     var overQCPct = m.pctLowRiskOverQC > 0 ? m.pctLowRiskOverQC : 20;
 
     var factors = [
-      { pct: (waitPct || 47) + '%', label: 'of cycle time is spent waiting for the next assignee to start after stage transition', color: '#C20A29', level: 1 },
-      { pct: (delayPct || 35) + '%', label: 'of elapsed time consumed by finding resolution', color: '#FF6543', level: 2 },
+      { pct: (waitPct || 47) + '%', label: 'above benchmark in transition-to-start time between stages', color: '#C20A29', level: 1 },
+      { pct: (delayPct || 35) + '%', label: 'above benchmark in finding resolution time', color: '#FF6543', level: 2 },
       { pct: (blockedPct || 9) + '%', label: 'of active deliverables blocked by open findings', color: '#0070CC', level: 3 },
       { pct: overQCPct + '%', label: 'of low-risk deliverables going through double programming QC', color: '#CCB718', level: 4 },
     ];
 
     return h('div', null,
-      h('div', { className: 'insight-overview-intro' },
-        h('div', { className: 'insight-overview-intro-icon' },
-          icons && icons.ExperimentOutlined ? h(icons.ExperimentOutlined, { style: { fontSize: 20 } }) : null
-        ),
-        h('div', null,
-          h('div', { style: { fontWeight: 600, fontSize: 14, marginBottom: 4 } }, 'Operational insights derived from your QC data'),
-          h('div', { style: { fontSize: 13, color: '#65657B' } }, 'Each insight follows a drill-down path: signal \u2192 data patterns \u2192 timeline \u2192 actions.')
-        )
-      ),
       // Primary insight card
       h('div', { className: 'insight-section-label' },
         h('span', { className: 'insight-section-number' }, 'INSIGHT 1'),
-        h('span', { className: 'insight-section-detail' }, 'Full drill-down available \u2014 click to explore')
+        h('span', { className: 'insight-section-detail' }, 'Full drill-down available \u2013 click to explore')
       ),
       h('div', { className: 'insight-card insight-card-primary', onClick: function() { setActiveInsight(1); } },
         h('div', { className: 'insight-card-header' },
@@ -7547,7 +7475,7 @@ function AIInsightsPage(props) {
         ),
         h('div', { className: 'insight-card-title' }, cardTitle),
         h('div', { className: 'insight-card-subtitle' }, cardSubtitle),
-        // Contributing factors — each clickable to its drill-down level
+        // Contributing factors -each clickable to its drill-down level
         factors.length > 0 ? h('div', { className: 'insight-card-factors' },
           factors.map(function(f, i) {
             return h('div', { key: i, className: 'insight-card-factor-row', onClick: function(e) { e.stopPropagation(); setActiveInsight(f.level); }, style: { cursor: 'pointer' } },
@@ -7563,7 +7491,7 @@ function AIInsightsPage(props) {
       // Secondary insight cards
       h('div', { className: 'insight-section-label', style: { marginTop: 24 } },
         h('span', { className: 'insight-section-number' }, 'MORE INSIGHTS'),
-        h('span', { className: 'insight-section-detail' }, 'Additional signals detected \u2014 full analysis coming soon')
+        h('span', { className: 'insight-section-detail' }, 'Additional signals detected \u2013 full analysis coming soon')
       ),
       h('div', { className: 'insight-cards-row' },
         h('div', { className: 'insight-card insight-card-secondary' },
@@ -7605,7 +7533,7 @@ function AIInsightsPage(props) {
     var totalWaitDays = m.estimatedWaitDays > 0 ? m.estimatedWaitDays : Math.round(avgWaitPerTransition * (m.complete || 12));
 
     // Find longest wait stage from stageDurations
-    var longestStage = '\u2014';
+    var longestStage = '\u2013';
     var longestDays = 0;
     var sd = m.stageDurations || {};
     Object.keys(sd).forEach(function(sName) {
@@ -7621,8 +7549,6 @@ function AIInsightsPage(props) {
       longestDays = 5.2;
     }
 
-    var chartHeight = 6 * 55 + 60; // 6 demo projects
-
     var featuredLabel = m.featuredProject ? m.featuredProject.replace(/_/g, ' ') : 'CDISC01 CSR';
 
     return h('div', null,
@@ -7631,7 +7557,7 @@ function AIInsightsPage(props) {
         h('h2', null, (waitPct || 47) + '% of your QC cycle is idle wait time'),
         h('p', { className: 'insight-level-subtitle' },
           B + 's sit idle for an average of ' + avgWaitPerTransition.toFixed(1) + ' days after each stage transition. ' +
-          'After a stage transitions, the new assignee doesn\u2019t begin work for days \u2014 this is the single largest contributor to cycle time.')
+          'After a stage transitions, the new assignee doesn\u2019t begin work for days \u2013 this is the single largest contributor to cycle time.')
       ),
 
       // Stats row
@@ -7666,18 +7592,7 @@ function AIInsightsPage(props) {
         })
       ),
 
-      // Chart 1: Time breakdown stacked bar
-      h('div', { className: 'panel', style: { marginTop: 16 } },
-        chartTitle(
-          'Time Breakdown by Study',
-          'Stacked bar showing how total QC cycle time breaks down into active work, finding resolution, and idle wait. Wait time (red) is the dominant component in most studies.'
-        ),
-        h('div', { className: 'panel-body' },
-          h('div', { id: 'chart-insight-wait-breakdown', style: { height: chartHeight } })
-        )
-      ),
-
-      // Chart 2: Avg wait by project
+      // Chart: Avg wait by project
       h('div', { className: 'panel', style: { marginTop: 16 } },
         chartTitle(
           'Avg Transition-to-Start Delay by Study',
@@ -7825,7 +7740,7 @@ function AIInsightsPage(props) {
           return {
             key: i,
             name: b.name,
-            project: b.projectName || '\u2014',
+            project: b.projectName || '\u2013',
             daysStuck: daysStuck,
             findingCount: openFindings.length,
             severity: maxSev,
@@ -7968,8 +7883,8 @@ function AIInsightsPage(props) {
         return {
           key: i,
           name: b.name,
-          project: b.projectName || '\u2014',
-          policy: b.policyName || '\u2014',
+          project: b.projectName || '\u2013',
+          policy: b.policyName || '\u2013',
           findings: (b._findings || []).length,
           cycle: cycleD,
         };
@@ -7993,7 +7908,7 @@ function AIInsightsPage(props) {
         h('h2', null, overQCPct + '% of low-risk deliverables are going through double programming QC'),
         h('p', { className: 'insight-level-subtitle' },
           'Low-risk deliverables with minimal findings history are being routed through ' +
-          'the same rigorous double programming QC as high-risk outputs \u2014 unnecessary overhead without proportional quality benefit.')
+          'the same rigorous double programming QC as high-risk outputs \u2013 unnecessary overhead without proportional quality benefit.')
       ),
 
       // Stats row
@@ -8247,7 +8162,7 @@ function AIInsightsPage(props) {
     var confidenceColor = confidenceLevel === 'High' ? '#28A464' : confidenceLevel === 'Medium' ? '#CCB718' : '#C20A29';
 
     var limitations = [
-      'Wait time is a residual estimate \u2014 actual hands-on effort may differ from stage duration',
+      'Wait time is a residual estimate \u2013 actual hands-on effort may differ from stage duration',
       'Risk classification uses QC plan names as a proxy; formal risk assessment data not yet available',
       'Finding resolution timestamps may not reflect actual work start (queue time included)',
       'Blocked percentage is a point-in-time snapshot and fluctuates daily',
@@ -8688,7 +8603,7 @@ function RiskOptimizerPage(props) {
             },
           };
         }
-        // Graph matches but doesn't upgrade — attach graph info anyway
+        // Graph matches but doesn't upgrade -attach graph info anyway
         keywordResult.graphDetail = {
           anchorNodes: graphResult.anchorNodes,
           propagationPaths: graphResult.propagationPaths,
@@ -9695,7 +9610,7 @@ function RiskOptimizerPage(props) {
                         content: h('div', null,
                           h('p', null, 'The following standard CDISC relationships were detected:'),
                           h('ul', { style: { fontSize: 12 } }, suggestions.map(function(s) {
-                            return h('li', { key: s.edgeId }, s.source.toUpperCase() + ' \u2192 ' + s.target.toUpperCase() + ' \u2014 ' + s.desc);
+                            return h('li', { key: s.edgeId }, s.source.toUpperCase() + ' \u2192 ' + s.target.toUpperCase() + ' \u2013 ' + s.desc);
                           }))
                         ),
                         okText: 'Add All (' + suggestions.length + ')', width: 520,
@@ -10327,8 +10242,8 @@ function AddEdgeModal(props) {
         h('div', { style: { flex: 1 } },
           h('label', { style: { fontSize: 12, color: '#65657B', display: 'block', marginBottom: 4 } }, 'Column Scope'),
           h(Select, { style: { width: '100%' }, value: edgeScope, onChange: setEdgeScope, options: [
-            { value: 'full', label: 'Full \u2014 all columns used' },
-            { value: 'partial', label: 'Partial \u2014 some columns used' },
+            { value: 'full', label: 'Full \u2013 all columns used' },
+            { value: 'partial', label: 'Partial \u2013 some columns used' },
             { value: 'unknown', label: 'Unknown' },
           ] })
         )
@@ -10343,7 +10258,7 @@ function AddEdgeModal(props) {
           var att = { full: 1.0, partial: 0.6, unknown: 0.8 }[edgeScope] * { direct: 1.0, indirect: 0.7, reference_only: 0.3 }[edgeRel];
           return h('strong', null, (att * 100).toFixed(0) + '%');
         })(),
-        ' \u2014 ',
+        ' \u2013 ',
         edgeScope === 'partial' ? 'Partial column usage reduces inherited risk.' : edgeScope === 'full' ? 'Full column usage passes inherited risk at full strength.' : 'Unknown scope uses a conservative 80% factor.',
         ' ',
         edgeRel === 'reference_only' ? 'Reference-only further reduces to 30%.' : edgeRel === 'indirect' ? 'Indirect dependency reduces to 70%.' : ''
@@ -10405,7 +10320,7 @@ function AddAnchorModal(props) {
           rows: 2,
           value: anchorReason,
           onChange: function(e) { setAnchorReason(e.target.value); },
-          placeholder: 'e.g., Primary efficacy endpoint — patient survival analysis',
+          placeholder: 'e.g., Primary efficacy endpoint -patient survival analysis',
         })
       ),
       h('div', { style: { fontSize: 11, color: '#8F8FA3', background: '#F8F8FC', padding: 8, borderRadius: 6 } },
@@ -10531,7 +10446,7 @@ function CopyDeliverablesUtility(props) {
           renamed = true;
           isDuplicate = false;
         } else {
-          // Even with suffix it collides — mark as duplicate
+          // Even with suffix it collides -mark as duplicate
           isDuplicate = true;
         }
       }
@@ -10609,7 +10524,7 @@ function CopyDeliverablesUtility(props) {
       if (idx >= validRows.length) {
         if (completedCount >= validRows.length) {
           if (progressTimer) { clearTimeout(progressTimer); progressTimer = null; }
-          console.log('[CopyDeliverables] Complete — created: ' + created.length + ', failed: ' + errors.length);
+          console.log('[CopyDeliverables] Complete -created: ' + created.length + ', failed: ' + errors.length);
           if (errors.length > 0) console.warn('[CopyDeliverables] Failures:', errors);
           console.groupEnd();
           setStep(3);
@@ -10670,9 +10585,9 @@ function CopyDeliverablesUtility(props) {
     { title: capFirst(terms.policy), dataIndex: 'policyName', key: 'policy' },
     { title: 'Status', key: 'status', width: 180,
       render: function(_, row) {
-        if (row.isDuplicate) return h(Tag, { color: 'orange' }, 'Duplicate — skip');
+        if (row.isDuplicate) return h(Tag, { color: 'orange' }, 'Duplicate -skip');
         if (!row.policyId) return h(Tag, { color: 'red' }, 'No policy');
-        if (row.renamed) return h(Tag, { color: 'blue' }, 'Renamed — ready');
+        if (row.renamed) return h(Tag, { color: 'blue' }, 'Renamed -ready');
         return h(Tag, { color: 'green' }, 'Ready');
       }
     },
@@ -10720,7 +10635,7 @@ function CopyDeliverablesUtility(props) {
       sourceProject && sourceBundles.length > 0 ? h('div', null,
         h('div', { style: { fontSize: 12, color: '#65657B', marginBottom: 8 } },
           sourceBundles.length + ' ' + B.toLowerCase() + (sourceBundles.length !== 1 ? 's' : '') + ' in ' + sourceProjectName +
-          ' — select which to copy' + (selectedKeys.length > 0 ? ' (' + selectedKeys.length + ' selected)' : '')
+          ' -select which to copy' + (selectedKeys.length > 0 ? ' (' + selectedKeys.length + ' selected)' : '')
         ),
         h(Table, {
           dataSource: sourceBundles,
@@ -10904,7 +10819,7 @@ function ConfigurationPage(props) {
       stageColumns.push({
         title: 'Stage ' + (idx + 1), key: 'stage_' + idx, width: 220,
         render: function(_, row) {
-          if (!row.stages || idx >= row.stages.length) return h('span', { style: { color: '#D0D0D0', fontSize: 12 } }, '\u2014');
+          if (!row.stages || idx >= row.stages.length) return h('span', { style: { color: '#D0D0D0', fontSize: 12 } }, '\u2013');
           var stageName = row.stages[idx];
           var policyMap = effectiveMapping[row.policyId] || {};
           var currentCategory = policyMap[stageName] || null;
@@ -11047,7 +10962,7 @@ function ConfigurationPage(props) {
                       placeholder: 'e.g. prod/', style: { fontFamily: 'monospace' }
                     }),
                     h('span', { key: rl + '_count', style: { fontSize: 12, color: '#65657B' } },
-                      patternPreview.counts[rl] + ' files' + (patternPreview.samples[rl] && patternPreview.samples[rl].length > 0 ? ' \u2014 e.g. ' + patternPreview.samples[rl][0] : ''))
+                      patternPreview.counts[rl] + ' files' + (patternPreview.samples[rl] && patternPreview.samples[rl].length > 0 ? ' \u2013 e.g. ' + patternPreview.samples[rl][0] : ''))
                   ];
                 })
               ),
@@ -11348,7 +11263,7 @@ function App() {
       }
       // State filter
       if (scopeStates.length > 0 && scopeStates.indexOf(b.state) < 0) return false;
-      // "Assigned to Me" checkbox filters — if any checked, bundle must match at least one
+      // "Assigned to Me" checkbox filters -if any checked, bundle must match at least one
       var anyCheckbox = filterMyCurrentStage || filterMyFutureStage || filterMyPriorStage;
       if (anyCheckbox && scopeCurrentUser) {
         var stageNames = (b.stages || []).map(function(s) { return s.stage ? s.stage.name : ''; });
@@ -11644,7 +11559,7 @@ function App() {
       .catch(function(err) {
         console.error('Failed to fetch live data:', err);
         if (fallbackToDummy) {
-          console.info('Initial load failed — falling back to dummy data');
+          console.info('Initial load failed -falling back to dummy data');
           setUseDummy(true);
           loadMockData();
         } else {
@@ -11782,7 +11697,7 @@ function App() {
   }, [storedPathPatterns]);
 
   // Build policy lookup for config page
-  // Live API policies may not have a stages[] of strings — derive from bundles
+  // Live API policies may not have a stages[] of strings -derive from bundles
   var policyLookup = useMemo(function() {
     var map = {};
     livePolicies.forEach(function(p) {
@@ -11796,7 +11711,7 @@ function App() {
       if (!map[b.policyId]) {
         map[b.policyId] = { id: b.policyId, name: b.policyName || 'Unknown', stages: stageNames };
       } else if (!map[b.policyId].stages || !map[b.policyId].stages.length) {
-        // Policy exists but has no stages — fill from bundle
+        // Policy exists but has no stages -fill from bundle
         map[b.policyId].stages = stageNames;
       }
     });
@@ -11853,7 +11768,7 @@ function App() {
 
   return h(ConfigProvider, { theme: dominoTheme },
     h('div', null,
-      // TopNav commented out — Domino platform provides its own top bar for hosted apps
+      // TopNav commented out -Domino platform provides its own top bar for hosted apps
       // h(TopNav, { terms: terms, useDummy: useDummy, onToggleDummy: handleToggleDummy, connected: connected, debugMode: debugMode, onToggleDebug: toggleDebugMode }),
       h('div', { className: 'app-layout app-layout-no-topnav' },
         h(Sidebar, { active: activePage, collapsed: sidebarCollapsed, onToggleCollapse: function() {
@@ -11874,7 +11789,7 @@ function App() {
           if (mc) mc.scrollTop = 0;
         } }),
         h('div', { className: 'main-content-wrapper' },
-          // Universal Scope Bar — only on pages that use scoped data
+          // Universal Scope Bar -only on pages that use scoped data
           ['dashboard', 'tracker', 'milestones', 'approvals', 'findings', 'metrics', 'insights'].indexOf(activePage) >= 0 ? h('div', { className: 'global-filter-bar' },
             // Saved Views filter group
             h('div', { className: 'global-filter-group' },
@@ -12013,7 +11928,7 @@ function App() {
               })
             ),
             h('span', { className: 'global-filter-divider' }),
-            // Assigned to Me — segmented toggle
+            // Assigned to Me -segmented toggle
             h('div', { className: 'global-filter-group' },
               h(Tooltip, { title: 'Filter deliverables where you are assigned to a stage' },
                 h('span', { className: 'global-filter-label', style: { borderBottom: '1px dashed #8F8FA3', cursor: 'help' } }, 'Assigned to Me')
