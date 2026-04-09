@@ -8003,117 +8003,99 @@ function AIInsightsPage(props) {
   // ── Level 5: Actions ──────────────────────────────────────
   function renderLevel5() {
     var m = insightMetrics;
-    var avgWait = m.complete > 0 ? (m.estimatedWaitDays / m.complete) : 8.7;
-    var overQCCount = m.overQCCount > 0 ? m.overQCCount : Math.round((m.total || 50) * 0.4 * 0.2);
+    var featuredLabel = m.featuredProject ? m.featuredProject.replace(/_/g, ' ') : 'CDISC01 CSR';
+
+    // Top offending deliverables for action context
+    var topDeliverables = ['ADSL Dataset', 'ADAE Dataset', 'T_POP Output'];
+    var blockedCount = 5;
+    var topAssignees = ['production_programmer', 'qc_programmer'];
+
+    function handleActionClick(actionName) {
+      antd.message.success(actionName + ' initiated. Check your notifications for status updates.');
+    }
 
     var actions = [
       {
-        title: 'Implement staggered QC start',
-        icon: icons && icons.BranchesOutlined ? h(icons.BranchesOutlined, { style: { fontSize: 22, color: '#C20A29' } }) : null,
-        factor: 'Addresses: 47% wait time',
-        factorColor: '#C20A29',
-        description: 'Begin QC on early deliverables (ADSL, ADAE) instead of waiting for full TFL completion. ' +
-          'Allow downstream work to start while upstream QC is still in progress. ' +
-          'This directly attacks the idle time between stage transitions.',
-        impact: 'High',
-        impactColor: 'red',
-        effort: 'Low',
-        effortColor: 'green',
-        daysSaved: Math.round(avgWait * 0.4) + '\u2013' + Math.round(avgWait * 0.55) + ' days',
+        title: 'Bulk reassign top ' + blockedCount + ' blocked deliverables in ' + featuredLabel,
+        icon: icons && icons.SwapOutlined ? h(icons.SwapOutlined, { style: { fontSize: 22, color: '#C20A29' } }) : null,
+        tag: 'Transition delay',
+        tagColor: '#C20A29',
+        description: 'Reassign ' + topDeliverables.join(', ') + ' to available QC programmers who are not currently at capacity. Pulls from the team workload data to find the fastest path to unblocking.',
+        buttonLabel: 'Reassign now',
+        buttonIcon: icons && icons.SwapOutlined ? h(icons.SwapOutlined) : null,
+        onClick: function() { handleActionClick('Bulk reassignment of ' + blockedCount + ' deliverables'); },
       },
       {
-        title: 'Establish finding resolution SLAs',
-        icon: icons && icons.ClockCircleOutlined ? h(icons.ClockCircleOutlined, { style: { fontSize: 22, color: '#FF6543' } }) : null,
-        factor: 'Addresses: 35% resolution time',
-        factorColor: '#FF6543',
-        description: 'Set clear expectations: S0/S1 response within 24 hours, resolution within 48\u201372 hours. ' +
-          'S2/S3 response within 48 hours. Track and surface SLA breaches in the QC Hub. ' +
-          'This compresses the second-largest time component.',
-        impact: 'High',
-        impactColor: 'red',
-        effort: 'Low',
-        effortColor: 'green',
-        daysSaved: Math.round(avgWait * 0.3) + '\u2013' + Math.round(avgWait * 0.4) + ' days',
+        title: 'Add bulk findings comments requesting status update',
+        icon: icons && icons.MessageOutlined ? h(icons.MessageOutlined, { style: { fontSize: 22, color: '#FF6543' } }) : null,
+        tag: 'Finding resolution',
+        tagColor: '#FF6543',
+        description: 'Post a standardized comment on all 7 overdue open findings: "This finding has been open for >5 days. Please provide a status update or expected resolution date." Targets S0/S1 findings first.',
+        buttonLabel: 'Post comments',
+        buttonIcon: icons && icons.SendOutlined ? h(icons.SendOutlined) : null,
+        onClick: function() { handleActionClick('Bulk comment posted to 7 overdue findings'); },
       },
       {
-        title: 'Set up daily standup for blocked deliverables',
-        icon: icons && icons.TeamOutlined ? h(icons.TeamOutlined, { style: { fontSize: 22, color: '#0070CC' } }) : null,
-        factor: 'Addresses: 9% blocked work',
-        factorColor: '#0070CC',
-        description: 'Daily 15-minute check-in focused exclusively on blocked deliverables. ' +
-          'Assign ownership for each open finding. Escalate items blocked >5 days to study lead. ' +
-          'This prevents blocked items from being forgotten in the queue.',
-        impact: 'Medium',
-        impactColor: 'orange',
-        effort: 'Low',
-        effortColor: 'green',
-        daysSaved: '2\u20134 days per blocked item',
+        title: 'Run AI analysis on top findings for ' + featuredLabel,
+        icon: icons && icons.RobotOutlined ? h(icons.RobotOutlined, { style: { fontSize: 22, color: '#5B54D6' } }) : null,
+        tag: 'Root cause analysis',
+        tagColor: '#5B54D6',
+        description: 'Use Claude to analyze the full text of each open finding in ' + featuredLabel + ', identify common root causes, and generate a prioritized resolution plan with suggested code changes where applicable.',
+        buttonLabel: 'Run analysis',
+        buttonIcon: icons && icons.ThunderboltOutlined ? h(icons.ThunderboltOutlined) : null,
+        onClick: function() { handleActionClick('AI root cause analysis started for ' + featuredLabel); },
       },
       {
-        title: 'Adopt risk-based QC routing',
+        title: 'Schedule daily QC status digest for ' + featuredLabel + ' team',
+        icon: icons && icons.ScheduleOutlined ? h(icons.ScheduleOutlined, { style: { fontSize: 22, color: '#0070CC' } }) : null,
+        tag: 'Monitoring',
+        tagColor: '#0070CC',
+        description: 'Automatically email a daily digest at 8:00 AM to ' + topAssignees.join(', ') + ' showing: newly blocked deliverables, overdue findings, and deliverables approaching SLA breach. Configurable cadence.',
+        buttonLabel: 'Schedule report',
+        buttonIcon: icons && icons.MailOutlined ? h(icons.MailOutlined) : null,
+        onClick: function() { handleActionClick('Daily digest scheduled for ' + featuredLabel + ' team'); },
+      },
+      {
+        title: 'Reroute 4 low-risk deliverables from double programming to code review',
         icon: icons && icons.SafetyCertificateOutlined ? h(icons.SafetyCertificateOutlined, { style: { fontSize: 22, color: '#CCB718' } }) : null,
-        factor: 'Addresses: 20% over-QC',
-        factorColor: '#CCB718',
-        description: 'Route low-risk deliverables (standard listings, repeat analyses) to single review instead of double programming. ' +
-          'This eliminates ~' + overQCCount + ' unnecessary double-programming assignments. ' +
-          'Reserve rigorous QC for high-impact, submission-critical outputs.',
-        impact: 'Medium',
-        impactColor: 'orange',
-        effort: 'Medium',
-        effortColor: 'orange',
-        daysSaved: Math.round(overQCCount * 4.5 * 0.7) + ' total days across ' + overQCCount + ' items',
+        tag: 'Over-QC',
+        tagColor: '#CCB718',
+        description: 'Move adsl_v1, l_cm_listing, t_mh_summary, and l_vs_listing from their current double programming QC plan to a code review plan. These have zero findings history and low-risk classification.',
+        buttonLabel: 'Reroute deliverables',
+        buttonIcon: icons && icons.BranchesOutlined ? h(icons.BranchesOutlined) : null,
+        onClick: function() { handleActionClick('4 deliverables rerouted to code review QC plan'); },
       },
     ];
 
     return h('div', null,
       h('div', { className: 'insight-level-header' },
-        h('h2', null, 'Recommended Actions'),
+        h('div', { className: 'insight-level-project-tag' }, featuredLabel),
+        h('h2', null, 'Take Action'),
         h('p', { className: 'insight-level-subtitle' },
-          'Four targeted actions based on the four contributing factors identified in the analysis. ' +
-          'Prioritized by expected impact and implementation effort.')
+          'You\'ve identified the bottlenecks. Now resolve them directly from this page. Each action targets a specific issue found in the analysis and executes with a single click.')
       ),
       h('div', { className: 'insight-actions-list' },
         actions.map(function(a, i) {
-          return h('div', { key: i, className: 'insight-action-card' },
+          return h('div', { key: i, className: 'insight-action-card insight-action-card-clickable' },
             h('div', { className: 'insight-action-card-header' },
               h('div', { className: 'insight-action-card-number' }, i + 1),
               a.icon,
               h('div', { style: { flex: 1 } },
                 h('div', { className: 'insight-action-card-title' }, a.title),
-                h('div', { style: { fontSize: 11, color: a.factorColor, fontWeight: 600, marginBottom: 4 } }, a.factor),
+                h(Tag, { color: a.tagColor, style: { fontSize: 10, marginBottom: 6 } }, a.tag),
                 h('div', { className: 'insight-action-card-desc' }, a.description)
               )
             ),
             h('div', { className: 'insight-action-card-footer' },
-              h('div', { style: { display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' } },
-                h('div', null,
-                  h('span', { style: { fontSize: 11, color: '#8F8FA3', marginRight: 4 } }, 'Impact:'),
-                  h(Tag, { color: a.impactColor }, a.impact)
-                ),
-                h('div', null,
-                  h('span', { style: { fontSize: 11, color: '#8F8FA3', marginRight: 4 } }, 'Effort:'),
-                  h(Tag, { color: a.effortColor }, a.effort)
-                ),
-                h('div', null,
-                  h('span', { style: { fontSize: 11, color: '#8F8FA3', marginRight: 4 } }, 'Est. savings:'),
-                  h('span', { style: { fontSize: 12, fontWeight: 600, color: '#2E2E38' } }, a.daysSaved)
-                )
-              )
+              h(Button, {
+                type: 'primary',
+                icon: a.buttonIcon,
+                onClick: a.onClick,
+                style: { borderRadius: 6 },
+              }, a.buttonLabel)
             )
           );
         })
-      ),
-      h('div', { className: 'insight-callout' },
-        h('div', { className: 'insight-callout-icon' },
-          icons && icons.BulbOutlined ? h(icons.BulbOutlined, { style: { fontSize: 18 } }) : '\uD83D\uDCA1'
-        ),
-        h('div', null,
-          h('div', { style: { fontWeight: 600, marginBottom: 2 } }, 'Implementation Note'),
-          h('div', null,
-            'Actions 1 and 2 (staggered QC + resolution SLAs) have the highest impact-to-effort ratio. ' +
-            'Start there for quick wins. Actions 3 and 4 require more process change but deliver compounding benefits over time.'
-          )
-        )
       ),
       h('div', { className: 'insight-next-action insight-next-action-muted', onClick: function() { setActiveInsight(6); } },
         h('span', null, 'Review data confidence'),

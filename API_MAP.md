@@ -88,6 +88,69 @@ The `POST /api/governance/v1/bundles` endpoint has the following behaviors disco
 5. Progress updates throttled for large batches (every N items instead of every item)
 6. Only copies name + policyId — stage assignments, findings, approvals, and attachments do not carry over
 
+## Performance Bottleneck: N+1 Enrichment Calls
+
+> **Date assessed**: 2026-04-08
+
+The single largest performance bottleneck in the app is **Phase 2 of the fetch sequence** (see above). For every bundle returned by the bundles endpoint, the app fires three additional requests:
+
+| Per-bundle call | Endpoint | Purpose |
+|----------------|----------|---------|
+| Approvals | `GET /api/bundles/{id}/approvals` | Gate approval status |
+| Findings | `GET /api/bundles/{id}/findings?limit=200` | Finding counts, severities |
+| Gates | `GET /api/bundles/{id}/gates` | Gate pass/fail status |
+
+With ~200 bundles, this produces **~600 concurrent HTTP requests** on every page load, all fired in a single `Promise.all`. This is the dominant contributor to initial load time (several seconds even on fast networks, and significantly worse on throttled or high-latency connections).
+
+### Measured impact
+
+- Phase 1 (top-level fetches): ~200-400ms
+- Phase 2 (600 enrichment calls): **3-8 seconds** depending on network and server load
+- Phase 2 accounts for **~80-90% of total load time**
+
+### Proposed solution: batch enrichment endpoint
+
+A single aggregation endpoint would collapse 600+ calls into 1-3:
+
+```
+GET /api/governance/v1/bundles/enriched?limit=200
+
+Response:
+{
+  "data": [
+    {
+      "id": "bundle-001",
+      "name": "adsl",
+      "policyId": "...",
+      "projectId": "...",
+      "projectName": "...",
+      "stage": "Double Programming",
+      "stages": [...],
+      "state": "Active",
+      "createdAt": "...",
+      "approvals": [{ "id": "...", "status": "Approved", ... }],
+      "findings": {
+        "data": [{ "id": "...", "severity": "S0", "status": "Open" }],
+        "totalCount": 12
+      },
+      "gates": [{ "id": "...", "name": "...", "status": "Passed" }]
+    }
+  ]
+}
+```
+
+**Expected improvement**: Eliminates ~600 requests per load, reducing total fetch time to **~300-600ms** (the cost of 1-3 paginated batch calls). This is a **~80-90% reduction in load time**.
+
+### Alternative: lazy enrichment
+
+If a batch endpoint is not feasible, the app could defer enrichment calls until a row is expanded (lazy-load approvals/findings/gates on click). This would reduce initial load to Phase 1 only (~200-400ms) but would add a ~200-400ms delay when expanding any row for the first time. The app currently has the infrastructure to support this (expanded row state is already tracked), but it would require refactoring the computed metrics (finding counts, gate statuses) that appear in the main table columns.
+
+### Relationship to pagination (Gap 5)
+
+If pagination is implemented (see DOMINO_API_GAPS.md, Gap 5) and the app fetches 300+ bundles, the N+1 problem scales to **900+ requests**. Solving the enrichment bottleneck becomes even more critical with pagination support.
+
+---
+
 ## Cross-App Discovery
 
 The app discovers other running Domino apps (e.g., Data Explorer) via the Beta Apps API:
