@@ -6957,6 +6957,11 @@ function AIInsightsPage(props) {
   var terms = props.terms || DEFAULT_TERMS;
   var B = capFirst(terms.bundle);
 
+  function scrollToTop() {
+    var mc = document.querySelector('.main-content');
+    if (mc) mc.scrollTop = 0;
+  }
+
   // Navigation state: null = overview, then drill-down depth 1-5
   var _depth = useState(null);
   var activeInsight = _depth[0];
@@ -7553,7 +7558,7 @@ function AIInsightsPage(props) {
 
     return h('div', null,
       h('div', { className: 'insight-level-header' },
-        h('div', { className: 'insight-level-next-btn', onClick: function() { setActiveInsight(2); window.scrollTo(0, 0); } }, 'Next \u203A'),
+        h('div', { className: 'insight-level-next-btn', onClick: function() { setActiveInsight(2); scrollToTop(); } }, 'Next \u203A'),
         h('div', { className: 'insight-level-project-tag' }, featuredLabel),
         h('h2', null, (waitPct || 47) + '% above benchmark in transition-to-start time'),
         h('p', { className: 'insight-level-subtitle' },
@@ -7617,7 +7622,7 @@ function AIInsightsPage(props) {
         )
       ),
 
-      h('div', { className: 'insight-next-action', onClick: function() { setActiveInsight(2); window.scrollTo(0, 0); } },
+      h('div', { className: 'insight-next-action', onClick: function() { setActiveInsight(2); scrollToTop(); } },
         h('span', null, 'See how finding resolution is 35% above benchmark'),
         h('span', { className: 'insight-card-arrow' }, '\u2192')
       )
@@ -7671,7 +7676,7 @@ function AIInsightsPage(props) {
 
     return h('div', null,
       h('div', { className: 'insight-level-header' },
-        h('div', { className: 'insight-level-next-btn', onClick: function() { setActiveInsight(3); window.scrollTo(0, 0); } }, 'Next \u203A'),
+        h('div', { className: 'insight-level-next-btn', onClick: function() { setActiveInsight(3); scrollToTop(); } }, 'Next \u203A'),
         h('div', { className: 'insight-level-project-tag' }, featuredLabel),
         h('h2', null, (delayPct || 35) + '% above benchmark in finding resolution time'),
         h('p', { className: 'insight-level-subtitle' },
@@ -7703,7 +7708,7 @@ function AIInsightsPage(props) {
         )
       ),
 
-      h('div', { className: 'insight-next-action', onClick: function() { setActiveInsight(3); window.scrollTo(0, 0); } },
+      h('div', { className: 'insight-next-action', onClick: function() { setActiveInsight(3); scrollToTop(); } },
         h('span', null, 'See which deliverables are currently blocked'),
         h('span', { className: 'insight-card-arrow' }, '\u2192')
       )
@@ -7771,7 +7776,7 @@ function AIInsightsPage(props) {
 
     return h('div', null,
       h('div', { className: 'insight-level-header' },
-        h('div', { className: 'insight-level-next-btn', onClick: function() { setActiveInsight(4); window.scrollTo(0, 0); } }, 'Next \u203A'),
+        h('div', { className: 'insight-level-next-btn', onClick: function() { setActiveInsight(4); scrollToTop(); } }, 'Next \u203A'),
         h('div', { className: 'insight-level-project-tag' }, featuredLabel),
         h('h2', null, (blockedPct || 9) + '% of active deliverables blocked by open findings'),
         h('p', { className: 'insight-level-subtitle' },
@@ -7853,7 +7858,7 @@ function AIInsightsPage(props) {
         )
       ),
 
-      h('div', { className: 'insight-next-action', onClick: function() { setActiveInsight(4); window.scrollTo(0, 0); } },
+      h('div', { className: 'insight-next-action', onClick: function() { setActiveInsight(4); scrollToTop(); } },
         h('span', null, 'See why low-risk work is being over-QC\u2019d'),
         h('span', { className: 'insight-card-arrow' }, '\u2192')
       )
@@ -7907,7 +7912,7 @@ function AIInsightsPage(props) {
 
     return h('div', null,
       h('div', { className: 'insight-level-header' },
-        h('div', { className: 'insight-level-next-btn', onClick: function() { setActiveInsight(5); window.scrollTo(0, 0); } }, 'Next \u203A'),
+        h('div', { className: 'insight-level-next-btn', onClick: function() { setActiveInsight(5); scrollToTop(); } }, 'Next \u203A'),
         h('div', { className: 'insight-level-project-tag' }, featuredLabel),
         h('h2', null, overQCPct + '% of low-risk deliverables going through double programming QC'),
         h('p', { className: 'insight-level-subtitle' },
@@ -7997,7 +8002,7 @@ function AIInsightsPage(props) {
         )
       ),
 
-      h('div', { className: 'insight-next-action', onClick: function() { setActiveInsight(5); window.scrollTo(0, 0); } },
+      h('div', { className: 'insight-next-action', onClick: function() { setActiveInsight(5); scrollToTop(); } },
         h('span', null, 'Review recommended actions'),
         h('span', { className: 'insight-card-arrow' }, '\u2192')
       )
@@ -8073,7 +8078,7 @@ function AIInsightsPage(props) {
 
     return h('div', null,
       h('div', { className: 'insight-level-header' },
-        h('div', { className: 'insight-level-next-btn', onClick: function() { setActiveInsight(6); window.scrollTo(0, 0); } }, 'Next \u203A'),
+        h('div', { className: 'insight-level-next-btn', onClick: function() { setActiveInsight(6); scrollToTop(); } }, 'Next \u203A'),
         h('div', { className: 'insight-level-project-tag' }, featuredLabel),
         h('h2', null, 'Take Action'),
         h('p', { className: 'insight-level-subtitle' },
@@ -8104,7 +8109,7 @@ function AIInsightsPage(props) {
           );
         })
       ),
-      h('div', { className: 'insight-next-action insight-next-action-muted', onClick: function() { setActiveInsight(6); window.scrollTo(0, 0); } },
+      h('div', { className: 'insight-next-action insight-next-action-muted', onClick: function() { setActiveInsight(6); scrollToTop(); } },
         h('span', null, 'Review data confidence'),
         h('span', { className: 'insight-card-arrow' }, '\u2192')
       )
@@ -11740,7 +11745,7 @@ function App() {
       case 'automation':
         return h(AutomationRulesPage, { bundles: bundles, automationRules: automationRules, setAutomationRules: setAutomationRules, automationHistory: automationHistory, setAutomationHistory: setAutomationHistory, terms: terms, projectMembersCache: projectMembersCache });
       case 'insights':
-        return h(AIInsightsPage, { bundles: scopedBundles, terms: terms });
+        return h(AIInsightsPage, { bundles: bundles, terms: terms });
       case 'risk':
         return h(RiskOptimizerPage, { bundles: bundles, livePolicies: livePolicies, terms: terms, useDummy: useDummy });
       case 'utilities':
@@ -11778,7 +11783,7 @@ function App() {
         } }),
         h('div', { className: 'main-content-wrapper' },
           // Universal Scope Bar -only on pages that use scoped data
-          ['dashboard', 'tracker', 'milestones', 'approvals', 'findings', 'metrics', 'insights'].indexOf(activePage) >= 0 ? h('div', { className: 'global-filter-bar' },
+          ['dashboard', 'tracker', 'milestones', 'approvals', 'findings', 'metrics'].indexOf(activePage) >= 0 ? h('div', { className: 'global-filter-bar' },
             // Saved Views filter group
             h('div', { className: 'global-filter-group' },
               h('span', { className: 'global-filter-label' }, 'Saved Views'),
