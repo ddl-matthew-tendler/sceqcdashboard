@@ -2767,7 +2767,7 @@ function StagePopoverContent(props) {
   var openGates = (bundle._gates || []).filter(function(g) { return g.isOpen; }).length;
 
   var statusLabel = dotState === 'completed' ? 'Completed' : dotState === 'active' ? 'In Progress' : dotState === 'blocked' ? 'Blocked' : 'Pending';
-  var statusColor = dotState === 'completed' ? '#28A464' : dotState === 'active' ? '#F59E0B' : dotState === 'blocked' ? '#C20A29' : '#8F8FA3';
+  var statusColor = dotState === 'completed' ? '#28A464' : dotState === 'active' ? '#543FDE' : dotState === 'blocked' ? '#C20A29' : '#8F8FA3';
 
   return h('div', { className: 'stage-popover', onClick: function(e) { e.stopPropagation(); } },
     // Header
