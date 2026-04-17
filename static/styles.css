@@ -1430,6 +1430,13 @@ body {
   border-color: #E0E0E0;
   box-shadow: none;
 }
+.insight-card-dim {
+  opacity: 0.6;
+  background: #fafafa;
+}
+.insight-card-dim .insight-card-title-sm {
+  color: #aaa;
+}
 
 /* Level headers */
 .insight-level-header {

@@ -7215,37 +7215,35 @@ function AIInsightsPage(props) {
     });
     var pctOverQC = completeBundles.length > 0 ? Math.round((overQCBundles.length / completeBundles.length) * 100) : 0;
 
+    // ── Delivery type classifier ──────────────────────────────
+    function deliveryType(b) {
+      var n = ((b.policyName || '') + ' ' + (b.name || '')).toLowerCase();
+      if (n.indexOf('tfl') >= 0 || n.indexOf('table') >= 0 || n.indexOf('figure') >= 0 || n.indexOf('listing') >= 0) return 'TFL';
+      if (n.indexOf('adam') >= 0 || n.indexOf('adsl') >= 0 || n.indexOf('adae') >= 0 || n.indexOf('adcm') >= 0 || n.indexOf('admh') >= 0) return 'ADaM';
+      if (n.indexOf('sdtm') >= 0) return 'SDTM';
+      if (n.indexOf('csr') >= 0) return 'CSR';
+      return 'Other';
+    }
+
     // ── Featured project: slowest study (for primary insight card) ────────────
-    // Try TFL heuristic first; if no TFL found, broaden to ALL completed bundles
-    var completedByProject = {};
-    var isTflInsight = false;
+    // Collect completed cycle times per project, tagged by delivery type
+    var completedByProject = {};   // proj -> [days]
+    var typeByProject = {};        // proj -> dominant delivery type
     bundles.forEach(function(b) {
       if (b.state !== 'Complete') return;
-      var pname = (b.policyName || '').toLowerCase();
-      var bname = (b.name || '').toLowerCase();
-      var isTFL = pname.indexOf('tfl') >= 0 ||
-                  bname.indexOf('t14') >= 0 || bname.indexOf('f14') >= 0 || bname.indexOf('l14') >= 0 ||
-                  bname.indexOf('t_') === 0 || bname.indexOf('f_') === 0 || bname.indexOf('l_') === 0 ||
-                  pname.indexOf('table') >= 0 || pname.indexOf('figure') >= 0 || pname.indexOf('listing') >= 0;
-      if (isTFL) isTflInsight = true;
-    });
-    // Collect completed cycle times per project (TFL-only if available, ALL if not)
-    bundles.forEach(function(b) {
-      if (b.state !== 'Complete') return;
-      if (isTflInsight) {
-        var pname = (b.policyName || '').toLowerCase();
-        var bname = (b.name || '').toLowerCase();
-        var isTFL = pname.indexOf('tfl') >= 0 ||
-                    bname.indexOf('t14') >= 0 || bname.indexOf('f14') >= 0 || bname.indexOf('l14') >= 0 ||
-                    bname.indexOf('t_') === 0 || bname.indexOf('f_') === 0 || bname.indexOf('l_') === 0 ||
-                    pname.indexOf('table') >= 0 || pname.indexOf('figure') >= 0 || pname.indexOf('listing') >= 0;
-        if (!isTFL) return;
-      }
       var proj = b.projectName || 'Unknown';
-      if (!completedByProject[proj]) completedByProject[proj] = [];
+      var dtype = deliveryType(b);
+      if (!completedByProject[proj]) { completedByProject[proj] = []; typeByProject[proj] = {}; }
+      typeByProject[proj][dtype] = (typeByProject[proj][dtype] || 0) + 1;
       var days = (new Date(b.updatedAt).getTime() - new Date(b.createdAt).getTime()) / (1000 * 60 * 60 * 24);
       if (days >= 0) completedByProject[proj].push(parseFloat(days.toFixed(1)));
     });
+
+    // Dominant delivery type per project
+    function dominantType(proj) {
+      var counts = typeByProject[proj] || {};
+      return Object.keys(counts).sort(function(a, b) { return counts[b] - counts[a]; })[0] || 'Other';
+    }
 
     // Find project with longest average cycle time
     var featuredProject = null;
@@ -7262,25 +7260,40 @@ function AIInsightsPage(props) {
       }
     });
 
-    // Benchmark = median cycle across all OTHER projects (excluding slowest outlier + any user-excluded projects)
+    var featuredType = featuredProject ? dominantType(featuredProject) : 'Other';
+    var isTflInsight = featuredType === 'TFL';
+
+    // Benchmark = median cycle across same-type OTHER projects (excluding slowest + user-excluded)
     var excluded = (benchmarkConfig.excludedProjects || []);
-    var benchmarkStudies = []; // for transparency tooltip
+    var benchmarkStudies = [];
     var otherDays = [];
     Object.keys(completedByProject).forEach(function(proj) {
       if (proj === featuredProject) return;
       if (excluded.indexOf(proj) >= 0) return;
+      // Like-for-like: only include projects of the same delivery type (fall back to all if no match)
+      var projType = dominantType(proj);
+      if (featuredProject && projType !== featuredType && projType !== 'Other' && featuredType !== 'Other') return;
       var days = completedByProject[proj];
       var avg = days.reduce(function(a, b) { return a + b; }, 0) / days.length;
-      benchmarkStudies.push({ project: proj, count: days.length, avg: parseFloat(avg.toFixed(1)) });
+      benchmarkStudies.push({ project: proj, count: days.length, avg: parseFloat(avg.toFixed(1)), type: projType });
       days.forEach(function(d) { otherDays.push(d); });
     });
+    // Fall back to all types if like-for-like yields nothing
+    if (otherDays.length === 0) {
+      Object.keys(completedByProject).forEach(function(proj) {
+        if (proj === featuredProject || excluded.indexOf(proj) >= 0) return;
+        var days = completedByProject[proj];
+        var avg = days.reduce(function(a, b) { return a + b; }, 0) / days.length;
+        benchmarkStudies.push({ project: proj, count: days.length, avg: parseFloat(avg.toFixed(1)), type: dominantType(proj) });
+        days.forEach(function(d) { otherDays.push(d); });
+      });
+    }
 
-    // Use median (more robust to outliers than mean)
+    // Median benchmark (robust to outliers), with optional manual override
     var benchmarkAvg = benchmarkConfig.manualOverride != null
       ? parseFloat(benchmarkConfig.manualOverride)
       : medianArr(otherDays);
 
-    // Ratio: how much longer is the featured project vs the internal benchmark
     var featuredRatio = benchmarkAvg > 0 && featuredProjectAvgCycle > 0
       ? (featuredProjectAvgCycle / benchmarkAvg)
       : (cycleRatio > 0 ? cycleRatio : 2.3);
@@ -7290,8 +7303,96 @@ function AIInsightsPage(props) {
       featuredProject = 'CDISC01_CSR';
       featuredProjectAvgCycle = 42;
       featuredProjectCount = 8;
+      featuredType = 'CSR';
       benchmarkAvg = benchmarkConfig.manualOverride != null ? parseFloat(benchmarkConfig.manualOverride) : 18;
       featuredRatio = featuredProjectAvgCycle / benchmarkAvg;
+    }
+
+    // ── Trend delta: is the featured project getting better or worse? ──────────
+    // Split featured project's completed bundles into recent (≤60d ago) vs earlier
+    var trendCutoff = now - (60 * 24 * 60 * 60 * 1000);
+    var featuredAllBundles = completeBundles.filter(function(b) { return (b.projectName || 'Unknown') === featuredProject; });
+    var recentBundles = featuredAllBundles.filter(function(b) { return new Date(b.updatedAt).getTime() > trendCutoff; });
+    var olderBundles  = featuredAllBundles.filter(function(b) { return new Date(b.updatedAt).getTime() <= trendCutoff; });
+    function avgDays(arr) {
+      if (!arr.length) return 0;
+      return arr.reduce(function(s, b) {
+        return s + (new Date(b.updatedAt).getTime() - new Date(b.createdAt).getTime()) / (1000 * 60 * 60 * 24);
+      }, 0) / arr.length;
+    }
+    var recentAvg = avgDays(recentBundles);
+    var olderAvg  = avgDays(olderBundles);
+    var trendDelta = null;      // days change (positive = worsening)
+    var trendDirection = null;  // 'worse' | 'better' | 'stable'
+    if (recentAvg > 0 && olderAvg > 0) {
+      trendDelta = parseFloat((recentAvg - olderAvg).toFixed(1));
+      trendDirection = Math.abs(trendDelta) < 1 ? 'stable' : (trendDelta > 0 ? 'worse' : 'better');
+    }
+
+    // ── Secondary insight metrics ──────────────────────────────
+
+    // Card 2: Multi-stage vs single-stage cycle time (proxy for staggered QC efficiency)
+    var highStageBundles = completeBundles.filter(function(b) { return b.stages && b.stages.length >= 3; });
+    var lowStageBundles  = completeBundles.filter(function(b) { return b.stages && b.stages.length < 3; });
+    var highStageAvg = avgDays(highStageBundles);
+    var lowStageAvg  = avgDays(lowStageBundles);
+    // Per-stage cost: if high-stage cost-per-stage < low-stage, multi-stage is more efficient per gate
+    var highStageCostPerStage = highStageBundles.length > 0
+      ? highStageAvg / (highStageBundles.reduce(function(s, b) { return s + b.stages.length; }, 0) / highStageBundles.length)
+      : 0;
+    var lowStageCostPerStage = lowStageBundles.length > 0
+      ? lowStageAvg / (lowStageBundles.reduce(function(s, b) { return s + b.stages.length; }, 0) / lowStageBundles.length)
+      : 0;
+    var staggeredSavingsData = (highStageBundles.length >= 2 && lowStageBundles.length >= 2)
+      ? { highAvg: parseFloat(highStageAvg.toFixed(1)), lowAvg: parseFloat(lowStageAvg.toFixed(1)),
+          costPerStageHigh: parseFloat(highStageCostPerStage.toFixed(1)), costPerStageLow: parseFloat(lowStageCostPerStage.toFixed(1)),
+          count: highStageBundles.length + lowStageBundles.length }
+      : null;
+
+    // Card 3: Assignee diversity (unique assignees per stage) vs cycle time
+    var highTurnoverCycles = [], lowTurnoverCycles = [];
+    completeBundles.forEach(function(b) {
+      if (!b.stages || b.stages.length === 0) return;
+      var days = (new Date(b.updatedAt).getTime() - new Date(b.createdAt).getTime()) / (1000 * 60 * 60 * 24);
+      if (days < 0) return;
+      // Count unique assignees across all stages
+      var assigneeIds = {};
+      b.stages.forEach(function(s) { if (s.userId) assigneeIds[s.userId] = true; });
+      var uniqueAssignees = Object.keys(assigneeIds).length;
+      var turnoverRate = uniqueAssignees / b.stages.length; // >1 means multiple people per stage on average
+      if (turnoverRate > 1) highTurnoverCycles.push(days);
+      else lowTurnoverCycles.push(days);
+    });
+    var assigneeDiversityData = (highTurnoverCycles.length >= 2 && lowTurnoverCycles.length >= 2)
+      ? { highTurnoverAvg: parseFloat((highTurnoverCycles.reduce(function(a,b){return a+b;},0)/highTurnoverCycles.length).toFixed(1)),
+          lowTurnoverAvg:  parseFloat((lowTurnoverCycles.reduce(function(a,b){return a+b;},0)/lowTurnoverCycles.length).toFixed(1)),
+          highCount: highTurnoverCycles.length, lowCount: lowTurnoverCycles.length }
+      : null;
+
+    // Card 4: Team size (unique assignees per project) vs avg cycle time
+    var teamSizeData = [];
+    Object.keys(projectMetrics).forEach(function(proj) {
+      var pm = projectMetrics[proj];
+      if (pm.completeCount < 2) return;
+      var projBundles = completeBundles.filter(function(b) { return (b.projectName || 'Unknown') === proj; });
+      var assigneeSet = {};
+      projBundles.forEach(function(b) {
+        (b.stages || []).forEach(function(s) { if (s.userId) assigneeSet[s.userId] = true; });
+      });
+      var teamSize = Object.keys(assigneeSet).length;
+      if (teamSize > 0) teamSizeData.push({ proj: proj, teamSize: teamSize, avgCycle: pm.totalCycle / pm.completeCount });
+    });
+    teamSizeData.sort(function(a, b) { return a.teamSize - b.teamSize; });
+    var teamSizeInsight = null;
+    if (teamSizeData.length >= 3) {
+      var small = teamSizeData.filter(function(d) { return d.teamSize <= 3; });
+      var large = teamSizeData.filter(function(d) { return d.teamSize >= 5; });
+      if (small.length >= 1 && large.length >= 1) {
+        var smallAvg = small.reduce(function(s,d){return s+d.avgCycle;},0) / small.length;
+        var largeAvg = large.reduce(function(s,d){return s+d.avgCycle;},0) / large.length;
+        var speedupPct = smallAvg > 0 ? Math.round(((smallAvg - largeAvg) / smallAvg) * 100) : null;
+        teamSizeInsight = { smallAvg: parseFloat(smallAvg.toFixed(1)), largeAvg: parseFloat(largeAvg.toFixed(1)), speedupPct: speedupPct };
+      }
     }
 
     // ── Over-QC: low-risk deliverables going through double programming ──────
@@ -7335,9 +7436,15 @@ function AIInsightsPage(props) {
       featuredProject: featuredProject,
       featuredProjectAvgCycle: featuredProjectAvgCycle,
       featuredProjectCount: featuredProjectCount,
+      featuredType: featuredType,
       benchmarkAvg: benchmarkAvg,
       benchmarkStudies: benchmarkStudies,
       featuredRatio: featuredRatio,
+      trendDelta: trendDelta,
+      trendDirection: trendDirection,
+      staggeredSavingsData: staggeredSavingsData,
+      assigneeDiversityData: assigneeDiversityData,
+      teamSizeInsight: teamSizeInsight,
       pctLowRiskOverQC: pctLowRiskOverQC,
     };
   }, [bundles, benchmarkConfig]);
@@ -7720,11 +7827,32 @@ function AIInsightsPage(props) {
             h('span', {
               style: { cursor: 'pointer', color: '#5b3fc4', fontSize: 11, fontWeight: 600, border: '1px solid #d6ccf5', borderRadius: 3, padding: '1px 5px', whiteSpace: 'nowrap' }
             },
-              '\u24d8 ' + numBenchmarkStudies + ' stud' + (numBenchmarkStudies !== 1 ? 'ies' : 'y') + ' in baseline',
+              '\u24d8 ' + numBenchmarkStudies + ' stud' + (numBenchmarkStudies !== 1 ? 'ies' : 'y') + ' in baseline' +
+              (m.featuredType && m.featuredType !== 'Other' ? ' (' + m.featuredType + ')' : ''),
               isManualOverride ? ' · manual target' : '',
               excludedCount > 0 ? ' · ' + excludedCount + ' excluded' : ''
             )
-          )
+          ),
+          m.trendDirection ? h(Tooltip, {
+            title: m.trendDelta !== null
+              ? 'Avg cycle time ' + (m.trendDirection === 'worse' ? 'increased' : m.trendDirection === 'better' ? 'decreased' : 'unchanged') +
+                ' by ' + Math.abs(m.trendDelta) + 'd vs deliverables completed >60 days ago.'
+              : '',
+            placement: 'right'
+          },
+            h('span', {
+              style: {
+                fontSize: 11, fontWeight: 700, borderRadius: 3, padding: '1px 6px', whiteSpace: 'nowrap',
+                background: m.trendDirection === 'worse' ? '#fff0f0' : m.trendDirection === 'better' ? '#f0fff4' : '#f5f5f5',
+                color: m.trendDirection === 'worse' ? '#c0392b' : m.trendDirection === 'better' ? '#1a7a1a' : '#888',
+                border: '1px solid ' + (m.trendDirection === 'worse' ? '#fcc' : m.trendDirection === 'better' ? '#aee' : '#ddd')
+              }
+            },
+              m.trendDirection === 'worse' ? '▲ +' + m.trendDelta + 'd worsening'
+                : m.trendDirection === 'better' ? '▼ ' + m.trendDelta + 'd improving'
+                : '→ stable'
+            )
+          ) : null
         ),
         // Contributing factors -each clickable to its drill-down level
         factors.length > 0 ? h('div', { className: 'insight-card-factors' },
@@ -7745,33 +7873,106 @@ function AIInsightsPage(props) {
         h('span', { className: 'insight-section-detail' }, 'Additional signals detected \u2013 full analysis coming soon')
       ),
       h('div', { className: 'insight-cards-row' },
-        h('div', { className: 'insight-card insight-card-secondary' },
-          h('div', { className: 'insight-card-secondary-header' },
-            h('span', { className: 'insight-card-secondary-number' }, '2'),
-            h('div', { className: 'insight-card-badge insight-card-badge-medium' }, 'MEDIUM CONFIDENCE')
-          ),
-          h('div', { className: 'insight-card-title-sm' }, 'Staggered QC start saves ~6\u20138 days vs batch QC'),
-          h('div', { className: 'insight-card-subtitle' }, 'Starting QC before full TFL completion compresses the critical path'),
-          h(Tag, { color: 'orange', style: { marginTop: 8, fontSize: 11 } }, 'Workflow optimization')
-        ),
-        h('div', { className: 'insight-card insight-card-secondary' },
-          h('div', { className: 'insight-card-secondary-header' },
-            h('span', { className: 'insight-card-secondary-number' }, '3'),
-            h('div', { className: 'insight-card-badge insight-card-badge-medium' }, 'MEDIUM CONFIDENCE')
-          ),
-          h('div', { className: 'insight-card-title-sm' }, 'CRO-heavy studies add +1.6 weeks to cycle time'),
-          h('div', { className: 'insight-card-subtitle' }, 'Cross-org coordination adds latency, especially in finding resolution'),
-          h(Tag, { color: 'blue', style: { marginTop: 8, fontSize: 11 } }, 'Vendor management')
-        ),
-        h('div', { className: 'insight-card insight-card-secondary' },
-          h('div', { className: 'insight-card-secondary-header' },
-            h('span', { className: 'insight-card-secondary-number' }, '4'),
-            h('div', { className: 'insight-card-badge insight-card-badge-low' }, 'EMERGING')
-          ),
-          h('div', { className: 'insight-card-title-sm' }, 'Teams of 5 deliver only 10% faster than teams of 4'),
-          h('div', { className: 'insight-card-subtitle' }, 'Coordination overhead outweighs throughput gains at scale'),
-          h(Tag, { style: { marginTop: 8, fontSize: 11 } }, 'Resource optimization')
-        )
+
+        // Card 2: Multi-stage efficiency (proxy for staggered QC value)
+        (function() {
+          var sd = m.staggeredSavingsData;
+          if (sd) {
+            var savingsPerStage = parseFloat((sd.costPerStageLow - sd.costPerStageHigh).toFixed(1));
+            var isEfficient = savingsPerStage > 0;
+            return h('div', { className: 'insight-card insight-card-secondary' },
+              h('div', { className: 'insight-card-secondary-header' },
+                h('span', { className: 'insight-card-secondary-number' }, '2'),
+                h('div', { className: 'insight-card-badge insight-card-badge-medium' }, 'MEDIUM CONFIDENCE')
+              ),
+              h('div', { className: 'insight-card-title-sm' },
+                isEfficient
+                  ? 'Multi-gate QC costs ' + savingsPerStage + 'd less per stage than single-gate'
+                  : 'Single-gate QC completes ' + Math.abs(savingsPerStage) + 'd faster per stage'
+              ),
+              h('div', { className: 'insight-card-subtitle' },
+                sd.count + ' completed ' + B.toLowerCase() + 's · 3+ stage avg ' + sd.highAvg + 'd vs <3 stage avg ' + sd.lowAvg + 'd'
+              ),
+              h(Tag, { color: 'orange', style: { marginTop: 8, fontSize: 11 } }, 'Workflow optimization')
+            );
+          }
+          return h('div', { className: 'insight-card insight-card-secondary insight-card-dim' },
+            h('div', { className: 'insight-card-secondary-header' },
+              h('span', { className: 'insight-card-secondary-number' }, '2'),
+              h('div', { className: 'insight-card-badge insight-card-badge-low' }, 'INSUFFICIENT DATA')
+            ),
+            h('div', { className: 'insight-card-title-sm' }, 'Multi-stage vs single-gate cycle time'),
+            h('div', { className: 'insight-card-subtitle' }, 'Needs ≥2 completed ' + B.toLowerCase() + 's in each stage-count group'),
+            h(Tag, { color: 'orange', style: { marginTop: 8, fontSize: 11 } }, 'Workflow optimization')
+          );
+        })(),
+
+        // Card 3: Assignee diversity vs cycle time
+        (function() {
+          var ad = m.assigneeDiversityData;
+          if (ad) {
+            var slowdown = parseFloat((ad.highTurnoverAvg - ad.lowTurnoverAvg).toFixed(1));
+            return h('div', { className: 'insight-card insight-card-secondary' },
+              h('div', { className: 'insight-card-secondary-header' },
+                h('span', { className: 'insight-card-secondary-number' }, '3'),
+                h('div', { className: 'insight-card-badge insight-card-badge-medium' }, 'MEDIUM CONFIDENCE')
+              ),
+              h('div', { className: 'insight-card-title-sm' },
+                slowdown > 0
+                  ? 'High assignee turnover adds ' + slowdown + 'd to cycle time'
+                  : 'Assignee diversity shows no cycle time penalty (' + Math.abs(slowdown) + 'd)'
+              ),
+              h('div', { className: 'insight-card-subtitle' },
+                'High-turnover ' + B.toLowerCase() + 's: ' + ad.highTurnoverAvg + 'd avg (' + ad.highCount + ') · ' +
+                'Low-turnover: ' + ad.lowTurnoverAvg + 'd avg (' + ad.lowCount + ')'
+              ),
+              h(Tag, { color: 'blue', style: { marginTop: 8, fontSize: 11 } }, 'Coordination overhead')
+            );
+          }
+          return h('div', { className: 'insight-card insight-card-secondary insight-card-dim' },
+            h('div', { className: 'insight-card-secondary-header' },
+              h('span', { className: 'insight-card-secondary-number' }, '3'),
+              h('div', { className: 'insight-card-badge insight-card-badge-low' }, 'INSUFFICIENT DATA')
+            ),
+            h('div', { className: 'insight-card-title-sm' }, 'Assignee turnover vs cycle time'),
+            h('div', { className: 'insight-card-subtitle' }, 'Needs ≥2 completed ' + B.toLowerCase() + 's in each turnover group'),
+            h(Tag, { color: 'blue', style: { marginTop: 8, fontSize: 11 } }, 'Coordination overhead')
+          );
+        })(),
+
+        // Card 4: Team size vs throughput
+        (function() {
+          var ts = m.teamSizeInsight;
+          if (ts) {
+            var pct = ts.speedupPct;
+            return h('div', { className: 'insight-card insight-card-secondary' },
+              h('div', { className: 'insight-card-secondary-header' },
+                h('span', { className: 'insight-card-secondary-number' }, '4'),
+                h('div', { className: 'insight-card-badge insight-card-badge-low' }, 'EMERGING')
+              ),
+              h('div', { className: 'insight-card-title-sm' },
+                pct !== null
+                  ? (pct > 0
+                      ? 'Larger teams deliver ' + pct + '% faster than smaller teams'
+                      : 'Smaller teams match larger teams — coordination overhead observed')
+                  : 'Team size has minimal impact on cycle time'
+              ),
+              h('div', { className: 'insight-card-subtitle' },
+                'Small teams (≤3): ' + ts.smallAvg + 'd avg · Large teams (5+): ' + ts.largeAvg + 'd avg'
+              ),
+              h(Tag, { style: { marginTop: 8, fontSize: 11 } }, 'Resource optimization')
+            );
+          }
+          return h('div', { className: 'insight-card insight-card-secondary insight-card-dim' },
+            h('div', { className: 'insight-card-secondary-header' },
+              h('span', { className: 'insight-card-secondary-number' }, '4'),
+              h('div', { className: 'insight-card-badge insight-card-badge-low' }, 'INSUFFICIENT DATA')
+            ),
+            h('div', { className: 'insight-card-title-sm' }, 'Team size vs throughput'),
+            h('div', { className: 'insight-card-subtitle' }, 'Needs ≥3 projects with varying team sizes and ≥2 completed ' + B.toLowerCase() + 's each'),
+            h(Tag, { style: { marginTop: 8, fontSize: 11 } }, 'Resource optimization')
+          );
+        })()
       )
     );
   }
