@@ -4173,7 +4173,7 @@ function QCTrackerPage(props) {
     var bundleIds = visibleBundles.map(function(b) { return b.id; }).filter(Boolean);
     console.log('[StatusReport] Exporting', bundleIds.length, 'deliverables from project', projectName);
     setReportLoading(true);
-    fetch('/api/status-report', {
+    fetch('/api/bundles/report', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ bundleIds: bundleIds, projectId: projectId, projectName: projectName }),

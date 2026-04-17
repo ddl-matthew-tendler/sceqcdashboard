@@ -1145,7 +1145,7 @@ def _build_status_report_pdf(project_name, sections, debug_info):
     return buf.getvalue()
 
 
-@app.post("/api/status-report")
+@app.post("/api/bundles/report")
 def generate_status_report(body: dict):
     """
     Generate a PDF status report matching the BMS QC tracker format.
