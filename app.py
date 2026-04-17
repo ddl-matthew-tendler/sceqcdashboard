@@ -988,7 +988,6 @@ def _categorize_attachment(att):
         return None, None
 
     low = fname.lower()
-    # Derive the directory path portion
     if "/" in fname:
         dir_path = fname.rsplit("/", 1)[0]
     else:
@@ -996,25 +995,27 @@ def _categorize_attachment(att):
 
     base = fname.rsplit("/", 1)[-1].lower()
 
-    # Output datasets / reports
-    if any(base.endswith(ext) for ext in (".sas7bdat", ".xpt", ".csv", ".xlsx", ".rtf")):
-        return "output", dir_path
-    # PDFs could be output reports or programs — treat as output
-    if base.endswith(".pdf") and not base.endswith("_pgm.pdf"):
-        return "output", dir_path
+    in_qc_path = (
+        any(seg in low for seg in ["/qc/", "/validation/", "/verif/", "/verify/", "/tfl_qc/", "/qc_", "_qc/", "_val/"])
+        or any(base.startswith(pfx) for pfx in ["v-", "v_", "vld_", "qc_", "chk_"])
+        or "_qc." in base or "_val." in base
+    )
 
+    # Dataset / table outputs (real deliverables, never QC artifacts)
+    if any(base.endswith(ext) for ext in (".sas7bdat", ".xpt", ".csv", ".xlsx", ".rtf")):
+        return ("qc_output" if in_qc_path else "output"), dir_path
+
+    # PDFs: qc path → qc artifact, else output report
+    if base.endswith(".pdf") and not base.endswith("_pgm.pdf"):
+        return ("qc_output" if in_qc_path else "output"), dir_path
+
+    # Programs
     if base.endswith(".sas") or base.endswith(".r") or base.endswith(".py"):
-        # QC / validation program heuristics
-        is_qc = (
-            any(seg in low for seg in ["/qc/", "/validation/", "/verif/", "/verify/", "_qc/", "_val/"])
-            or any(base.startswith(pfx) for pfx in ["v-", "v_", "vld_", "qc_", "chk_"])
-            or "_qc." in base or "_val." in base
-        )
-        if is_qc:
+        if in_qc_path:
             return "qc", dir_path
-        # Production / primary program
         return "prog", dir_path
 
+    # Logs and other auxiliary files — ignored for the report
     return None, None
 
 
@@ -1267,16 +1268,31 @@ def generate_status_report(body: dict):
         rationale = _get_rationale(policy)
         deliverable_name = b.get("name") or ""
 
-        prog_file = ""; prog_path = ""; qc_file = ""; qc_path = ""; out_file = ""; out_path = ""
+        # Rank candidates so the row picks the most meaningful attachment per slot.
+        # Output rank (lower = preferred): dataset binaries > text tables > report PDFs
+        output_ext_rank = {
+            ".sas7bdat": 0, ".xpt": 1, ".csv": 2, ".xlsx": 3, ".rtf": 4, ".pdf": 5,
+        }
+        buckets = {"prog": [], "qc": [], "output": []}
         for att in atts:
             cat, dir_p = _categorize_attachment(att)
-            fname_base = ((att.get("identifier") or {}).get("filename") or "").rsplit("/", 1)[-1]
-            if cat == "prog" and not prog_file:
-                prog_file = fname_base; prog_path = dir_p
-            elif cat == "qc" and not qc_file:
-                qc_file = fname_base; qc_path = dir_p
-            elif cat == "output" and not out_file:
-                out_file = fname_base; out_path = dir_p
+            if cat not in buckets:
+                continue  # qc_output, logs, unknown types are intentionally excluded
+            fname_full = (att.get("identifier") or {}).get("filename") or ""
+            fname_base = fname_full.rsplit("/", 1)[-1]
+            ext = "." + fname_base.rsplit(".", 1)[-1].lower() if "." in fname_base else ""
+            ext_rank = output_ext_rank.get(ext, 99) if cat == "output" else 0
+            buckets[cat].append((ext_rank, fname_base, dir_p))
+
+        def pick(bucket):
+            if not bucket:
+                return "", ""
+            best = sorted(bucket, key=lambda t: (t[0], t[1]))[0]
+            return best[1], best[2]
+
+        prog_file, prog_path = pick(buckets["prog"])
+        qc_file, qc_path = pick(buckets["qc"])
+        out_file, out_path = pick(buckets["output"])
 
         # Collect all paths seen across this section for smarter path aggregation
         prog_stage = find_stage(stages, "self", "author", "production", "programmer") or (stages[0] if stages else None)
