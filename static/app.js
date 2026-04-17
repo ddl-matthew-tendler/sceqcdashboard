@@ -4166,17 +4166,15 @@ function QCTrackerPage(props) {
   function exportStatusReport() {
     var visibleBundles = filtered;
     if (!visibleBundles.length) return;
-    // Derive projectId and projectName from the first bundle
     var firstBundle = visibleBundles[0];
-    var projectId = firstBundle.projectId || '';
     var projectName = firstBundle.projectName || 'Project';
-    var bundleIds = visibleBundles.map(function(b) { return b.id; }).filter(Boolean);
-    console.log('[StatusReport] Exporting', bundleIds.length, 'deliverables from project', projectName);
+    var membersCache = props.projectMembersCache || {};
+    console.log('[StatusReport] Exporting', visibleBundles.length, 'deliverables from project', projectName);
     setReportLoading(true);
     fetch('/api/bundles/report', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ bundleIds: bundleIds, projectId: projectId, projectName: projectName }),
+      body: JSON.stringify({ projectName: projectName, bundles: visibleBundles, membersCache: membersCache }),
     })
       .then(function(resp) {
         if (!resp.ok) return resp.text().then(function(t) { throw new Error(t); });
