@@ -997,7 +997,7 @@ def _categorize_attachment(att):
     base = fname.rsplit("/", 1)[-1].lower()
 
     # Output datasets / reports
-    if any(base.endswith(ext) for ext in (".sas7bdat", ".csv", ".xlsx")):
+    if any(base.endswith(ext) for ext in (".sas7bdat", ".xpt", ".csv", ".xlsx", ".rtf")):
         return "output", dir_path
     # PDFs could be output reports or programs — treat as output
     if base.endswith(".pdf") and not base.endswith("_pgm.pdf"):
@@ -1052,28 +1052,30 @@ def _build_status_report_pdf(project_name, sections, debug_info):
     DOMINO_PURPLE = colors.HexColor("#2D2B6B")
     ALT_ROW = colors.HexColor("#F5F5FA")
 
-    # Column widths (mm) — must sum to ≤ 400mm usable width
+    # Column widths (mm) — 13 cols, must sum to ≤ 400mm usable width on A3 landscape
     col_widths = [
-        38 * mm,  # Program Name
-        38 * mm,  # Dataset Output File Name
-        32 * mm,  # Programmer Email
-        20 * mm,  # Execution Date
-        16 * mm,  # Risk Level
-        72 * mm,  # Rationale (widest)
-        38 * mm,  # Verification Program Name
-        32 * mm,  # Verifier Email
-        20 * mm,  # QC Date
-        32 * mm,  # Final Review Email
-        20 * mm,  # Final Review Date
-        20 * mm,  # Program Freeze Date
+        36 * mm,  # Deliverable Name
+        30 * mm,  # Program Name
+        30 * mm,  # Dataset Output File Name
+        26 * mm,  # Programmer Email
+        16 * mm,  # Execution Date
+        44 * mm,  # Risk Level (full policy name)
+        56 * mm,  # Rationale
+        30 * mm,  # Verification Program Name
+        26 * mm,  # Verifier Email
+        16 * mm,  # QC Date
+        26 * mm,  # Final Review Email
+        16 * mm,  # Final Review Date
+        16 * mm,  # Program Freeze Date
     ]
 
     headers = [
+        "Deliverable\nName",
         "Program\nName",
         "Dataset Output\nFile Name",
         "Programmer\nEmail @bms.com",
         "Execution\nDate",
-        "Risk\nLevel",
+        "Risk Level\n(Policy)",
         "Rationale for Risk Level\nAssignment",
         "Verification\nProgram Name",
         "Verifier\nEmail @bms.com",
@@ -1195,8 +1197,8 @@ def generate_status_report(body: dict):
         atts = b.get("_attachments") or []
 
         output_type = _get_output_type(policy)
-        risk_level = _get_risk_level(policy)
         rationale = _get_rationale(policy)
+        deliverable_name = b.get("name") or ""
 
         prog_file = ""; prog_path = ""; qc_file = ""; qc_path = ""; out_file = ""; out_path = ""
         for att in atts:
@@ -1209,9 +1211,7 @@ def generate_status_report(body: dict):
             elif cat == "output" and not out_file:
                 out_file = fname_base; out_path = dir_p
 
-        if not prog_file:
-            prog_file = b.get("name") or ""
-
+        # Collect all paths seen across this section for smarter path aggregation
         prog_stage = find_stage(stages, "self", "author", "production", "programmer") or (stages[0] if stages else None)
         qc_stage = find_stage(stages, "double", "independent", "verif", "qc")
         review_stage = find_stage(stages, "study lead", "review", "final")
@@ -1225,11 +1225,12 @@ def generate_status_report(body: dict):
         freeze_date = _format_date(b.get("updatedAt")) if b.get("state") == "Complete" else ""
 
         sec = sections[output_type]
-        sec["rows"].append([prog_file, out_file, prog_email, exec_date, risk_level, rationale,
+        sec["rows"].append([deliverable_name, prog_file, out_file, prog_email, exec_date, policy, rationale,
                             qc_file, qc_email, qc_date, review_email, review_date, freeze_date])
-        if prog_path and not sec["prog_path"]: sec["prog_path"] = prog_path
-        if out_path and not sec["output_path"]: sec["output_path"] = out_path
-        if qc_path and not sec["qc_path"]: sec["qc_path"] = qc_path
+        # Keep the longest path seen (more specific = more useful)
+        if prog_path and len(prog_path) > len(sec["prog_path"]): sec["prog_path"] = prog_path
+        if out_path and len(out_path) > len(sec["output_path"]): sec["output_path"] = out_path
+        if qc_path and len(qc_path) > len(sec["qc_path"]): sec["qc_path"] = qc_path
 
     logger.info(f"[StatusReport] Sections: { {k: len(v['rows']) for k, v in sections.items()} }")
 
