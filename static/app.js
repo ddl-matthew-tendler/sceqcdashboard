@@ -4200,7 +4200,7 @@ function QCTrackerPage(props) {
 
     console.log('[StatusReport] Exporting', visibleBundles.length, 'deliverables from', scope);
     setReportLoading(true);
-    fetch('/api/bundles/report', {
+    fetch('api/bundles/report', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
