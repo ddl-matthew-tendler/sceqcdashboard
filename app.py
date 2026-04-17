@@ -1,12 +1,21 @@
 import os
+import io
+import json
 import logging
 import time
 import requests
+from datetime import datetime
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import landscape, A3
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.platypus import SimpleDocTemplate, Table as RLTable, TableStyle, Paragraph, Spacer, HRFlowable, KeepTogether
+from reportlab.lib.enums import TA_LEFT, TA_CENTER
 
 load_dotenv()
 
@@ -917,6 +926,438 @@ def debug_auth():
         "domino_env_vars": domino_vars,
         "governance_test": gov_test,
     }
+
+
+# ── Status Report (PDF Export) ────────────────────────────────────
+
+def _format_date(iso_str):
+    if not iso_str:
+        return ""
+    try:
+        # Handle both "2026-01-20T10:00:00Z" and epoch-ms integers
+        if isinstance(iso_str, (int, float)):
+            dt = datetime.utcfromtimestamp(iso_str / 1000)
+        else:
+            s = iso_str.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(s)
+        return dt.strftime("%m/%d/%Y")
+    except Exception:
+        return str(iso_str)[:10]
+
+
+def _get_output_type(policy_name):
+    up = (policy_name or "").upper()
+    if "SDTM" in up:
+        return "SDTM"
+    if "ADAM" in up:
+        return "ADaM"
+    if "TFL" in up or "TABLE" in up or "FIGURE" in up or "LISTING" in up:
+        return "TFL"
+    return "Other"
+
+
+def _get_risk_level(policy_name):
+    low = (policy_name or "").lower()
+    if "high" in low or "level 3" in low or "level3" in low:
+        return "Level 3"
+    if "medium" in low or "level 2" in low or "level2" in low:
+        return "Level 2"
+    if "low" in low or "level 1" in low or "level1" in low:
+        return "Level 1"
+    return "Level 2"
+
+
+def _get_rationale(policy_name):
+    low = (policy_name or "").lower()
+    if "high" in low or "level 3" in low or "level3" in low:
+        return ("Full independent programming of datasets supporting new or critical "
+                "analyses where no validated code exists")
+    if "low" in low or "level 1" in low or "level1" in low:
+        return ("Self-QC with study lead review; prior validated code available as "
+                "reference")
+    # Medium / default
+    return ("Partial independent programming with peer review; some validated "
+            "reference code available")
+
+
+def _categorize_attachment(att):
+    """Return ('prog', path) | ('qc', path) | ('output', path) | (None, None)."""
+    ident = att.get("identifier") or {}
+    fname = (ident.get("filename") or ident.get("name") or "").strip()
+    if not fname:
+        return None, None
+
+    low = fname.lower()
+    # Derive the directory path portion
+    if "/" in fname:
+        dir_path = fname.rsplit("/", 1)[0]
+    else:
+        dir_path = ""
+
+    base = fname.rsplit("/", 1)[-1].lower()
+
+    # Output datasets / reports
+    if any(base.endswith(ext) for ext in (".sas7bdat", ".csv", ".xlsx")):
+        return "output", dir_path
+    # PDFs could be output reports or programs — treat as output
+    if base.endswith(".pdf") and not base.endswith("_pgm.pdf"):
+        return "output", dir_path
+
+    if base.endswith(".sas") or base.endswith(".r") or base.endswith(".py"):
+        # QC / validation program heuristics
+        is_qc = (
+            any(seg in low for seg in ["/qc/", "/validation/", "/verif/", "/verify/", "_qc/", "_val/"])
+            or any(base.startswith(pfx) for pfx in ["v-", "v_", "vld_", "qc_", "chk_"])
+            or "_qc." in base or "_val." in base
+        )
+        if is_qc:
+            return "qc", dir_path
+        # Production / primary program
+        return "prog", dir_path
+
+    return None, None
+
+
+def _build_status_report_pdf(project_name, sections, debug_info):
+    """Render a landscape A3 PDF matching the BMS QC status report format."""
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=landscape(A3),
+        leftMargin=10 * mm,
+        rightMargin=10 * mm,
+        topMargin=12 * mm,
+        bottomMargin=12 * mm,
+    )
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("ReportTitle", parent=styles["Normal"],
+                                  fontSize=13, fontName="Helvetica-Bold",
+                                  alignment=TA_CENTER, spaceAfter=4)
+    path_style = ParagraphStyle("PathLine", parent=styles["Normal"],
+                                 fontSize=8, fontName="Helvetica",
+                                 alignment=TA_CENTER, spaceAfter=2)
+    section_style = ParagraphStyle("Section", parent=styles["Normal"],
+                                    fontSize=11, fontName="Helvetica-Bold",
+                                    spaceBefore=12, spaceAfter=4)
+    cell_style = ParagraphStyle("Cell", parent=styles["Normal"],
+                                 fontSize=7, fontName="Helvetica", leading=9)
+    hdr_style = ParagraphStyle("Hdr", parent=styles["Normal"],
+                                fontSize=7, fontName="Helvetica-Bold",
+                                textColor=colors.white, leading=9,
+                                alignment=TA_CENTER)
+    debug_style = ParagraphStyle("Debug", parent=styles["Normal"],
+                                  fontSize=6, fontName="Courier", leading=8)
+
+    DOMINO_PURPLE = colors.HexColor("#2D2B6B")
+    ALT_ROW = colors.HexColor("#F5F5FA")
+
+    # Column widths (mm) — must sum to ≤ 400mm usable width
+    col_widths = [
+        38 * mm,  # Program Name
+        38 * mm,  # Dataset Output File Name
+        32 * mm,  # Programmer Email
+        20 * mm,  # Execution Date
+        16 * mm,  # Risk Level
+        72 * mm,  # Rationale (widest)
+        38 * mm,  # Verification Program Name
+        32 * mm,  # Verifier Email
+        20 * mm,  # QC Date
+        32 * mm,  # Final Review Email
+        20 * mm,  # Final Review Date
+        20 * mm,  # Program Freeze Date
+    ]
+
+    headers = [
+        "Program\nName",
+        "Dataset Output\nFile Name",
+        "Programmer\nEmail @bms.com",
+        "Execution\nDate",
+        "Risk\nLevel",
+        "Rationale for Risk Level\nAssignment",
+        "Verification\nProgram Name",
+        "Verifier\nEmail @bms.com",
+        "QC\nDate",
+        "Final Review\nEmail @bms.com",
+        "Final Review\nDate",
+        "Program\nFreeze Date",
+    ]
+
+    def make_table(data_rows):
+        header_row = [Paragraph(h, hdr_style) for h in headers]
+        table_data = [header_row]
+        for i, row in enumerate(data_rows):
+            table_data.append([Paragraph(str(v or ""), cell_style) for v in row])
+
+        tbl = RLTable(table_data, colWidths=col_widths, repeatRows=1)
+        row_count = len(table_data)
+        style_cmds = [
+            ("BACKGROUND", (0, 0), (-1, 0), DOMINO_PURPLE),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 7),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#CCCCCC")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, ALT_ROW]),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]
+        tbl.setStyle(TableStyle(style_cmds))
+        return tbl
+
+    story = []
+
+    # Cover header
+    gen_time = datetime.utcnow().strftime("%B %d, %Y %H:%M UTC")
+    total = sum(len(s["rows"]) for s in sections.values())
+    story.append(Paragraph(f"QC Status Report — {project_name}", title_style))
+    story.append(Paragraph(f"Generated: {gen_time}  |  Deliverables: {total}", path_style))
+    story.append(Spacer(1, 6 * mm))
+
+    for section_name in ["SDTM", "ADaM", "TFL", "Other"]:
+        sec = sections.get(section_name)
+        if not sec or not sec["rows"]:
+            continue
+
+        story.append(Paragraph(section_name + " Datasets", section_style))
+        if sec.get("prog_path"):
+            story.append(Paragraph(f"Program Path: {sec['prog_path']}", path_style))
+        if sec.get("output_path"):
+            story.append(Paragraph(f"Output Path: {sec['output_path']}", path_style))
+        if sec.get("qc_path"):
+            story.append(Paragraph(f"Validation Program Path: {sec['qc_path']}", path_style))
+        story.append(Spacer(1, 2 * mm))
+        story.append(KeepTogether([make_table(sec["rows"])]))
+        story.append(Spacer(1, 4 * mm))
+
+    # Debug appendix
+    if debug_info:
+        story.append(HRFlowable(width="100%", thickness=0.5, color=colors.grey))
+        story.append(Paragraph("Debug Appendix", section_style))
+        debug_text = json.dumps(debug_info, indent=2, default=str)
+        # Split into chunks to avoid ReportLab overflow
+        for line in debug_text.splitlines():
+            story.append(Paragraph(line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"), debug_style))
+
+    doc.build(story)
+    return buf.getvalue()
+
+
+@app.post("/api/status-report")
+def generate_status_report(body: dict):
+    """
+    Generate a PDF status report matching the BMS QC tracker format.
+    Body: { bundleIds: [...], projectId: "...", projectName: "..." }
+    """
+    bundle_ids = body.get("bundleIds") or []
+    project_id = body.get("projectId") or ""
+    project_name = body.get("projectName") or "Unknown Project"
+
+    debug = {
+        "input": {"bundleIds": bundle_ids, "projectId": project_id, "projectName": project_name},
+        "bundles": [],
+        "attachments": {},
+        "users": {},
+        "sections": {},
+        "errors": [],
+    }
+
+    # ── Step 1: Fetch bundle details ──────────────────────────────
+    bundles_data = []
+    for bid in bundle_ids:
+        try:
+            b = gov_get(f"/bundles/{bid}")
+            bundles_data.append(b)
+            debug["bundles"].append({
+                "id": bid,
+                "name": b.get("name"),
+                "policyName": b.get("policyName"),
+                "state": b.get("state"),
+                "createdAt": b.get("createdAt"),
+                "updatedAt": b.get("updatedAt"),
+                "stages": [
+                    {
+                        "name": (s.get("stage") or {}).get("name"),
+                        "stageId": s.get("stageId"),
+                        "assigneeId": (s.get("assignee") or {}).get("id"),
+                        "assignedAt": s.get("assignedAt"),
+                    }
+                    for s in (b.get("stages") or [])
+                ],
+            })
+        except Exception as e:
+            debug["errors"].append({"step": "fetch_bundle", "bundleId": bid, "error": str(e)})
+            logger.warning(f"[StatusReport] Failed to fetch bundle {bid}: {e}")
+
+    # ── Step 2: Fetch attachment overviews ────────────────────────
+    bundle_id_set = {b.get("id") for b in bundles_data if b.get("id")}
+    att_by_bundle = {bid: [] for bid in bundle_id_set}
+    try:
+        att_result = gov_get("/attachment-overviews", params={"limit": 500})
+        all_atts = att_result.get("data") or att_result.get("overviews") or []
+        matched = 0
+        for att in all_atts:
+            bid = att.get("bundleId")
+            if bid in att_by_bundle:
+                att_by_bundle[bid].append(att)
+                matched += 1
+        debug["attachments"]["total_fetched"] = len(all_atts)
+        debug["attachments"]["total_matched"] = matched
+        debug["attachments"]["per_bundle"] = {
+            bid: [
+                {
+                    "filename": (a.get("identifier") or {}).get("filename"),
+                    "type": a.get("type"),
+                    "category": _categorize_attachment(a)[0],
+                }
+                for a in atts
+            ]
+            for bid, atts in att_by_bundle.items()
+        }
+    except Exception as e:
+        debug["errors"].append({"step": "fetch_attachments", "error": str(e)})
+        logger.warning(f"[StatusReport] Attachment fetch failed: {e}")
+
+    # ── Step 3: Resolve user emails via project collaborators ─────
+    user_map = {}  # user_id → {name, email}
+    try:
+        collab_result = v4_get(f"/projects/{project_id}/collaborators?getUsers=true")
+        members = collab_result if isinstance(collab_result, list) else []
+        for m in members:
+            uid = m.get("id") or m.get("userId")
+            if not uid:
+                continue
+            first = m.get("firstName") or ""
+            last = m.get("lastName") or ""
+            uname = m.get("userName") or m.get("username") or ""
+            email = (m.get("email") or m.get("emailAddress") or "").strip()
+            if not email and uname and "@" in uname:
+                email = uname
+            display = (f"{first} {last}".strip()) or uname or uid
+            user_map[uid] = {"name": display, "email": email, "userName": uname}
+        debug["users"]["collaborator_count"] = len(members)
+        debug["users"]["resolved"] = list(user_map.keys())
+    except Exception as e:
+        debug["errors"].append({"step": "fetch_collaborators", "error": str(e)})
+        logger.warning(f"[StatusReport] Collaborator fetch failed: {e}")
+
+    def resolve_user(assignee):
+        if not assignee:
+            return "", ""
+        uid = assignee.get("id") or ""
+        info = user_map.get(uid, {})
+        name = info.get("name") or assignee.get("name") or ""
+        email = info.get("email") or ""
+        return name, email
+
+    def find_stage(stages, *keywords):
+        """Return the first stage whose name matches any keyword."""
+        for s in (stages or []):
+            sname = ((s.get("stage") or {}).get("name") or "").lower()
+            if any(kw in sname for kw in keywords):
+                return s
+        return None
+
+    # ── Step 4: Build rows grouped by output type ─────────────────
+    sections = {
+        "SDTM": {"rows": [], "prog_path": "", "output_path": "", "qc_path": ""},
+        "ADaM": {"rows": [], "prog_path": "", "output_path": "", "qc_path": ""},
+        "TFL":  {"rows": [], "prog_path": "", "output_path": "", "qc_path": ""},
+        "Other": {"rows": [], "prog_path": "", "output_path": "", "qc_path": ""},
+    }
+
+    for b in bundles_data:
+        bid = b.get("id", "")
+        policy = b.get("policyName") or ""
+        stages = b.get("stages") or []
+        atts = att_by_bundle.get(bid, [])
+
+        output_type = _get_output_type(policy)
+        risk_level = _get_risk_level(policy)
+        rationale = _get_rationale(policy)
+
+        # Categorize attachments
+        prog_file = ""; prog_path = ""; qc_file = ""; qc_path = ""; out_file = ""; out_path = ""
+        for att in atts:
+            cat, dir_p = _categorize_attachment(att)
+            fname_base = ((att.get("identifier") or {}).get("filename") or "").rsplit("/", 1)[-1]
+            if cat == "prog" and not prog_file:
+                prog_file = fname_base
+                prog_path = dir_p
+            elif cat == "qc" and not qc_file:
+                qc_file = fname_base
+                qc_path = dir_p
+            elif cat == "output" and not out_file:
+                out_file = fname_base
+                out_path = dir_p
+
+        # Fall back bundle name if no prog file found
+        if not prog_file:
+            prog_file = b.get("name") or ""
+
+        # Stage assignees
+        prog_stage = find_stage(stages, "self", "author", "production", "programmer")
+        if not prog_stage and stages:
+            prog_stage = stages[0]
+        qc_stage = find_stage(stages, "double", "independent", "verif", "qc")
+        review_stage = find_stage(stages, "study lead", "review", "final")
+
+        _, prog_email = resolve_user(prog_stage.get("assignee") if prog_stage else None)
+        exec_date = _format_date((prog_stage or {}).get("assignedAt") or b.get("createdAt"))
+
+        _, qc_email = resolve_user(qc_stage.get("assignee") if qc_stage else None)
+        qc_date = _format_date((qc_stage or {}).get("assignedAt")) if qc_stage else ""
+
+        _, review_email = resolve_user(review_stage.get("assignee") if review_stage else None)
+        review_date = _format_date((review_stage or {}).get("assignedAt")) if review_stage else ""
+
+        freeze_date = _format_date(b.get("updatedAt")) if b.get("state") == "Complete" else ""
+
+        row = [
+            prog_file,
+            out_file,
+            prog_email,
+            exec_date,
+            risk_level,
+            rationale,
+            qc_file,
+            qc_email,
+            qc_date,
+            review_email,
+            review_date,
+            freeze_date,
+        ]
+        sec = sections[output_type]
+        sec["rows"].append(row)
+        if prog_path and not sec["prog_path"]:
+            sec["prog_path"] = prog_path
+        if out_path and not sec["output_path"]:
+            sec["output_path"] = out_path
+        if qc_path and not sec["qc_path"]:
+            sec["qc_path"] = qc_path
+
+    debug["sections"] = {k: {"row_count": len(v["rows"]), "paths": {kk: vv for kk, vv in v.items() if kk != "rows"}} for k, v in sections.items()}
+    logger.info(f"[StatusReport] Sections: { {k: len(v['rows']) for k, v in sections.items()} }")
+
+    # ── Step 5: Render PDF ────────────────────────────────────────
+    try:
+        pdf_bytes = _build_status_report_pdf(project_name, sections, debug)
+    except Exception as e:
+        debug["errors"].append({"step": "render_pdf", "error": str(e)})
+        logger.error(f"[StatusReport] PDF render failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {e}")
+
+    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in project_name)
+    filename = f"status_report_{safe_name}.pdf"
+    logger.info(f"[StatusReport] PDF generated: {len(pdf_bytes)} bytes, file={filename}")
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ── Static files & SPA ────────────────────────────────────────────

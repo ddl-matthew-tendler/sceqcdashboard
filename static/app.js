@@ -4007,6 +4007,9 @@ function QCTrackerPage(props) {
   // CSV upload state
   var _csv1 = useState(false); var csvDrawerOpen = _csv1[0]; var setCsvDrawerOpen = _csv1[1];
 
+  // Status report loading state
+  var _rl = useState(false); var reportLoading = _rl[0]; var setReportLoading = _rl[1];
+
   // Filter state
   var _fs1 = useState(''); var searchText = _fs1[0]; var setSearchText = _fs1[1];
   var _fs2 = useState([]); var filterPolicies = _fs2[0]; var setFilterPolicies = _fs2[1];
@@ -4158,6 +4161,43 @@ function QCTrackerPage(props) {
   function clearFilters() {
     setSearchText(''); setFilterPolicies([]); setFilterState(null); setFilterAssignee(null); setFilterFlags([]); setFilterStage(null);
     setActiveStatCard(null);
+  }
+
+  function exportStatusReport() {
+    var visibleBundles = filtered;
+    if (!visibleBundles.length) return;
+    // Derive projectId and projectName from the first bundle
+    var firstBundle = visibleBundles[0];
+    var projectId = firstBundle.projectId || '';
+    var projectName = firstBundle.projectName || 'Project';
+    var bundleIds = visibleBundles.map(function(b) { return b.id; }).filter(Boolean);
+    console.log('[StatusReport] Exporting', bundleIds.length, 'deliverables from project', projectName);
+    setReportLoading(true);
+    fetch('/api/status-report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bundleIds: bundleIds, projectId: projectId, projectName: projectName }),
+    })
+      .then(function(resp) {
+        if (!resp.ok) return resp.text().then(function(t) { throw new Error(t); });
+        return resp.blob();
+      })
+      .then(function(blob) {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'status_report_' + projectName + '.pdf';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        console.log('[StatusReport] Download triggered');
+      })
+      .catch(function(err) {
+        console.error('[StatusReport] Error:', err);
+        antd.message.error('Status report failed: ' + err.message);
+      })
+      .finally(function() { setReportLoading(false); });
   }
 
   // Clickable stat cards -toggle filter when clicked
@@ -4705,11 +4745,21 @@ function QCTrackerPage(props) {
         h('h1', null, 'QC Tracker'),
         h('p', null, 'Track all ' + capFirst(B).toLowerCase() + 's across projects and ' + capFirst(P).toLowerCase() + 's')
       ),
-      h(Tooltip, { title: 'Import ' + capFirst(B).toLowerCase() + 's from a CSV file' },
-        h(Button, {
-          onClick: function() { setCsvDrawerOpen(true); },
-          icon: icons && icons.UploadOutlined ? h(icons.UploadOutlined) : null,
-        }, 'Import CSV')
+      h('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
+        h(Tooltip, { title: filtered.length + ' ' + capFirst(B).toLowerCase() + 's will be included (based on current filters)' },
+          h(Button, {
+            onClick: exportStatusReport,
+            loading: reportLoading,
+            disabled: filtered.length === 0,
+            icon: icons && icons.DownloadOutlined ? h(icons.DownloadOutlined) : null,
+          }, 'Status Report')
+        ),
+        h(Tooltip, { title: 'Import ' + capFirst(B).toLowerCase() + 's from a CSV file' },
+          h(Button, {
+            onClick: function() { setCsvDrawerOpen(true); },
+            icon: icons && icons.UploadOutlined ? h(icons.UploadOutlined) : null,
+          }, 'Import CSV')
+        )
       )
     ),
 
