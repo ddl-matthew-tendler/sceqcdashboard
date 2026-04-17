@@ -4167,14 +4167,50 @@ function QCTrackerPage(props) {
     var visibleBundles = filtered;
     if (!visibleBundles.length) return;
     var firstBundle = visibleBundles[0];
-    var projectName = firstBundle.projectName || 'Project';
+    var projectNames = {};
+    visibleBundles.forEach(function(b) { if (b.projectName) projectNames[b.projectName] = true; });
+    var projectList = Object.keys(projectNames);
+    var projectName = projectList.length === 1 ? projectList[0] : (firstBundle.projectName || 'Project');
     var membersCache = props.projectMembersCache || {};
-    console.log('[StatusReport] Exporting', visibleBundles.length, 'deliverables from project', projectName);
+
+    // Who generated this
+    var cu = props.currentUser || {};
+    var nameParts = [];
+    if (cu.firstName) nameParts.push(cu.firstName);
+    if (cu.lastName) nameParts.push(cu.lastName);
+    var displayName = nameParts.join(' ').trim() || cu.userName || 'Unknown user';
+    var emailPart = cu.email ? ' <' + cu.email + '>' : (cu.userName && cu.userName.indexOf('@') >= 0 ? ' <' + cu.userName + '>' : '');
+    var generatedBy = displayName + emailPart;
+
+    // Active filter summary
+    var filterBits = [];
+    if (searchText) filterBits.push('Search: "' + searchText + '"');
+    if (filterPolicies && filterPolicies.length) filterBits.push('Policies: ' + filterPolicies.join(', '));
+    if (filterState) filterBits.push('State: ' + filterState);
+    if (filterStage) filterBits.push('Stage: ' + filterStage);
+    if (filterAssignee) filterBits.push('Assignee: ' + (filterAssignee === '__unassigned__' ? 'Unassigned' : filterAssignee));
+    if (filterFlags && filterFlags.length) filterBits.push('Flags: ' + filterFlags.join(', '));
+    if (activeStatCard) filterBits.push('Quick filter: ' + activeStatCard);
+    var filtersSummary = filterBits.length ? filterBits.join('  •  ') : '';
+
+    // Scope label
+    var scope;
+    if (projectList.length > 1) scope = projectList.length + ' projects: ' + projectList.join(', ');
+    else scope = projectName;
+
+    console.log('[StatusReport] Exporting', visibleBundles.length, 'deliverables from', scope);
     setReportLoading(true);
     fetch('/api/bundles/report', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectName: projectName, bundles: visibleBundles, membersCache: membersCache }),
+      body: JSON.stringify({
+        projectName: projectName,
+        bundles: visibleBundles,
+        membersCache: membersCache,
+        generatedBy: generatedBy,
+        filtersSummary: filtersSummary,
+        scope: scope,
+      }),
     })
       .then(function(resp) {
         if (!resp.ok) return resp.text().then(function(t) { throw new Error(t); });
@@ -11779,7 +11815,7 @@ function App() {
     // All other pages get scopedBundles
     switch (activePage) {
       case 'tracker':
-        return h(QCTrackerPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, selectedBundle: selectedBundle, terms: terms, projectMembersCache: projectMembersCache, dataExplorerUrl: dataExplorerUrl, connected: connected, policies: livePolicies, debugMode: debugMode, hiddenCols: appHiddenCols, setHiddenCols: setAppHiddenCols, shownStageCols: appShownStageCols, setShownStageCols: setAppShownStageCols, onRefresh: function() { if (connected) fetchLiveData(); } });
+        return h(QCTrackerPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, selectedBundle: selectedBundle, terms: terms, projectMembersCache: projectMembersCache, dataExplorerUrl: dataExplorerUrl, connected: connected, policies: livePolicies, debugMode: debugMode, hiddenCols: appHiddenCols, setHiddenCols: setAppHiddenCols, shownStageCols: appShownStageCols, setShownStageCols: setAppShownStageCols, currentUser: currentUser, scopeCurrentUser: scopeCurrentUser, scopeProjects: scopeProjects, onRefresh: function() { if (connected) fetchLiveData(); } });
       case 'rules':
         return h(AssignmentRulesPage, { bundles: bundles, setBundles: setBundles, assignmentRules: assignmentRules, setAssignmentRules: setAssignmentRules, terms: terms, projectMembersCache: projectMembersCache, livePolicies: livePolicies, onNavigate: setActivePage });
       case 'milestones':
