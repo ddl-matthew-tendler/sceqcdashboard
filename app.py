@@ -1235,9 +1235,8 @@ def generate_status_report(body: dict):
 
     # ── Step 5: Render PDF ────────────────────────────────────────
     try:
-        pdf_bytes = _build_status_report_pdf(project_name, sections, debug)
+        pdf_bytes = _build_status_report_pdf(project_name, sections, None)
     except Exception as e:
-        debug["errors"].append({"step": "render_pdf", "error": str(e)})
         logger.error(f"[StatusReport] PDF render failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"PDF generation failed: {e}")
 
