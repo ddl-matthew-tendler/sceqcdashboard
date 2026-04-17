@@ -4,7 +4,7 @@
    ================================================================ */
 
 const { ConfigProvider, Button, Table, Tag, Space, Spin, Drawer, Badge,
-        Tooltip, Progress, Select, Input, Empty, Tabs, Statistic, Switch,
+        Tooltip, Progress, Select, Input, InputNumber, Divider, Empty, Tabs, Statistic, Switch,
         Modal, Alert, Radio, Checkbox, Popover } = antd;
 const { createElement: h, useState, useEffect, useCallback, useMemo, useRef } = React;
 
@@ -7039,6 +7039,13 @@ var DEFAULT_RISK_CONFIG = {
 //  PAGE: AI Insights
 // ═══════════════════════════════════════════════════════════════
 
+function medianArr(arr) {
+  if (!arr || arr.length === 0) return 0;
+  var sorted = arr.slice().sort(function(a, b) { return a - b; });
+  var mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
 function AIInsightsPage(props) {
   var bundles = props.bundles || [];
   var terms = props.terms || DEFAULT_TERMS;
@@ -7053,6 +7060,22 @@ function AIInsightsPage(props) {
   var _depth = useState(null);
   var activeInsight = _depth[0];
   var setActiveInsight = _depth[1];
+
+  // Benchmark config — persisted to localStorage
+  var _bCfg = useState(function() {
+    try { return JSON.parse(localStorage.getItem('sce_benchmark_config') || 'null'); } catch(e) { return null; }
+  });
+  var benchmarkConfig = _bCfg[0] || { excludedProjects: [], manualOverride: null };
+  var setBenchmarkConfig = _bCfg[1];
+
+  function saveBenchmarkConfig(next) {
+    try { localStorage.setItem('sce_benchmark_config', JSON.stringify(next)); } catch(e) {}
+    setBenchmarkConfig(next);
+  }
+
+  var _bDrawer = useState(false);
+  var benchmarkDrawerOpen = _bDrawer[0];
+  var setBenchmarkDrawerOpen = _bDrawer[1];
 
   // ── Compute real metrics from bundle data ──────────────────
   var insightMetrics = useMemo(function() {
@@ -7239,15 +7262,23 @@ function AIInsightsPage(props) {
       }
     });
 
-    // Benchmark = avg cycle across all OTHER projects (excluding the slowest outlier)
+    // Benchmark = median cycle across all OTHER projects (excluding slowest outlier + any user-excluded projects)
+    var excluded = (benchmarkConfig.excludedProjects || []);
+    var benchmarkStudies = []; // for transparency tooltip
     var otherDays = [];
     Object.keys(completedByProject).forEach(function(proj) {
       if (proj === featuredProject) return;
-      completedByProject[proj].forEach(function(d) { otherDays.push(d); });
+      if (excluded.indexOf(proj) >= 0) return;
+      var days = completedByProject[proj];
+      var avg = days.reduce(function(a, b) { return a + b; }, 0) / days.length;
+      benchmarkStudies.push({ project: proj, count: days.length, avg: parseFloat(avg.toFixed(1)) });
+      days.forEach(function(d) { otherDays.push(d); });
     });
-    var benchmarkAvg = otherDays.length > 0
-      ? otherDays.reduce(function(a, b) { return a + b; }, 0) / otherDays.length
-      : 0;
+
+    // Use median (more robust to outliers than mean)
+    var benchmarkAvg = benchmarkConfig.manualOverride != null
+      ? parseFloat(benchmarkConfig.manualOverride)
+      : medianArr(otherDays);
 
     // Ratio: how much longer is the featured project vs the internal benchmark
     var featuredRatio = benchmarkAvg > 0 && featuredProjectAvgCycle > 0
@@ -7259,8 +7290,8 @@ function AIInsightsPage(props) {
       featuredProject = 'CDISC01_CSR';
       featuredProjectAvgCycle = 42;
       featuredProjectCount = 8;
-      benchmarkAvg = 18;
-      featuredRatio = 2.3;
+      benchmarkAvg = benchmarkConfig.manualOverride != null ? parseFloat(benchmarkConfig.manualOverride) : 18;
+      featuredRatio = featuredProjectAvgCycle / benchmarkAvg;
     }
 
     // ── Over-QC: low-risk deliverables going through double programming ──────
@@ -7305,10 +7336,11 @@ function AIInsightsPage(props) {
       featuredProjectAvgCycle: featuredProjectAvgCycle,
       featuredProjectCount: featuredProjectCount,
       benchmarkAvg: benchmarkAvg,
+      benchmarkStudies: benchmarkStudies,
       featuredRatio: featuredRatio,
       pctLowRiskOverQC: pctLowRiskOverQC,
     };
-  }, [bundles]);
+  }, [bundles, benchmarkConfig]);
 
   // ── Chart: Wait by Project horizontal bar (Level 1) ───────
   useEffect(function() {
@@ -7519,6 +7551,102 @@ function AIInsightsPage(props) {
     return h('div', { className: 'insight-breadcrumb' }, crumbs);
   }
 
+  // ── Benchmark Settings Drawer ──────────────────────────────
+  function renderBenchmarkDrawer() {
+    var m = insightMetrics;
+    var allProjects = Object.keys(m.completedByProject || {}).filter(function(p) { return p !== m.featuredProject; });
+    var excluded = benchmarkConfig.excludedProjects || [];
+    var manualOverride = benchmarkConfig.manualOverride;
+
+    return h(Drawer, {
+      title: 'Benchmark Settings',
+      open: benchmarkDrawerOpen,
+      onClose: function() { setBenchmarkDrawerOpen(false); },
+      width: 480,
+      extra: h(Button, {
+        size: 'small',
+        onClick: function() { saveBenchmarkConfig({ excludedProjects: [], manualOverride: null }); }
+      }, 'Reset to defaults')
+    },
+      h('div', { style: { display: 'flex', flexDirection: 'column', gap: 24 } },
+
+        // Manual override section
+        h('div', null,
+          h('div', { style: { fontWeight: 600, marginBottom: 6 } }, 'Manual target (days)'),
+          h('div', { style: { color: '#888', fontSize: 12, marginBottom: 10 } },
+            'Override the computed median with a fixed benchmark. Leave blank to use the data-driven median.'
+          ),
+          h(InputNumber, {
+            style: { width: 160 },
+            min: 1, max: 365,
+            value: manualOverride != null ? manualOverride : undefined,
+            placeholder: 'e.g. 18',
+            addonAfter: 'days',
+            onChange: function(val) {
+              saveBenchmarkConfig(Object.assign({}, benchmarkConfig, { manualOverride: val != null ? val : null }));
+            }
+          }),
+          manualOverride == null
+            ? h('div', { style: { marginTop: 8, color: '#555', fontSize: 12 } },
+                'Current computed median: ',
+                h('strong', null, m.benchmarkAvg > 0 ? m.benchmarkAvg.toFixed(1) + 'd' : 'n/a'),
+                ' across ', h('strong', null, (m.benchmarkStudies || []).length), ' studies'
+              )
+            : h('div', { style: { marginTop: 8, color: '#5b3fc4', fontSize: 12 } },
+                'Manual override active. Data-driven median is ',
+                h('strong', null, medianArr(
+                  allProjects.filter(function(p) { return excluded.indexOf(p) < 0; })
+                    .flatMap(function(p) { return m.completedByProject[p] || []; })
+                ).toFixed(1) + 'd'),
+                '.'
+              )
+        ),
+
+        h(Divider, { style: { margin: '0' } }),
+
+        // Per-project exclusion table
+        h('div', null,
+          h('div', { style: { fontWeight: 600, marginBottom: 6 } }, 'Studies included in baseline'),
+          h('div', { style: { color: '#888', fontSize: 12, marginBottom: 12 } },
+            'Exclude outlier studies (e.g. crisis programs) from the benchmark median. The featured study is always excluded.'
+          ),
+          allProjects.length === 0
+            ? h('div', { style: { color: '#bbb', fontSize: 13 } }, 'No other completed studies to configure.')
+            : allProjects.map(function(proj) {
+                var days = m.completedByProject[proj] || [];
+                var avg = days.length > 0 ? (days.reduce(function(a, b) { return a + b; }, 0) / days.length).toFixed(1) : '—';
+                var isExcluded = excluded.indexOf(proj) >= 0;
+                return h('div', {
+                  key: proj,
+                  style: {
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '8px 0', borderBottom: '1px solid #f0f0f0'
+                  }
+                },
+                  h('div', null,
+                    h('div', { style: { fontWeight: 500, fontSize: 13, color: isExcluded ? '#bbb' : '#222' } }, proj.replace(/_/g, ' ')),
+                    h('div', { style: { fontSize: 11, color: '#aaa' } },
+                      days.length + ' deliverable' + (days.length !== 1 ? 's' : '') + ' · avg ' + avg + 'd'
+                    )
+                  ),
+                  h(Switch, {
+                    size: 'small',
+                    checked: !isExcluded,
+                    checkedChildren: 'In',
+                    unCheckedChildren: 'Out',
+                    onChange: function(checked) {
+                      var next = excluded.filter(function(p) { return p !== proj; });
+                      if (!checked) next.push(proj);
+                      saveBenchmarkConfig(Object.assign({}, benchmarkConfig, { excludedProjects: next }));
+                    }
+                  })
+                );
+              })
+        )
+      )
+    );
+  }
+
   // ── Level 0: Overview (Insight Cards) ──────────────────────
   function renderOverview() {
     var m = insightMetrics;
@@ -7532,9 +7660,19 @@ function AIInsightsPage(props) {
     var cardTitle = featuredName
       ? 'QC cycles are ' + ratioDisplay + ' longer in ' + featuredName + ' than the internal benchmark'
       : 'QC cycles are ' + ratioDisplay + ' longer than the internal benchmark';
-    var numStudies = Object.keys(m.completedByProject || {}).length || 6;
+    var benchmarkStudies = m.benchmarkStudies || [];
+    var numBenchmarkStudies = benchmarkStudies.length || (Object.keys(m.completedByProject || {}).length || 6);
+    var isManualOverride = benchmarkConfig.manualOverride != null;
+    var excludedCount = (benchmarkConfig.excludedProjects || []).length;
+    var benchmarkTooltipLines = benchmarkStudies.map(function(s) {
+      return s.project.replace(/_/g, ' ') + ': ' + s.avg + 'd (' + s.count + ')';
+    }).join('\n');
+    var benchmarkTooltip = isManualOverride
+      ? 'Manual override: ' + benchmarkConfig.manualOverride + 'd target set in Benchmark Settings.'
+      : (benchmarkTooltipLines || 'Computed from completed deliverables across all other studies.');
+
     var cardSubtitle = m.featuredProject
-      ? m.featuredProject.replace(/_/g, ' ') + ' avg: ' + m.featuredProjectAvgCycle.toFixed(0) + 'd \u2013 benchmark: ' + m.benchmarkAvg.toFixed(0) + 'd (' + numStudies + ' studies)'
+      ? m.featuredProject.replace(/_/g, ' ') + ' avg: ' + m.featuredProjectAvgCycle.toFixed(0) + 'd \u2013 benchmark: ' + m.benchmarkAvg.toFixed(0) + 'd'
       : 'Driving ~' + delayPct + '% of total programming delay';
 
     // ── Contributing factors (real data + demo supplement) ──
@@ -7558,7 +7696,17 @@ function AIInsightsPage(props) {
       // Primary insight card
       h('div', { className: 'insight-section-label' },
         h('span', { className: 'insight-section-number' }, 'INSIGHT 1'),
-        h('span', { className: 'insight-section-detail' }, 'Full drill-down available \u2013 click to explore')
+        h('span', { className: 'insight-section-detail' }, 'Full drill-down available \u2013 click to explore'),
+        h('span', {
+          style: { marginLeft: 'auto', cursor: 'pointer', color: '#888', fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 },
+          onClick: function(e) { e.stopPropagation(); setBenchmarkDrawerOpen(true); },
+          title: 'Configure benchmark'
+        },
+          h('span', null, '\u2699'),
+          'Benchmark settings',
+          excludedCount > 0 ? h('span', { style: { color: '#5b3fc4', fontWeight: 600 } }, ' (' + excludedCount + ' excluded)') : null,
+          isManualOverride ? h('span', { style: { color: '#e87a2a', fontWeight: 600 } }, ' (manual)') : null
+        )
       ),
       h('div', { className: 'insight-card insight-card-primary', onClick: function() { setActiveInsight(1); } },
         h('div', { className: 'insight-card-header' },
@@ -7566,7 +7714,18 @@ function AIInsightsPage(props) {
           h('div', { className: 'insight-card-scope' }, 'Based on ' + m.total + ' ' + B.toLowerCase() + 's across ' + Object.keys(m.projectMetrics).length + ' studies')
         ),
         h('div', { className: 'insight-card-title' }, cardTitle),
-        h('div', { className: 'insight-card-subtitle' }, cardSubtitle),
+        h('div', { className: 'insight-card-subtitle', style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
+          h('span', null, cardSubtitle),
+          h(Tooltip, { title: benchmarkTooltip, placement: 'right' },
+            h('span', {
+              style: { cursor: 'pointer', color: '#5b3fc4', fontSize: 11, fontWeight: 600, border: '1px solid #d6ccf5', borderRadius: 3, padding: '1px 5px', whiteSpace: 'nowrap' }
+            },
+              '\u24d8 ' + numBenchmarkStudies + ' stud' + (numBenchmarkStudies !== 1 ? 'ies' : 'y') + ' in baseline',
+              isManualOverride ? ' · manual target' : '',
+              excludedCount > 0 ? ' · ' + excludedCount + ' excluded' : ''
+            )
+          )
+        ),
         // Contributing factors -each clickable to its drill-down level
         factors.length > 0 ? h('div', { className: 'insight-card-factors' },
           factors.map(function(f, i) {
@@ -8317,7 +8476,8 @@ function AIInsightsPage(props) {
       activeInsight === null
         ? renderOverview()
         : (levelRenderers[activeInsight] ? levelRenderers[activeInsight]() : renderOverview())
-    )
+    ),
+    renderBenchmarkDrawer()
   );
 }
 
