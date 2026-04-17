@@ -4214,13 +4214,26 @@ function QCTrackerPage(props) {
     })
       .then(function(resp) {
         if (!resp.ok) return resp.text().then(function(t) { throw new Error(t); });
-        return resp.blob();
+        var cd = resp.headers.get('Content-Disposition') || '';
+        var m = cd.match(/filename="([^"]+)"/);
+        var serverName = m ? m[1] : '';
+        return resp.blob().then(function(b) { return { blob: b, name: serverName }; });
       })
-      .then(function(blob) {
+      .then(function(result) {
+        var blob = result.blob;
         var url = URL.createObjectURL(blob);
         var a = document.createElement('a');
         a.href = url;
-        a.download = 'status_report_' + projectName + '.pdf';
+        if (result.name) {
+          a.download = result.name;
+        } else {
+          var d = new Date();
+          var pad = function(n) { return n < 10 ? '0' + n : '' + n; };
+          var stamp = d.getUTCFullYear() + '-' + pad(d.getUTCMonth() + 1) + '-' + pad(d.getUTCDate()) + '_' + pad(d.getUTCHours()) + pad(d.getUTCMinutes()) + 'UTC';
+          var scopeTag = projectList.length > 1 ? 'MultiProject' : projectName;
+          var safeScope = scopeTag.replace(/[^A-Za-z0-9_-]/g, '_');
+          a.download = 'QC_Status_Report_' + safeScope + '_' + stamp + '_' + visibleBundles.length + 'deliverables.pdf';
+        }
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);

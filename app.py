@@ -1088,14 +1088,14 @@ def _build_status_report_pdf(project_name, sections, meta, debug_info):
         "Deliverable\nName",
         "Program\nName",
         "Dataset Output\nFile Name",
-        "Programmer\nEmail @bms.com",
+        "Programmer\nEmail",
         "Execution\nDate",
         "Risk Level\n(Policy)",
         "Rationale for Risk Level\nAssignment",
         "Verification\nProgram Name",
-        "Verifier\nEmail @bms.com",
+        "Verifier\nEmail",
         "QC\nDate",
-        "Final Review\nEmail @bms.com",
+        "Final Review\nEmail",
         "Final Review\nDate",
         "Program\nFreeze Date",
     ]
@@ -1331,8 +1331,12 @@ def generate_status_report(body: dict):
         logger.error(f"[StatusReport] PDF render failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"PDF generation failed: {e}")
 
-    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in project_name)
-    filename = f"status_report_{safe_name}.pdf"
+    total_count = sum(len(s["rows"]) for s in sections.values())
+    multi_project = scope_label.startswith(tuple(str(n) + " projects" for n in range(2, 100)))
+    scope_for_name = "MultiProject" if multi_project else project_name
+    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in scope_for_name)
+    date_stamp = datetime.utcnow().strftime("%Y-%m-%d_%H%MUTC")
+    filename = f"QC_Status_Report_{safe_name}_{date_stamp}_{total_count}deliverables.pdf"
     logger.info(f"[StatusReport] PDF generated: {len(pdf_bytes)} bytes, file={filename}")
 
     return Response(
