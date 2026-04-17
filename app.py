@@ -1180,7 +1180,7 @@ def _build_status_report_pdf(project_name, sections, meta, debug_info):
     story.append(Spacer(1, 6 * mm))
 
     # Per-section rendering — table directly under the headline, paths as footnote below.
-    for section_name in ["ADaM", "TFL", "Other"]:
+    for section_name in ["SDTM", "ADaM", "TFL", "Other"]:
         sec = sections.get(section_name)
         if not sec or not sec["rows"]:
             continue
@@ -1254,6 +1254,7 @@ def generate_status_report(body: dict):
         return None
 
     sections = {
+        "SDTM": {"rows": [], "prog_path": "", "output_path": "", "qc_path": ""},
         "ADaM": {"rows": [], "prog_path": "", "output_path": "", "qc_path": ""},
         "TFL":  {"rows": [], "prog_path": "", "output_path": "", "qc_path": ""},
         "Other": {"rows": [], "prog_path": "", "output_path": "", "qc_path": ""},
