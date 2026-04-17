@@ -1134,9 +1134,19 @@ def _build_status_report_pdf(project_name, sections, meta, debug_info):
     subtitle_style_v2 = ParagraphStyle("SubBand", parent=styles["Normal"],
                                         fontSize=9, fontName="Helvetica",
                                         textColor=colors.white, alignment=TA_CENTER, leading=11)
+    scope_label_meta = (meta.get("scope") or project_name).strip()
+    # If scope covers multiple projects, use a compact subtitle; full list appears in the metadata block.
+    if scope_label_meta.lower().startswith(tuple(str(n) + " projects" for n in range(2, 100))):
+        try:
+            n_projects = int(scope_label_meta.split(" ", 1)[0])
+            subtitle_text = f"{n_projects} Projects"
+        except Exception:
+            subtitle_text = "Multiple Projects"
+    else:
+        subtitle_text = scope_label_meta
     title_cell = [
         Paragraph(f"QC Status Report", title_style_v2),
-        Paragraph(project_name, subtitle_style_v2),
+        Paragraph(subtitle_text, subtitle_style_v2),
     ]
     title_tbl = RLTable([[title_cell]], colWidths=[380 * mm])
     title_tbl.setStyle(TableStyle([
