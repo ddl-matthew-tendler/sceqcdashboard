@@ -75,6 +75,14 @@ mockup_*.html
 test_*.js
 =1.0.0
 
+# Local research / reference material (do not push)
+*.pdf
+*.jpg
+*.jpeg
+*.png
+!static/**/*.png
+!static/**/*.jpg
+
 # Domino Frontend (ignore contents but keep the folder structure)
 example_domino_frontend_code/*
 !example_domino_frontend_code/.gitkeep

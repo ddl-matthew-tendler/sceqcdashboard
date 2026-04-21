@@ -10,16 +10,6 @@ const { createElement: h, useState, useEffect, useCallback, useMemo, useRef } = 
 
 dayjs.extend(dayjs_plugin_relativeTime);
 
-// ── Force CSS reload (bust browser cache on every page load) ─────
-(function() {
-  var links = document.querySelectorAll('link[rel="stylesheet"]');
-  links.forEach(function(link) {
-    if (link.href && link.href.indexOf('styles.css') !== -1) {
-      link.href = link.href.replace(/(\?.*)?$/, '?v=' + Date.now());
-    }
-  });
-})();
-
 // ── Domino Theme ────────────────────────────────────────────────
 const dominoTheme = {
   token: {
@@ -7049,6 +7039,7 @@ function medianArr(arr) {
 function AIInsightsPage(props) {
   var bundles = props.bundles || [];
   var terms = props.terms || DEFAULT_TERMS;
+  var vendorTags = props.vendorTags || {};
   var B = capFirst(terms.bundle);
 
   function scrollToTop() {
@@ -7076,6 +7067,23 @@ function AIInsightsPage(props) {
   var _bDrawer = useState(false);
   var benchmarkDrawerOpen = _bDrawer[0];
   var setBenchmarkDrawerOpen = _bDrawer[1];
+
+  // ── AI Analysis state ──────────────────────────────────────────
+  var _aiResult = useState(null);
+  var aiResult = _aiResult[0]; var setAiResult = _aiResult[1];
+  var _aiLoading = useState(false);
+  var aiLoading = _aiLoading[0]; var setAiLoading = _aiLoading[1];
+  var _aiModalOpen = useState(false);
+  var aiModalOpen = _aiModalOpen[0]; var setAiModalOpen = _aiModalOpen[1];
+
+  // Feature flag: read from backend config (cached in window)
+  var aiEnabled = typeof window.__SCE_AI_ENABLED === 'boolean' ? window.__SCE_AI_ENABLED : true;
+  useEffect(function() {
+    if (typeof window.__SCE_AI_ENABLED !== 'undefined') return;
+    fetch('/api/config').then(function(r) { return r.json(); }).then(function(cfg) {
+      window.__SCE_AI_ENABLED = cfg.ai_enabled !== false;
+    }).catch(function() { window.__SCE_AI_ENABLED = false; });
+  }, []);
 
   // ── Compute real metrics from bundle data ──────────────────
   var insightMetrics = useMemo(function() {
@@ -7406,6 +7414,45 @@ function AIInsightsPage(props) {
     });
     var pctLowRiskOverQC = bundles.length > 0 ? Math.round((lowRiskDoubleProg.length / bundles.length) * 100) : 0;
 
+    // ── Phase 4: Per-project wait time & vendor breakdown ─────────────────
+    // waitByProject: { [projectName]: { avg, internal, external, unknown, count } }
+    // vendorBreakdown: { Internal, CRO, FSP, Other, Unknown } (total wait days each)
+    var waitByProject = {};
+    var vendorBreakdown = { Internal: 0, CRO: 0, FSP: 0, Other: 0, Unknown: 0 };
+    bundles.forEach(function(b) {
+      if (!b.stages || b.stages.length < 2) return;
+      var proj = b.projectName || 'Unknown';
+      if (!waitByProject[proj]) waitByProject[proj] = { total: 0, internal: 0, external: 0, unknown: 0, count: 0 };
+      var sorted = b.stages.slice().sort(function(a, c) {
+        return (a.stage ? a.stage.order : 0) - (c.stage ? c.stage.order : 0);
+      });
+      for (var wi = 0; wi < sorted.length - 1; wi++) {
+        var wcurr = sorted[wi];
+        var wnext = sorted[wi + 1];
+        if (wcurr.assignedAt && wnext.assignedAt) {
+          var wdays = (new Date(wnext.assignedAt).getTime() - new Date(wcurr.assignedAt).getTime()) / (1000 * 60 * 60 * 24);
+          if (wdays >= 0 && wdays < 365) {
+            var nextId = (wnext.assignee && wnext.assignee.id) ? wnext.assignee.id : null;
+            var tag = nextId ? vendorTags[nextId] : null;
+            var orgType = tag ? tag.type : 'Unknown';
+            waitByProject[proj].total += wdays;
+            waitByProject[proj].count++;
+            if (orgType === 'Internal') waitByProject[proj].internal += wdays;
+            else if (orgType === 'CRO' || orgType === 'FSP' || orgType === 'Other') waitByProject[proj].external += wdays;
+            else waitByProject[proj].unknown += wdays;
+            if (vendorBreakdown[orgType] !== undefined) vendorBreakdown[orgType] += wdays;
+            else vendorBreakdown.Unknown += wdays;
+          }
+        }
+      }
+    });
+    // Compute avg per project
+    Object.keys(waitByProject).forEach(function(proj) {
+      var wp = waitByProject[proj];
+      wp.avg = wp.count > 0 ? parseFloat((wp.total / wp.count).toFixed(1)) : 0;
+    });
+    var hasVendorTags = Object.keys(vendorTags).length > 0;
+
     return {
       total: bundles.length,
       active: activeBundles.length,
@@ -7446,8 +7493,11 @@ function AIInsightsPage(props) {
       assigneeDiversityData: assigneeDiversityData,
       teamSizeInsight: teamSizeInsight,
       pctLowRiskOverQC: pctLowRiskOverQC,
+      waitByProject: waitByProject,
+      vendorBreakdown: vendorBreakdown,
+      hasVendorTags: hasVendorTags,
     };
-  }, [bundles, benchmarkConfig]);
+  }, [bundles, benchmarkConfig, vendorTags]);
 
   // ── Chart: Wait by Project horizontal bar (Level 1) ───────
   useEffect(function() {
@@ -7462,23 +7512,36 @@ function AIInsightsPage(props) {
 
       var m = insightMetrics;
       var featuredLabel = m.featuredProject ? m.featuredProject.replace(/_/g, ' ') : 'CDISC01 CSR';
-      // Compelling demo data: ascending order, featured project is the clear outlier at top
-      var demoWaitData = [
-        ['quick-start',               2.1],
-        ['Landingproject',            2.8],
-        ['Scalable RWE Migraine',     3.5],
-        ['AM',                        4.2],
-        ['LS-GovernanceDemo-AY',      5.8],
-        [featuredLabel,              10.5],
-      ];
+      // Use live per-project wait time data; fall back to demo data if no transitions recorded
+      var liveWait = m.waitByProject || {};
+      var liveProjectNames = Object.keys(liveWait).filter(function(p) { return liveWait[p].count > 0; });
       var categories = [];
       var waitDays = [];
       var colors = [];
-      demoWaitData.forEach(function(row) {
-        categories.push(row[0]);
-        waitDays.push(row[1]);
-        colors.push(row[0] === featuredLabel ? '#C20A29' : '#9DA0AE');
-      });
+      if (liveProjectNames.length > 0) {
+        liveProjectNames.sort(function(a, b) { return liveWait[a].avg - liveWait[b].avg; });
+        liveProjectNames.forEach(function(p) {
+          var label = p.replace(/_/g, ' ');
+          categories.push(label);
+          waitDays.push(liveWait[p].avg);
+          colors.push(label === featuredLabel ? '#C20A29' : '#9DA0AE');
+        });
+      } else {
+        // Compelling demo data: ascending order, featured project is the clear outlier at top
+        var demoWaitData = [
+          ['quick-start',               2.1],
+          ['Landingproject',            2.8],
+          ['Scalable RWE Migraine',     3.5],
+          ['AM',                        4.2],
+          ['LS-GovernanceDemo-AY',      5.8],
+          [featuredLabel,              10.5],
+        ];
+        demoWaitData.forEach(function(row) {
+          categories.push(row[0]);
+          waitDays.push(row[1]);
+          colors.push(row[0] === featuredLabel ? '#C20A29' : '#9DA0AE');
+        });
+      }
 
       Highcharts.chart('chart-insight-wait-by-project', {
         chart: { type: 'bar', height: Math.max(180, categories.length * 48 + 60), backgroundColor: 'transparent' },

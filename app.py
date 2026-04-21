@@ -1357,6 +1357,90 @@ def generate_status_report(body: dict):
     )
 
 
+# ── AI Analysis ───────────────────────────────────────────────────
+
+@app.get("/api/config")
+def get_config():
+    """Return feature flags for the frontend."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    return {"ai_enabled": bool(api_key)}
+
+
+@app.post("/api/analyze-findings")
+async def analyze_findings(body: dict):
+    """Use Claude to cluster open QC findings by root cause and produce a prioritized resolution plan."""
+    try:
+        import anthropic as _anthropic
+    except ImportError:
+        raise HTTPException(status_code=503, detail="anthropic package not installed — run: pip install anthropic>=0.25.0")
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        raise HTTPException(
+            status_code=503,
+            detail="Claude integration not configured — set ANTHROPIC_API_KEY in environment.",
+        )
+
+    model = os.environ.get("CLAUDE_MODEL", "claude-3-5-sonnet-20241022")
+    project_name = body.get("projectName", "Unknown Project")
+    findings = body.get("findings", [])
+
+    if not findings:
+        raise HTTPException(status_code=400, detail="No findings provided.")
+
+    ts = datetime.utcnow().isoformat() + "Z"
+    prompt = (
+        f'You are a clinical trial QC analyst. Analyze the following open QC findings for the study "{project_name}" '
+        f"and return a structured JSON report.\n\nFindings (JSON):\n{json.dumps(findings, indent=2)}\n\n"
+        "Return ONLY a valid JSON object (no markdown fences, no explanation) in exactly this shape:\n"
+        '{\n'
+        '  "clusters": [\n'
+        '    {\n'
+        '      "theme": "string — root cause theme name",\n'
+        '      "count": <integer>,\n'
+        '      "findingIds": ["id1", "id2"],\n'
+        '      "priority": <integer 1-N where 1 = highest priority>,\n'
+        '      "rationale": "string — why this theme is high priority"\n'
+        '    }\n'
+        '  ],\n'
+        '  "quickWins": [\n'
+        '    {\n'
+        '      "findingId": "string",\n'
+        '      "reason": "string — why this can be resolved quickly"\n'
+        '    }\n'
+        '  ],\n'
+        '  "overdueSummary": "string — 2-3 sentences summarizing overdue risk and recommended next action",\n'
+        f'  "generatedAt": "{ts}"\n'
+        '}'
+    )
+
+    raw = ""
+    try:
+        client = _anthropic.Anthropic(api_key=api_key)
+        message = client.messages.create(
+            model=model,
+            max_tokens=2048,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = message.content[0].text.strip()
+        # Strip markdown code fences if present
+        if raw.startswith("```"):
+            parts = raw.split("```")
+            raw = parts[1] if len(parts) > 1 else raw
+            if raw.startswith("json"):
+                raw = raw[4:].strip()
+        result = json.loads(raw)
+        result["generatedAt"] = ts
+        logger.info(f"[AnalyzeFindings] project={project_name} clusters={len(result.get('clusters', []))} quickWins={len(result.get('quickWins', []))}")
+        return result
+    except json.JSONDecodeError as e:
+        logger.error(f"[AnalyzeFindings] JSON parse failed: {e} | raw[:200]={raw[:200]}")
+        return {"error": "parse_failed", "raw": raw[:2000]}
+    except Exception as e:
+        logger.error(f"[AnalyzeFindings] Claude call failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {e}")
+
+
 # ── Static files & SPA ────────────────────────────────────────────
 
 # Prevent browser from caching static assets during development — ensures
