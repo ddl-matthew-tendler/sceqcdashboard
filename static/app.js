@@ -4034,11 +4034,17 @@ function QCTrackerPage(props) {
   // Project objects for CSV upload (id + name)
   var projectObjects = useMemo(function() {
     var map = {};
+    // Seed from live API projects list so projects with zero deliverables are still resolvable
+    // (e.g. CSV import name lookup). Without this, the CSV importer can only find projects
+    // that already have at least one bundle.
+    (projects || []).forEach(function(p) {
+      if (p && p.id) map[p.id] = { id: p.id, name: p.name || p.id };
+    });
     bundles.forEach(function(b) {
       if (b.projectId && !map[b.projectId]) map[b.projectId] = { id: b.projectId, name: b.projectName || b.projectId };
     });
     return Object.values(map);
-  }, [bundles]);
+  }, [bundles, projects]);
 
   var assigneeOptions = useMemo(function() {
     var names = {};
@@ -12252,7 +12258,7 @@ function App() {
     // All other pages get scopedBundles
     switch (activePage) {
       case 'tracker':
-        return h(QCTrackerPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, selectedBundle: selectedBundle, terms: terms, projectMembersCache: projectMembersCache, dataExplorerUrl: dataExplorerUrl, connected: connected, policies: livePolicies, debugMode: debugMode, hiddenCols: appHiddenCols, setHiddenCols: setAppHiddenCols, shownStageCols: appShownStageCols, setShownStageCols: setAppShownStageCols, currentUser: currentUser, scopeCurrentUser: scopeCurrentUser, scopeProjects: scopeProjects, onRefresh: function() { if (connected) fetchLiveData(); } });
+        return h(QCTrackerPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, selectedBundle: selectedBundle, terms: terms, projectMembersCache: projectMembersCache, dataExplorerUrl: dataExplorerUrl, connected: connected, policies: livePolicies, projects: liveProjects, debugMode: debugMode, hiddenCols: appHiddenCols, setHiddenCols: setAppHiddenCols, shownStageCols: appShownStageCols, setShownStageCols: setAppShownStageCols, currentUser: currentUser, scopeCurrentUser: scopeCurrentUser, scopeProjects: scopeProjects, onRefresh: function() { if (connected) fetchLiveData(); } });
       case 'rules':
         return h(AssignmentRulesPage, { bundles: bundles, setBundles: setBundles, assignmentRules: assignmentRules, setAssignmentRules: setAssignmentRules, terms: terms, projectMembersCache: projectMembersCache, livePolicies: livePolicies, onNavigate: setActivePage });
       case 'milestones':
