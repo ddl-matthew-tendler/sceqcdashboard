@@ -338,6 +338,81 @@ def get_bundle_gates(bundle_id: str):
     return gov_get(f"/bundles/{bundle_id}/gates")
 
 
+@app.get("/api/bundles/{bundle_id}/detail")
+def get_bundle_detail(bundle_id: str):
+    """
+    Consolidated evidence view: merges bundle metadata, policy artifact
+    structure, and submitted evidence values into one payload.
+
+    Evidence values live in results[].artifactContent — results[].value
+    is always null. submit-result-to-policy requires a valid evidenceId,
+    so we pick the first one from the policy.
+    """
+    bundle = gov_get(f"/bundles/{bundle_id}")
+    policy_id = bundle.get("policyId")
+    if not policy_id:
+        raise HTTPException(status_code=400, detail="Bundle has no policyId")
+
+    policy = gov_get(f"/policies/{policy_id}")
+
+    evidence_id = None
+    for stage in policy.get("stages", []) or []:
+        for ev_set in stage.get("evidenceSet", []) or []:
+            if ev_set.get("id"):
+                evidence_id = ev_set["id"]
+                break
+        if evidence_id:
+            break
+    if not evidence_id:
+        for stage in policy.get("stages", []) or []:
+            for approval in stage.get("approvals", []) or []:
+                eid = (approval.get("evidence") or {}).get("id")
+                if eid:
+                    evidence_id = eid
+                    break
+            if evidence_id:
+                break
+
+    evidence_map = {}
+    if evidence_id:
+        try:
+            ev_data = gov_post(
+                "/rpc/submit-result-to-policy",
+                json_body={
+                    "bundleId": bundle_id,
+                    "policyId": policy_id,
+                    "evidenceId": evidence_id,
+                    "content": {},
+                },
+            )
+        except HTTPException as e:
+            logger.warning(f"submit-result-to-policy probe failed for bundle {bundle_id}: {e.detail[:200] if isinstance(e.detail, str) else e.detail}")
+            ev_data = {}
+
+        for r in (ev_data.get("results") or []):
+            art_id = r.get("artifactId")
+            if not art_id:
+                continue
+            evidence_map[art_id] = {
+                "value": r.get("artifactContent"),
+                "submittedBy": (r.get("createdBy") or {}).get("userName"),
+                "submittedAt": r.get("createdAt"),
+            }
+        for d in (ev_data.get("drafts") or []):
+            art_id = d.get("artifactId")
+            if not art_id:
+                continue
+            content = d.get("artifactContent") or {}
+            evidence_map[art_id] = {
+                "value": content,
+                "jobId": content.get("jobId") if isinstance(content, dict) else None,
+                "jobStatus": content.get("jobStatus") if isinstance(content, dict) else None,
+                "parameters": content.get("parameters") if isinstance(content, dict) else None,
+            }
+
+    return {"bundle": bundle, "policy": policy, "evidenceMap": evidence_map}
+
+
 # ── Stage Reassignment ───────────────────────────────────────────
 
 @app.patch("/api/bundles/{bundle_id}/stages/{stage_id}")

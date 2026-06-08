@@ -4958,6 +4958,107 @@ function QCTrackerPage(props) {
 
 
 // ═══════════════════════════════════════════════════════════════
+// ── Evidence helpers ────────────────────────────────────────────
+function EvidenceStageSection(props) {
+  var _o = useState(props.defaultOpen !== false);
+  var open = _o[0]; var setOpen = _o[1];
+  var statusColor = props.statusColor;
+  return h('div', { style: { borderBottom: '1px solid #E0E0E0' } },
+    h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 4px', cursor: 'pointer', userSelect: 'none' },
+      onClick: function() { setOpen(!open); } },
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: 10 } },
+        h('span', { style: { fontSize: 13, fontWeight: 600, color: '#2E2E38' } }, props.stageName),
+        h('span', { style: { fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 10, textTransform: 'uppercase', letterSpacing: '0.04em', background: statusColor.bg, color: statusColor.fg } }, props.statusLabel),
+        props.assignee
+          ? h('span', { style: { fontSize: 11, color: '#65657B' } }, '· ' + props.assignee)
+          : null
+      ),
+      h('span', { style: { color: '#8F8FA3', fontSize: 11, transition: 'transform 0.2s', display: 'inline-block', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' } }, '▼')
+    ),
+    open
+      ? h('div', { style: { padding: '4px 4px 16px' } },
+          props.fields.length
+            ? props.fields
+            : h('div', { style: { fontSize: 12, color: '#B0B0C0', fontStyle: 'italic', padding: '8px 0' } }, 'No evidence fields configured for this stage.')
+        )
+      : null
+  );
+}
+
+function renderArtifactField(art, ev, key, fullBundle) {
+  var type = art.artifactType || '';
+  var details = art.details || {};
+  var label = details.label || details.name || '';
+
+  if (type === 'guidance') return null;
+
+  if (type === 'policyScriptedCheck') {
+    var jobId = ev.jobId || (ev.value && ev.value.jobId);
+    var params = ev.parameters || (ev.value && ev.value.parameters) || {};
+    var jobLink = null;
+    if (jobId) {
+      var owner = (fullBundle || {}).projectOwner;
+      var proj = (fullBundle || {}).projectName;
+      var host = '';
+      try { host = window.location.origin; } catch(e) {}
+      var jobHref = (owner && proj)
+        ? host + '/u/' + encodeURIComponent(owner) + '/' + encodeURIComponent(proj) + '/jobs/' + jobId
+        : null;
+      var jobLabel = 'Job ' + String(jobId).slice(-8);
+      jobLink = jobHref
+        ? h('a', { href: jobHref, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 11, color: '#543FDE', textDecoration: 'none', whiteSpace: 'nowrap' } }, jobLabel, ' ↗')
+        : h('span', { style: { fontSize: 11, color: '#65657B' } }, jobLabel);
+    } else {
+      jobLink = h('span', { style: { fontSize: 11, color: '#B0B0C0', fontStyle: 'italic' } }, 'Not yet run');
+    }
+    var paramPills = Object.keys(params || {}).filter(function(k) { return params[k] != null && params[k] !== ''; }).map(function(k) {
+      return h('span', { key: k, style: { fontSize: 10, background: '#FFFFFF', border: '1px solid #E0E0E0', borderRadius: 4, padding: '2px 7px', color: '#65657B' } },
+        h('strong', { style: { color: '#2E2E38' } }, k + ':'), ' ', String(params[k])
+      );
+    });
+    return h('div', { key: key, style: { padding: '10px 12px', margin: '6px 0', background: '#FAFAFA', border: '1px solid #E0E0E0', borderRadius: 6 } },
+      h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' } },
+        h('span', { style: { fontSize: 12, fontWeight: 600, color: '#2E2E38' } }, '⚙ ' + (label || 'Scripted Check')),
+        jobLink
+      ),
+      paramPills.length
+        ? h('div', { style: { marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 4 } }, paramPills)
+        : null
+    );
+  }
+
+  var raw = ev.value;
+  var valueEl;
+  if (raw === null || raw === undefined || raw === '') {
+    valueEl = h('span', { style: { fontSize: 12, color: '#B0B0C0', fontStyle: 'italic' } }, 'Not yet submitted');
+  } else if (Array.isArray(raw)) {
+    valueEl = raw.length
+      ? h('span', { style: { fontSize: 12, color: '#28A464' } }, '✓ ' + raw.join(', '))
+      : h('span', { style: { fontSize: 12, color: '#B0B0C0', fontStyle: 'italic' } }, 'Not checked');
+  } else if (details.type === 'radio') {
+    var sval = String(raw);
+    var isYes = /^yes$/i.test(sval);
+    var isNo = /^no$/i.test(sval);
+    var color = isYes ? '#28A464' : isNo ? '#C20A29' : '#2E2E38';
+    var glyph = isYes ? '✓ ' : isNo ? '✕ ' : '';
+    valueEl = h('span', { style: { fontSize: 12, color: color, fontWeight: 500 } }, glyph + sval);
+  } else if (details.type === 'textarea' || String(raw).length > 80) {
+    valueEl = h('span', { style: { fontSize: 12, color: '#2E2E38', whiteSpace: 'pre-wrap', lineHeight: 1.5 } }, String(raw));
+  } else {
+    valueEl = h('span', { style: { fontSize: 12, color: '#2E2E38' } }, String(raw));
+  }
+
+  return h('div', { key: key, style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, padding: '10px 4px', borderBottom: '1px solid #F5F5F8', alignItems: 'start' } },
+    h('div', null,
+      h('div', { style: { fontSize: 12, fontWeight: 500, color: '#65657B', lineHeight: 1.4 } }, label),
+      details.helpText
+        ? h('div', { style: { fontSize: 10.5, color: '#8F8FA3', marginTop: 2 } }, details.helpText)
+        : null
+    ),
+    h('div', null, valueEl)
+  );
+}
+
 //  Study Detail Drawer
 // ═══════════════════════════════════════════════════════════════
 function DetailDrawer(props) {
@@ -4997,11 +5098,27 @@ function DetailDrawer(props) {
   var viewOptions = [
     { value: 'attachments', label: 'Attachments' + (attachCount > 0 ? ' (' + attachCount + ')' : '') + (staleCount > 0 ? ' \u26A0' : '') },
     { value: 'stage-timeline', label: 'Stage Timeline' },
+    { value: 'evidence', label: 'Evidence' },
     { value: 'overview', label: B + ' Overview' },
     { value: 'findings', label: 'Findings' + (findingsCount > 0 ? ' (' + findingsCount + ')' : '') },
     { value: 'approvals', label: 'Approvals' + (approvalsCount > 0 ? ' (' + approvalsCount + ')' : '') },
     { value: 'gates', label: 'Gates' + (gatesCount > 0 ? ' (' + gatesCount + ')' : '') },
   ];
+
+  // \u2500\u2500 Evidence view: lazy-load consolidated detail \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  var _ev = useState(null);    var evidenceData = _ev[0];    var setEvidenceData = _ev[1];
+  var _evL = useState(false);  var evidenceLoading = _evL[0]; var setEvidenceLoading = _evL[1];
+  var _evE = useState(null);   var evidenceError = _evE[0];   var setEvidenceError = _evE[1];
+  useEffect(function() {
+    if (activeView !== 'evidence' || !bundle || !bundle.id) return;
+    if (evidenceData && evidenceData._bundleId === bundle.id) return;
+    setEvidenceLoading(true);
+    setEvidenceError(null);
+    apiGet('api/bundles/' + bundle.id + '/detail')
+      .then(function(data) { data._bundleId = bundle.id; setEvidenceData(data); })
+      .catch(function(err) { setEvidenceError(err.message || String(err)); })
+      .then(function() { setEvidenceLoading(false); });
+  }, [activeView, bundleId]);
 
   // ── View: Stage Timeline ────────────────────────────────────
   function renderStageTimeline() {
@@ -5232,10 +5349,92 @@ function DetailDrawer(props) {
     );
   }
 
+  // ── View: Evidence (per-stage submitted artifact values) ───
+  function renderEvidence() {
+    if (evidenceLoading) return h('div', { style: { textAlign: 'center', padding: 32, color: '#8F8FA3' } }, h(Spin, { size: 'small' }), h('div', { style: { marginTop: 8, fontSize: 12 } }, 'Loading evidence…'));
+    if (evidenceError) return h(Alert, { type: 'error', showIcon: true, message: 'Failed to load evidence', description: evidenceError });
+    if (!evidenceData) return null;
+    var policy = evidenceData.policy || {};
+    var fullBundle = evidenceData.bundle || bundle;
+    var evidenceMap = evidenceData.evidenceMap || {};
+    var stages = policy.stages || [];
+    var currentStageName = fullBundle.stage || '';
+
+    if (!stages.length) return h(Empty, { description: 'Policy has no stages.' });
+
+    // Stage name -> assignee
+    var stageAssignees = {};
+    (fullBundle.stages || []).forEach(function(s) {
+      var n = s.stage && s.stage.name;
+      if (n) stageAssignees[n] = s.assignee ? (s.assignee.name || s.assignee.userName) : null;
+    });
+
+    // Stage status helper
+    var pastCurrent = false;
+    var stageStates = stages.map(function(s) {
+      var isActive = s.name === currentStageName;
+      var isDone = !pastCurrent && !isActive;
+      if (isActive) pastCurrent = true;
+      if (fullBundle.state === 'Complete') { isDone = true; isActive = false; }
+      return isDone ? 'done' : isActive ? 'active' : 'pending';
+    });
+
+    // Stepper
+    var stepper = h('div', { style: { display: 'flex', alignItems: 'center', padding: '4px 0 16px', borderBottom: '1px solid #E0E0E0', marginBottom: 12, overflowX: 'auto' } },
+      stages.map(function(stage, i) {
+        var st = stageStates[i];
+        var dotBg = st === 'done' ? '#543FDE' : '#FFFFFF';
+        var dotBorder = st === 'pending' ? '#E0E0E0' : '#543FDE';
+        var dotColor = st === 'done' ? '#FFFFFF' : st === 'active' ? '#543FDE' : '#8F8FA3';
+        var dotShadow = st === 'active' ? '0 0 0 3px rgba(84,63,222,0.15)' : 'none';
+        var labelColor = st === 'pending' ? '#8F8FA3' : '#543FDE';
+        return h('div', { key: i, style: { flex: 1, minWidth: 70, display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' } },
+          i < stages.length - 1
+            ? h('div', { style: { position: 'absolute', top: 11, left: 'calc(50% + 12px)', right: 'calc(-50% + 12px)', height: 2, background: (st === 'done' || st === 'active') ? '#543FDE' : '#E0E0E0' } })
+            : null,
+          h('div', { style: { width: 24, height: 24, borderRadius: '50%', border: '2px solid ' + dotBorder, background: dotBg, color: dotColor, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, boxShadow: dotShadow, position: 'relative', zIndex: 1 } },
+            st === 'done' ? '✓' : String(i + 1)
+          ),
+          h('div', { style: { marginTop: 6, fontSize: 10.5, color: labelColor, fontWeight: st === 'pending' ? 400 : 500, textAlign: 'center', lineHeight: 1.2, maxWidth: 90 } }, stage.name)
+        );
+      })
+    );
+
+    // Per-stage sections
+    var sections = stages.map(function(stage, idx) {
+      var st = stageStates[idx];
+      var statusLabel = st === 'done' ? 'Complete' : st === 'active' ? 'Active' : 'Pending';
+      var statusColor = st === 'done' ? { bg: '#D1FAE5', fg: '#065F46' } : st === 'active' ? { bg: '#DBEAFE', fg: '#1E40AF' } : { bg: '#F3F4F6', fg: '#6B7280' };
+      var assignee = stageAssignees[stage.name];
+
+      // Gather artifacts from evidenceSet + approvals
+      var artifacts = [];
+      (stage.evidenceSet || []).forEach(function(es) { (es.artifacts || []).forEach(function(a) { artifacts.push(a); }); });
+      (stage.approvals || []).forEach(function(ap) { ((ap.evidence || {}).artifacts || []).forEach(function(a) { artifacts.push(a); }); });
+
+      var fields = artifacts.map(function(art, i) {
+        return renderArtifactField(art, evidenceMap[art.id] || {}, i, fullBundle);
+      }).filter(Boolean);
+
+      return h(EvidenceStageSection, {
+        key: idx,
+        stageName: stage.name,
+        statusLabel: statusLabel,
+        statusColor: statusColor,
+        assignee: assignee,
+        fields: fields,
+        defaultOpen: st === 'active' || st === 'done',
+      });
+    });
+
+    return h('div', null, stepper, sections);
+  }
+
   // ── Render active view ──────────────────────────────────────
   function renderActiveView() {
     switch (activeView) {
       case 'stage-timeline': return renderStageTimeline();
+      case 'evidence': return renderEvidence();
       case 'overview': return renderOverview();
       case 'findings': return renderFindings();
       case 'approvals': return renderApprovals();
