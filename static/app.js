@@ -5084,17 +5084,20 @@ function EvidenceStageSection(props) {
   var _o = useState(props.defaultOpen !== false);
   var open = _o[0]; var setOpen = _o[1];
   var statusColor = props.statusColor;
+  // Pending stages are visually muted so the active stage stands out.
+  var isPending = (props.statusLabel || '').toLowerCase() === 'pending';
+  var titleColor = isPending ? '#8F8FA3' : '#2E2E38';
   return h('div', { style: { borderBottom: '1px solid #E0E0E0' } },
     h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 4px', cursor: 'pointer', userSelect: 'none' },
       onClick: function() { setOpen(!open); } },
       h('div', { style: { display: 'flex', alignItems: 'center', gap: 10 } },
-        h('span', { style: { fontSize: 13, fontWeight: 600, color: '#2E2E38' } }, props.stageName),
+        h('span', { style: { fontSize: 13, fontWeight: isPending ? 500 : 600, color: titleColor } }, props.stageName),
         h('span', { style: { fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 10, textTransform: 'uppercase', letterSpacing: '0.04em', background: statusColor.bg, color: statusColor.fg } }, props.statusLabel),
         props.assignee
-          ? h('span', { style: { fontSize: 11, color: '#65657B' } }, '· ' + props.assignee)
+          ? h('span', { style: { fontSize: 11, color: isPending ? '#B0B0C0' : '#65657B' } }, '· ' + props.assignee)
           : null
       ),
-      h('span', { style: { color: '#8F8FA3', fontSize: 11, transition: 'transform 0.2s', display: 'inline-block', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' } }, '▼')
+      h('span', { style: { color: isPending ? '#C5C5D0' : '#8F8FA3', fontSize: 11, transition: 'transform 0.2s', display: 'inline-block', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' } }, '▼')
     ),
     open
       ? h('div', { style: { padding: '4px 4px 16px' } }, props.children)
@@ -5386,13 +5389,13 @@ function DetailDrawer(props) {
   var initialView = props.initialView || null;
   var debugMode = props.debugMode || false;
 
-  var _view = useState('attachments');
+  var _view = useState('stage-timeline');
   var activeView = _view[0];
   var setActiveView = _view[1];
 
   // Reset to initialView (or Attachments) when a new bundle is selected
   var bundleId = bundle ? (bundle.id || bundle.name) : null;
-  useEffect(function() { setActiveView(initialView || 'attachments'); }, [bundleId, initialView]);
+  useEffect(function() { setActiveView(initialView || 'stage-timeline'); }, [bundleId, initialView]);
 
   // Evidence view: lazy-load consolidated detail. Hooks MUST run on every
   // render. Declare them before the !bundle early-return.
@@ -5438,7 +5441,7 @@ function DetailDrawer(props) {
     if (!dragRef.current.active) return;
     // Drawer is on the right; dragging LEFT (decreasing clientX) widens it.
     var delta = dragRef.current.startX - e.clientX;
-    var maxW = Math.max(400, window.innerWidth - 80);
+    var maxW = Math.max(400, window.innerWidth - 40);
     var w = Math.max(360, Math.min(maxW, dragRef.current.startW + delta));
     setDrawerWidth(w);
   }
@@ -5503,9 +5506,9 @@ function DetailDrawer(props) {
   var staleCount = countStaleAttachments(bundle);
 
   var viewOptions = [
-    { value: 'attachments', label: 'Attachments' + (attachCount > 0 ? ' (' + attachCount + ')' : '') + (staleCount > 0 ? ' \u26A0' : '') },
     { value: 'stage-timeline', label: 'Stage Timeline' },
     { value: 'evidence', label: 'Evidence' },
+    { value: 'attachments', label: 'Attachments' + (attachCount > 0 ? ' (' + attachCount + ')' : '') + (staleCount > 0 ? ' \u26A0' : '') },
     { value: 'overview', label: B + ' Overview' },
     { value: 'findings', label: 'Findings' + (findingsCount > 0 ? ' (' + findingsCount + ')' : '') },
     { value: 'approvals', label: 'Approvals' + (approvalsCount > 0 ? ' (' + approvalsCount + ')' : '') },
