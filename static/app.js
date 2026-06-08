@@ -4963,6 +4963,109 @@ function QCTrackerPage(props) {
 // per-evidence-set Save buttons. Scripted checks expose a Run button
 // that starts a Domino job and stores the jobId back as evidence.
 
+// Lightweight markdown for guidance banners: **bold**, blank-line paragraphs,
+// `code`, bullet lines. Avoids pulling in a markdown lib for a few formats.
+function renderInlineMd(text) {
+  if (!text) return null;
+  // Split by blank lines into blocks, then within each block split lines.
+  var blocks = String(text).split(/\n\s*\n/);
+  return blocks.map(function(block, bi) {
+    var trimmed = block.trim();
+    if (!trimmed) return null;
+    if (trimmed === '---') return h('hr', { key: bi, style: { border: 'none', borderTop: '1px solid #E0E0E0', margin: '8px 0' } });
+    // Bullet block?
+    var isBullets = trimmed.split('\n').every(function(l) { return /^\s*[-*]\s/.test(l); });
+    if (isBullets) {
+      var items = trimmed.split('\n').map(function(l) { return l.replace(/^\s*[-*]\s+/, ''); });
+      return h('ul', { key: bi, style: { margin: '4px 0 4px 20px', padding: 0 } },
+        items.map(function(it, ii) { return h('li', { key: ii, style: { fontSize: 11.5, lineHeight: 1.5, marginBottom: 2 } }, renderInlineFragments(it)); })
+      );
+    }
+    var lines = trimmed.split('\n');
+    return h('p', { key: bi, style: { margin: '4px 0', fontSize: 11.5, lineHeight: 1.5, color: '#2E2E38' } },
+      lines.map(function(ln, li) {
+        return h(React.Fragment, { key: li }, renderInlineFragments(ln), li < lines.length - 1 ? h('br') : null);
+      })
+    );
+  });
+}
+
+function renderInlineFragments(s) {
+  if (!s) return null;
+  // **bold** and `code` — naive tokenizer
+  var out = []; var rest = String(s); var k = 0;
+  while (rest.length) {
+    var bm = rest.match(/^\*\*([^*]+)\*\*/);
+    var cm = rest.match(/^`([^`]+)`/);
+    if (bm) { out.push(h('strong', { key: k++ }, bm[1])); rest = rest.slice(bm[0].length); continue; }
+    if (cm) { out.push(h('code', { key: k++, style: { fontFamily: 'monospace', fontSize: 11, background: '#F5F5F8', padding: '1px 4px', borderRadius: 3 } }, cm[1])); rest = rest.slice(cm[0].length); continue; }
+    // Find next ** or ` or end
+    var next = rest.search(/\*\*|`/);
+    if (next === -1) { out.push(rest); break; }
+    out.push(rest.slice(0, next));
+    rest = rest.slice(next);
+  }
+  return out;
+}
+
+function GuidanceBanner(props) {
+  var details = props.details || {};
+  var _o = useState(true); var open = _o[0]; var setOpen = _o[1];
+  // Truncated preview when collapsed
+  var fullText = details.text || '';
+  return h('div', { style: { background: '#EDECFB', border: '1px solid #C9C5F2', borderRadius: 6, padding: '10px 12px', margin: '8px 0', color: '#1820A0' } },
+    h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' },
+      onClick: function() { setOpen(!open); } },
+      h('span', { style: { fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' } }, '⓵ Guidance'),
+      h('span', { style: { fontSize: 10, color: '#1820A0' } }, open ? 'hide' : 'show')
+    ),
+    open ? h('div', { style: { marginTop: 6, color: '#2E2E38' } }, renderInlineMd(fullText)) : null
+  );
+}
+
+function EvidenceDebugPanel(props) {
+  var _o = useState(false); var open = _o[0]; var setOpen = _o[1];
+  function copy(label, obj) {
+    try {
+      navigator.clipboard.writeText(JSON.stringify(obj, null, 2));
+      antd.message.success('Copied ' + label);
+    } catch (e) { antd.message.error('Copy failed'); }
+  }
+  function pre(obj) {
+    return h('pre', { style: { fontSize: 10, background: '#1E1E2E', color: '#E4E4F0', padding: 8, borderRadius: 4, overflow: 'auto', maxHeight: 240, margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } },
+      obj == null ? '(none)' : JSON.stringify(obj, null, 2));
+  }
+  function row(label, obj) {
+    return h('div', { style: { marginTop: 10 } },
+      h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 } },
+        h('span', { style: { fontSize: 11, fontWeight: 600, color: '#65657B' } }, label),
+        obj != null
+          ? h('a', { style: { fontSize: 10, color: '#543FDE', cursor: 'pointer' }, onClick: function() { copy(label, obj); } }, 'Copy')
+          : null
+      ),
+      pre(obj)
+    );
+  }
+  return h('div', { style: { marginTop: 16, borderTop: '1px dashed #C9C5F2', paddingTop: 10 } },
+    h('div', { style: { cursor: 'pointer', userSelect: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+      onClick: function() { setOpen(!open); } },
+      h('span', { style: { fontSize: 11, fontWeight: 600, color: '#543FDE', textTransform: 'uppercase', letterSpacing: '0.04em' } },
+        '🛠 Debug ' + (open ? '▾' : '▸')),
+      h('span', { style: { fontSize: 10, color: '#8F8FA3' } }, 'Raw API state')
+    ),
+    open
+      ? h('div', null,
+          row('GET /api/bundles/{id}/detail · response', props.detail),
+          row('Last save · request', props.lastSaveReq),
+          row('Last save · response', props.lastSaveResp),
+          row('Last run · request', props.lastRunReq),
+          row('Last run · response', props.lastRunResp),
+          row('Last error', props.lastError)
+        )
+      : null
+  );
+}
+
 function EvidenceStageSection(props) {
   var _o = useState(props.defaultOpen !== false);
   var open = _o[0]; var setOpen = _o[1];
@@ -5027,7 +5130,7 @@ function EvidenceField(props) {
     });
   } else if (type === 'textarea') {
     inputEl = h(Input.TextArea, {
-      size: 'small', autoSize: { minRows: 2, maxRows: 8 },
+      size: 'small', autoSize: { minRows: details.height || 2, maxRows: Math.max((details.height || 2) + 4, 8) },
       value: currentValue || '', onChange: function(e) { onChange(e.target.value); },
       placeholder: details.placeholder || 'Enter response…',
     });
@@ -5170,6 +5273,10 @@ function DetailDrawer(props) {
   var _evD = useState({});     var evidenceDirty = _evD[0];   var setEvidenceDirty = _evD[1];  // artifactId -> true
   var _evS = useState({});     var evidenceSaving = _evS[0];  var setEvidenceSaving = _evS[1]; // evidenceSetId -> true
   var _evR = useState({});     var checkRunning = _evR[0];    var setCheckRunning = _evR[1];   // artifactId -> true
+  // Debug payloads (last request/response for each operation)
+  var _dbg = useState({ lastSaveReq: null, lastSaveResp: null, lastRunReq: null, lastRunResp: null, lastError: null });
+  var debugState = _dbg[0]; var setDebugState = _dbg[1];
+  function mergeDebug(patch) { setDebugState(function(prev) { return Object.assign({}, prev, patch); }); }
 
   function loadEvidence(force) {
     if (!bundle || !bundle.id) return;
@@ -5521,13 +5628,17 @@ function DetailDrawer(props) {
         antd.message.info('No changes to save');
         return;
       }
+      var req = { evidenceId: evSetId, content: content };
+      mergeDebug({ lastSaveReq: req, lastSaveResp: null, lastError: null });
       setEvidenceSaving(function(prev) { var n = Object.assign({}, prev); n[evSetId] = true; return n; });
-      apiPost('api/bundles/' + bundle.id + '/evidence', { evidenceId: evSetId, content: content })
-        .then(function() {
+      apiPost('api/bundles/' + bundle.id + '/evidence', req)
+        .then(function(resp) {
+          mergeDebug({ lastSaveResp: resp });
           antd.message.success('Evidence saved');
           loadEvidence(true);
         })
         .catch(function(err) {
+          mergeDebug({ lastError: { op: 'save', evidenceSetId: evSetId, message: err.message || String(err) } });
           antd.notification.error({ message: 'Save failed', description: parseServerError(err.message || String(err)), duration: 8 });
         })
         .then(function() {
@@ -5536,13 +5647,17 @@ function DetailDrawer(props) {
     }
 
     function handleRunCheck(artId, evSetId, params) {
+      var req = { evidenceId: evSetId, parameters: params };
+      mergeDebug({ lastRunReq: { artifactId: artId, body: req }, lastRunResp: null, lastError: null });
       setCheckRunning(function(prev) { var n = Object.assign({}, prev); n[artId] = true; return n; });
-      apiPost('api/bundles/' + bundle.id + '/scripted-check/' + artId, { evidenceId: evSetId, parameters: params })
+      apiPost('api/bundles/' + bundle.id + '/scripted-check/' + artId, req)
         .then(function(resp) {
+          mergeDebug({ lastRunResp: resp });
           antd.message.success('Job started: ' + (resp.jobId ? String(resp.jobId).slice(-8) : 'queued'));
           loadEvidence(true);
         })
         .catch(function(err) {
+          mergeDebug({ lastError: { op: 'run', artifactId: artId, message: err.message || String(err) } });
           antd.notification.error({ message: 'Run failed', description: parseServerError(err.message || String(err)), duration: 8 });
         })
         .then(function() {
@@ -5561,13 +5676,16 @@ function DetailDrawer(props) {
       // Walk each evidenceSet separately so we can render a Save button per set.
       var sectionContent = [];
       (stage.evidenceSet || []).forEach(function(es, esIdx) {
-        var arts = (es.artifacts || []).filter(function(a) { return a.artifactType !== 'guidance'; });
+        var arts = (es.artifacts || []);  // include guidance — rendered as banners
         if (!arts.length) return;
-        var artIds = arts.map(function(a) { return a.id; });
-        var dirtyCount = artIds.filter(function(aid) { return evidenceDirty[aid]; }).length;
+        var savableIds = arts.filter(function(a) { return a.artifactType === 'input'; }).map(function(a) { return a.id; });
+        var dirtyCount = savableIds.filter(function(aid) { return evidenceDirty[aid]; }).length;
 
         var fieldEls = arts.map(function(art) {
           var ev = evidenceMap[art.id] || {};
+          if (art.artifactType === 'guidance') {
+            return h(GuidanceBanner, { key: art.id, details: art.details || {} });
+          }
           if (art.artifactType === 'policyScriptedCheck') {
             return h(ScriptedCheckRow, {
               key: art.id, artifact: art, evidence: ev, fullBundle: fullBundle,
@@ -5623,7 +5741,16 @@ function DetailDrawer(props) {
       h(Button, { size: 'small', onClick: function() { loadEvidence(true); } }, '⟳ Refresh')
     );
 
-    return h('div', null, refreshBtn, stepper, sections);
+    var debugPanel = h(EvidenceDebugPanel, {
+      detail: evidenceData,
+      lastSaveReq: debugState.lastSaveReq,
+      lastSaveResp: debugState.lastSaveResp,
+      lastRunReq: debugState.lastRunReq,
+      lastRunResp: debugState.lastRunResp,
+      lastError: debugState.lastError,
+    });
+
+    return h('div', null, refreshBtn, stepper, sections, debugPanel);
   }
 
   // ── Render active view ──────────────────────────────────────

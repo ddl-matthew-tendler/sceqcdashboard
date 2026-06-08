@@ -540,8 +540,9 @@ def run_scripted_check(bundle_id: str, artifact_id: str, body: dict):
     for k, v in resolved.items():
         final_command = final_command.replace("${" + k + "}", str(v))
 
-    env_id = _find_environment_id(details.get("environment"), project_id)
-    hw_id  = _find_hw_tier_id(details.get("hardwareTier"), project_id)
+    # Accept either name (resolve to ID) or direct ID/slug from policy YAML.
+    env_id = details.get("environmentId") or _find_environment_id(details.get("environment"), project_id)
+    hw_id  = details.get("hardwareTierId") or _find_hw_tier_id(details.get("hardwareTier"), project_id)
 
     job_req = {"projectId": project_id, "commandToRun": final_command}
     if env_id: job_req["environmentId"] = env_id
