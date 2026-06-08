@@ -4963,6 +4963,11 @@ function QCTrackerPage(props) {
 // per-evidence-set Save buttons. Scripted checks expose a Run button
 // that starts a Domino job and stores the jobId back as evidence.
 
+// Cross-platform monospace stack: prefers programmer-friendly fonts when
+// available, falls back gracefully. Used for the script command, param
+// labels, log output, and debug JSON.
+var MONO_STACK = '"JetBrains Mono", "SF Mono", "Fira Code", "Cascadia Mono", "Menlo", "Consolas", "Liberation Mono", monospace';
+
 // Lightweight markdown for guidance banners: **bold**, blank-line paragraphs,
 // `code`, bullet lines. Avoids pulling in a markdown lib for a few formats.
 function renderInlineMd(text) {
@@ -4998,7 +5003,7 @@ function renderInlineFragments(s) {
     var bm = rest.match(/^\*\*([^*]+)\*\*/);
     var cm = rest.match(/^`([^`]+)`/);
     if (bm) { out.push(h('strong', { key: k++ }, bm[1])); rest = rest.slice(bm[0].length); continue; }
-    if (cm) { out.push(h('code', { key: k++, style: { fontFamily: 'monospace', fontSize: 11, background: '#F5F5F8', padding: '1px 4px', borderRadius: 3 } }, cm[1])); rest = rest.slice(cm[0].length); continue; }
+    if (cm) { out.push(h('code', { key: k++, style: { fontFamily: MONO_STACK, fontSize: 12, background: '#F5F5F8', padding: '1px 5px', borderRadius: 3 } }, cm[1])); rest = rest.slice(cm[0].length); continue; }
     // Find next ** or ` or end
     var next = rest.search(/\*\*|`/);
     if (next === -1) { out.push(rest); break; }
@@ -5046,7 +5051,7 @@ function EvidenceDebugPanel(props) {
     } catch (e) { antd.message.error('Copy failed'); }
   }
   function pre(obj) {
-    return h('pre', { style: { fontSize: 10, background: '#1E1E2E', color: '#E4E4F0', padding: 8, borderRadius: 4, overflow: 'auto', maxHeight: 240, margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } },
+    return h('pre', { style: { fontSize: 12, background: '#1A1B26', color: '#F5F6F8', padding: '10px 12px', borderRadius: 6, overflow: 'auto', maxHeight: 240, margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: MONO_STACK, lineHeight: 1.5 } },
       obj == null ? '(none)' : JSON.stringify(obj, null, 2));
   }
   function row(label, obj) {
@@ -5340,8 +5345,8 @@ function ScriptedCheckRow(props) {
           ? h('div', { style: { fontSize: 10.5, color: '#65657B', marginTop: 4, lineHeight: 1.4 } }, details.description)
           : null,
         details.command
-          ? h('div', { style: { fontSize: 10.5, color: '#65657B', marginTop: 4, fontFamily: 'monospace', wordBreak: 'break-all' } },
-              h('span', { style: { fontWeight: 600 } }, 'Script: '), details.command)
+          ? h('div', { style: { fontSize: 12, color: '#3F4547', marginTop: 6, fontFamily: MONO_STACK, wordBreak: 'break-all', lineHeight: 1.5 } },
+              h('span', { style: { fontWeight: 600, fontFamily: 'Inter, sans-serif', color: '#65657B' } }, 'Script: '), details.command)
           : null
       ),
       h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 } },
@@ -5360,8 +5365,8 @@ function ScriptedCheckRow(props) {
     declared.length
       ? h('div', { style: { marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 } },
           declared.map(function(p) {
-            return h('div', { key: p.name, style: { display: 'flex', alignItems: 'center', gap: 8 } },
-              h('span', { style: { fontSize: 11, color: '#65657B', minWidth: 110, fontFamily: 'monospace' } }, p.name),
+            return h('div', { key: p.name, style: { display: 'flex', alignItems: 'center', gap: 10 } },
+              h('span', { style: { fontSize: 12.5, color: '#3F4547', minWidth: 120, fontFamily: MONO_STACK, fontWeight: 500 } }, p.name),
               h(Input, {
                 size: 'small', style: { flex: 1 },
                 value: paramValues[p.name] || '',
@@ -5417,7 +5422,7 @@ function ScriptedCheckRow(props) {
                 // banner above carries the message instead of a flickering
                 // "(no logs yet)" placeholder.
                 resultLogs || !jobIsRunning
-                  ? h('pre', { style: { fontSize: 10.5, background: '#1E1E2E', color: '#E4E4F0', padding: 10, borderRadius: 4, maxHeight: 280, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, lineHeight: 1.4, fontFamily: 'Menlo, Monaco, monospace' } },
+                  ? h('pre', { style: { fontSize: 12.5, background: '#1A1B26', color: '#F5F6F8', padding: '12px 14px', borderRadius: 6, maxHeight: 320, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, lineHeight: 1.6, fontFamily: MONO_STACK, letterSpacing: '0.01em' } },
                       resultLogs || '(no output produced)')
                   : null
               )
