@@ -4959,6 +4959,10 @@ function QCTrackerPage(props) {
 
 // ═══════════════════════════════════════════════════════════════
 // ── Evidence helpers ────────────────────────────────────────────
+// Editable Evidence form: per-stage section with editable inputs and
+// per-evidence-set Save buttons. Scripted checks expose a Run button
+// that starts a Domino job and stores the jobId back as evidence.
+
 function EvidenceStageSection(props) {
   var _o = useState(props.defaultOpen !== false);
   var open = _o[0]; var setOpen = _o[1];
@@ -4976,86 +4980,162 @@ function EvidenceStageSection(props) {
       h('span', { style: { color: '#8F8FA3', fontSize: 11, transition: 'transform 0.2s', display: 'inline-block', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' } }, '▼')
     ),
     open
-      ? h('div', { style: { padding: '4px 4px 16px' } },
-          props.fields.length
-            ? props.fields
-            : h('div', { style: { fontSize: 12, color: '#B0B0C0', fontStyle: 'italic', padding: '8px 0' } }, 'No evidence fields configured for this stage.')
-        )
+      ? h('div', { style: { padding: '4px 4px 16px' } }, props.children)
       : null
   );
 }
 
-function renderArtifactField(art, ev, key, fullBundle) {
-  var type = art.artifactType || '';
+function buildJobHref(fullBundle, jobId) {
+  if (!jobId) return null;
+  var owner = (fullBundle || {}).projectOwner;
+  var proj = (fullBundle || {}).projectName;
+  if (!owner || !proj) return null;
+  var host = '';
+  try { host = window.location.origin; } catch(e) {}
+  return host + '/u/' + encodeURIComponent(owner) + '/' + encodeURIComponent(proj) + '/jobs/' + jobId;
+}
+
+// One editable field for a regular artifact (text/textarea/radio/checkbox).
+function EvidenceField(props) {
+  var art = props.artifact;
   var details = art.details || {};
   var label = details.label || details.name || '';
+  var type = details.type || 'text';
+  var currentValue = props.value;
+  var onChange = props.onChange;
 
-  if (type === 'guidance') return null;
-
-  if (type === 'policyScriptedCheck') {
-    var jobId = ev.jobId || (ev.value && ev.value.jobId);
-    var params = ev.parameters || (ev.value && ev.value.parameters) || {};
-    var jobLink = null;
-    if (jobId) {
-      var owner = (fullBundle || {}).projectOwner;
-      var proj = (fullBundle || {}).projectName;
-      var host = '';
-      try { host = window.location.origin; } catch(e) {}
-      var jobHref = (owner && proj)
-        ? host + '/u/' + encodeURIComponent(owner) + '/' + encodeURIComponent(proj) + '/jobs/' + jobId
-        : null;
-      var jobLabel = 'Job ' + String(jobId).slice(-8);
-      jobLink = jobHref
-        ? h('a', { href: jobHref, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 11, color: '#543FDE', textDecoration: 'none', whiteSpace: 'nowrap' } }, jobLabel, ' ↗')
-        : h('span', { style: { fontSize: 11, color: '#65657B' } }, jobLabel);
-    } else {
-      jobLink = h('span', { style: { fontSize: 11, color: '#B0B0C0', fontStyle: 'italic' } }, 'Not yet run');
-    }
-    var paramPills = Object.keys(params || {}).filter(function(k) { return params[k] != null && params[k] !== ''; }).map(function(k) {
-      return h('span', { key: k, style: { fontSize: 10, background: '#FFFFFF', border: '1px solid #E0E0E0', borderRadius: 4, padding: '2px 7px', color: '#65657B' } },
-        h('strong', { style: { color: '#2E2E38' } }, k + ':'), ' ', String(params[k])
-      );
+  var inputEl;
+  if (type === 'radio') {
+    var opts = (details.options || ['Yes', 'No']).map(function(o) {
+      var v = typeof o === 'string' ? o : (o.value != null ? o.value : o.label);
+      var lbl = typeof o === 'string' ? o : (o.label || o.value);
+      return { label: lbl, value: v };
     });
-    return h('div', { key: key, style: { padding: '10px 12px', margin: '6px 0', background: '#FAFAFA', border: '1px solid #E0E0E0', borderRadius: 6 } },
-      h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' } },
-        h('span', { style: { fontSize: 12, fontWeight: 600, color: '#2E2E38' } }, '⚙ ' + (label || 'Scripted Check')),
-        jobLink
-      ),
-      paramPills.length
-        ? h('div', { style: { marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 4 } }, paramPills)
-        : null
-    );
-  }
-
-  var raw = ev.value;
-  var valueEl;
-  if (raw === null || raw === undefined || raw === '') {
-    valueEl = h('span', { style: { fontSize: 12, color: '#B0B0C0', fontStyle: 'italic' } }, 'Not yet submitted');
-  } else if (Array.isArray(raw)) {
-    valueEl = raw.length
-      ? h('span', { style: { fontSize: 12, color: '#28A464' } }, '✓ ' + raw.join(', '))
-      : h('span', { style: { fontSize: 12, color: '#B0B0C0', fontStyle: 'italic' } }, 'Not checked');
-  } else if (details.type === 'radio') {
-    var sval = String(raw);
-    var isYes = /^yes$/i.test(sval);
-    var isNo = /^no$/i.test(sval);
-    var color = isYes ? '#28A464' : isNo ? '#C20A29' : '#2E2E38';
-    var glyph = isYes ? '✓ ' : isNo ? '✕ ' : '';
-    valueEl = h('span', { style: { fontSize: 12, color: color, fontWeight: 500 } }, glyph + sval);
-  } else if (details.type === 'textarea' || String(raw).length > 80) {
-    valueEl = h('span', { style: { fontSize: 12, color: '#2E2E38', whiteSpace: 'pre-wrap', lineHeight: 1.5 } }, String(raw));
+    inputEl = h(Radio.Group, {
+      size: 'small', value: currentValue != null ? currentValue : undefined,
+      options: opts, onChange: function(e) { onChange(e.target.value); },
+    });
+  } else if (type === 'checkbox') {
+    var copts = (details.options || []).map(function(o) {
+      var v = typeof o === 'string' ? o : (o.value != null ? o.value : o.label);
+      var lbl = typeof o === 'string' ? o : (o.label || o.value);
+      return { label: lbl, value: v };
+    });
+    inputEl = h(Checkbox.Group, {
+      value: Array.isArray(currentValue) ? currentValue : [],
+      options: copts, onChange: function(vals) { onChange(vals); },
+    });
+  } else if (type === 'textarea') {
+    inputEl = h(Input.TextArea, {
+      size: 'small', autoSize: { minRows: 2, maxRows: 8 },
+      value: currentValue || '', onChange: function(e) { onChange(e.target.value); },
+      placeholder: details.placeholder || 'Enter response…',
+    });
+  } else if (type === 'select') {
+    var sopts = (details.options || []).map(function(o) {
+      var v = typeof o === 'string' ? o : (o.value != null ? o.value : o.label);
+      var lbl = typeof o === 'string' ? o : (o.label || o.value);
+      return { label: lbl, value: v };
+    });
+    inputEl = h(Select, {
+      size: 'small', style: { width: '100%' },
+      value: currentValue != null ? currentValue : undefined,
+      options: sopts, onChange: function(v) { onChange(v); }, allowClear: true,
+    });
   } else {
-    valueEl = h('span', { style: { fontSize: 12, color: '#2E2E38' } }, String(raw));
+    inputEl = h(Input, {
+      size: 'small', value: currentValue || '',
+      onChange: function(e) { onChange(e.target.value); },
+      placeholder: details.placeholder || '',
+    });
   }
 
-  return h('div', { key: key, style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, padding: '10px 4px', borderBottom: '1px solid #F5F5F8', alignItems: 'start' } },
-    h('div', null,
-      h('div', { style: { fontSize: 12, fontWeight: 500, color: '#65657B', lineHeight: 1.4 } }, label),
-      details.helpText
-        ? h('div', { style: { fontSize: 10.5, color: '#8F8FA3', marginTop: 2 } }, details.helpText)
-        : null
+  return h('div', { style: { padding: '10px 4px', borderBottom: '1px solid #F5F5F8' } },
+    h('div', { style: { fontSize: 12, fontWeight: 500, color: '#2E2E38', lineHeight: 1.4, marginBottom: 4 } }, label),
+    details.helpText
+      ? h('div', { style: { fontSize: 10.5, color: '#8F8FA3', marginBottom: 6 } }, details.helpText)
+      : null,
+    inputEl,
+    props.submittedAt
+      ? h('div', { style: { fontSize: 10, color: '#B0B0C0', marginTop: 4 } },
+          'Last saved ' + dayjs(props.submittedAt).fromNow() + (props.submittedBy ? ' by ' + props.submittedBy : ''))
+      : null
+  );
+}
+
+// Scripted check row — shows status, params, and a Run button.
+function ScriptedCheckRow(props) {
+  var art = props.artifact;
+  var details = art.details || {};
+  var ev = props.evidence || {};
+  var label = details.label || details.name || 'Scripted Check';
+
+  var jobId = ev.jobId || (ev.value && ev.value.jobId);
+  var jobStatus = ev.jobStatus || (ev.value && ev.value.jobStatus);
+  var resolvedParams = ev.parameters || (ev.value && ev.value.parameters) || {};
+
+  // Editable parameters
+  var declared = details.parameters || [];
+  var _params = useState(function() {
+    var seed = {};
+    declared.forEach(function(p) {
+      var n = p.name;
+      if (!n) return;
+      if (resolvedParams[n] != null) seed[n] = resolvedParams[n];
+      else if (p.default != null) seed[n] = p.default;
+      else seed[n] = '';
+    });
+    return seed;
+  });
+  var paramValues = _params[0]; var setParamValues = _params[1];
+
+  var jobHref = buildJobHref(props.fullBundle, jobId);
+  var statusBadge = null;
+  if (jobStatus) {
+    var st = String(jobStatus).toLowerCase();
+    var sc = st === 'succeeded' ? '#28A464' : (st === 'failed' || st === 'error') ? '#C20A29' : '#0070CC';
+    statusBadge = h('span', { style: { fontSize: 10, color: sc, fontWeight: 600, textTransform: 'uppercase' } }, jobStatus);
+  }
+
+  return h('div', { style: { padding: '12px', margin: '8px 0', background: '#FAFAFA', border: '1px solid #E0E0E0', borderRadius: 6 } },
+    h('div', { style: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' } },
+      h('div', { style: { flex: 1, minWidth: 0 } },
+        h('div', { style: { fontSize: 12, fontWeight: 600, color: '#2E2E38' } }, '⚙ ' + label),
+        details.description
+          ? h('div', { style: { fontSize: 10.5, color: '#65657B', marginTop: 4, lineHeight: 1.4 } }, details.description)
+          : null
+      ),
+      h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 } },
+        h(Button, {
+          size: 'small', type: 'primary',
+          loading: props.running,
+          disabled: props.running || !props.canRun,
+          onClick: function() { props.onRun(paramValues); },
+        }, jobId ? 'Re-run' : 'Run check'),
+        jobHref
+          ? h('a', { href: jobHref, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 10.5, color: '#543FDE' } }, 'Job ' + String(jobId).slice(-8) + ' ↗')
+          : null,
+        statusBadge
+      )
     ),
-    h('div', null, valueEl)
+    declared.length
+      ? h('div', { style: { marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 } },
+          declared.map(function(p) {
+            return h('div', { key: p.name, style: { display: 'flex', alignItems: 'center', gap: 8 } },
+              h('span', { style: { fontSize: 11, color: '#65657B', minWidth: 110, fontFamily: 'monospace' } }, p.name),
+              h(Input, {
+                size: 'small', style: { flex: 1 },
+                value: paramValues[p.name] || '',
+                placeholder: p.default || '',
+                onChange: function(e) {
+                  var v = e.target.value;
+                  setParamValues(function(prev) { var next = Object.assign({}, prev); next[p.name] = v; return next; });
+                },
+              })
+            );
+          })
+        )
+      : null
   );
 }
 
@@ -5086,15 +5166,39 @@ function DetailDrawer(props) {
   var _ev = useState(null);    var evidenceData = _ev[0];    var setEvidenceData = _ev[1];
   var _evL = useState(false);  var evidenceLoading = _evL[0]; var setEvidenceLoading = _evL[1];
   var _evE = useState(null);   var evidenceError = _evE[0];   var setEvidenceError = _evE[1];
-  useEffect(function() {
-    if (activeView !== 'evidence' || !bundle || !bundle.id) return;
-    if (evidenceData && evidenceData._bundleId === bundle.id) return;
+  var _evF = useState({});     var evidenceForm = _evF[0];    var setEvidenceForm = _evF[1];   // artifactId -> current value
+  var _evD = useState({});     var evidenceDirty = _evD[0];   var setEvidenceDirty = _evD[1];  // artifactId -> true
+  var _evS = useState({});     var evidenceSaving = _evS[0];  var setEvidenceSaving = _evS[1]; // evidenceSetId -> true
+  var _evR = useState({});     var checkRunning = _evR[0];    var setCheckRunning = _evR[1];   // artifactId -> true
+
+  function loadEvidence(force) {
+    if (!bundle || !bundle.id) return;
+    if (!force && evidenceData && evidenceData._bundleId === bundle.id) return;
     setEvidenceLoading(true);
     setEvidenceError(null);
     apiGet('api/bundles/' + bundle.id + '/detail')
-      .then(function(data) { data._bundleId = bundle.id; setEvidenceData(data); })
+      .then(function(data) {
+        data._bundleId = bundle.id;
+        setEvidenceData(data);
+        // Seed form values from submitted evidence
+        var seed = {};
+        var em = data.evidenceMap || {};
+        Object.keys(em).forEach(function(aid) {
+          var v = em[aid] && em[aid].value;
+          if (v !== undefined && v !== null && (typeof v !== 'object' || Array.isArray(v))) {
+            seed[aid] = v;
+          }
+        });
+        setEvidenceForm(seed);
+        setEvidenceDirty({});
+      })
       .catch(function(err) { setEvidenceError(err.message || String(err)); })
       .then(function() { setEvidenceLoading(false); });
+  }
+
+  useEffect(function() {
+    if (activeView !== 'evidence') return;
+    loadEvidence(false);
   }, [activeView, bundleId]);
 
   if (!bundle) return null;
@@ -5402,21 +5506,108 @@ function DetailDrawer(props) {
       })
     );
 
+    // Handlers
+    function handleFieldChange(artId, value) {
+      setEvidenceForm(function(prev) { var n = Object.assign({}, prev); n[artId] = value; return n; });
+      setEvidenceDirty(function(prev) { var n = Object.assign({}, prev); n[artId] = true; return n; });
+    }
+
+    function handleSaveEvidenceSet(evSetId, artifactIds) {
+      var content = {};
+      artifactIds.forEach(function(aid) {
+        if (evidenceDirty[aid]) content[aid] = evidenceForm[aid];
+      });
+      if (!Object.keys(content).length) {
+        antd.message.info('No changes to save');
+        return;
+      }
+      setEvidenceSaving(function(prev) { var n = Object.assign({}, prev); n[evSetId] = true; return n; });
+      apiPost('api/bundles/' + bundle.id + '/evidence', { evidenceId: evSetId, content: content })
+        .then(function() {
+          antd.message.success('Evidence saved');
+          loadEvidence(true);
+        })
+        .catch(function(err) {
+          antd.notification.error({ message: 'Save failed', description: parseServerError(err.message || String(err)), duration: 8 });
+        })
+        .then(function() {
+          setEvidenceSaving(function(prev) { var n = Object.assign({}, prev); delete n[evSetId]; return n; });
+        });
+    }
+
+    function handleRunCheck(artId, evSetId, params) {
+      setCheckRunning(function(prev) { var n = Object.assign({}, prev); n[artId] = true; return n; });
+      apiPost('api/bundles/' + bundle.id + '/scripted-check/' + artId, { evidenceId: evSetId, parameters: params })
+        .then(function(resp) {
+          antd.message.success('Job started: ' + (resp.jobId ? String(resp.jobId).slice(-8) : 'queued'));
+          loadEvidence(true);
+        })
+        .catch(function(err) {
+          antd.notification.error({ message: 'Run failed', description: parseServerError(err.message || String(err)), duration: 8 });
+        })
+        .then(function() {
+          setCheckRunning(function(prev) { var n = Object.assign({}, prev); delete n[artId]; return n; });
+        });
+    }
+
     // Per-stage sections
     var sections = stages.map(function(stage, idx) {
       var st = stageStates[idx];
       var statusLabel = st === 'done' ? 'Complete' : st === 'active' ? 'Active' : 'Pending';
       var statusColor = st === 'done' ? { bg: '#D1FAE5', fg: '#065F46' } : st === 'active' ? { bg: '#DBEAFE', fg: '#1E40AF' } : { bg: '#F3F4F6', fg: '#6B7280' };
       var assignee = stageAssignees[stage.name];
+      var canEdit = st === 'active' || st === 'done';
 
-      // Gather artifacts from evidenceSet + approvals
-      var artifacts = [];
-      (stage.evidenceSet || []).forEach(function(es) { (es.artifacts || []).forEach(function(a) { artifacts.push(a); }); });
-      (stage.approvals || []).forEach(function(ap) { ((ap.evidence || {}).artifacts || []).forEach(function(a) { artifacts.push(a); }); });
+      // Walk each evidenceSet separately so we can render a Save button per set.
+      var sectionContent = [];
+      (stage.evidenceSet || []).forEach(function(es, esIdx) {
+        var arts = (es.artifacts || []).filter(function(a) { return a.artifactType !== 'guidance'; });
+        if (!arts.length) return;
+        var artIds = arts.map(function(a) { return a.id; });
+        var dirtyCount = artIds.filter(function(aid) { return evidenceDirty[aid]; }).length;
 
-      var fields = artifacts.map(function(art, i) {
-        return renderArtifactField(art, evidenceMap[art.id] || {}, i, fullBundle);
-      }).filter(Boolean);
+        var fieldEls = arts.map(function(art) {
+          var ev = evidenceMap[art.id] || {};
+          if (art.artifactType === 'policyScriptedCheck') {
+            return h(ScriptedCheckRow, {
+              key: art.id, artifact: art, evidence: ev, fullBundle: fullBundle,
+              running: !!checkRunning[art.id], canRun: canEdit,
+              onRun: function(params) { handleRunCheck(art.id, es.id, params); },
+            });
+          }
+          var current = evidenceForm[art.id] != null ? evidenceForm[art.id] : ev.value;
+          if (!canEdit) {
+            return h('div', { key: art.id, style: { padding: '10px 4px', borderBottom: '1px solid #F5F5F8' } },
+              h('div', { style: { fontSize: 12, fontWeight: 500, color: '#65657B', marginBottom: 4 } }, (art.details || {}).label || (art.details || {}).name),
+              current != null && current !== ''
+                ? h('div', { style: { fontSize: 12, color: '#2E2E38', whiteSpace: 'pre-wrap' } }, Array.isArray(current) ? current.join(', ') : String(current))
+                : h('div', { style: { fontSize: 12, color: '#B0B0C0', fontStyle: 'italic' } }, 'Not yet submitted')
+            );
+          }
+          return h(EvidenceField, {
+            key: art.id, artifact: art, value: current,
+            submittedAt: ev.submittedAt, submittedBy: ev.submittedBy,
+            onChange: function(v) { handleFieldChange(art.id, v); },
+          });
+        });
+
+        sectionContent.push(h('div', { key: es.id || esIdx, style: { marginBottom: 8 } },
+          fieldEls,
+          canEdit
+            ? h('div', { style: { display: 'flex', justifyContent: 'flex-end', marginTop: 10, gap: 8 } },
+                h(Button, {
+                  size: 'small', type: 'primary',
+                  loading: !!evidenceSaving[es.id], disabled: dirtyCount === 0,
+                  onClick: function() { handleSaveEvidenceSet(es.id, artIds); },
+                }, dirtyCount > 0 ? 'Save (' + dirtyCount + ')' : 'Save')
+              )
+            : null
+        ));
+      });
+
+      if (!sectionContent.length) {
+        sectionContent = [h('div', { key: 'empty', style: { fontSize: 12, color: '#B0B0C0', fontStyle: 'italic', padding: '8px 0' } }, 'No evidence fields configured for this stage.')];
+      }
 
       return h(EvidenceStageSection, {
         key: idx,
@@ -5424,12 +5615,15 @@ function DetailDrawer(props) {
         statusLabel: statusLabel,
         statusColor: statusColor,
         assignee: assignee,
-        fields: fields,
         defaultOpen: st === 'active' || st === 'done',
-      });
+      }, sectionContent);
     });
 
-    return h('div', null, stepper, sections);
+    var refreshBtn = h('div', { style: { display: 'flex', justifyContent: 'flex-end', marginBottom: 8 } },
+      h(Button, { size: 'small', onClick: function() { loadEvidence(true); } }, '⟳ Refresh')
+    );
+
+    return h('div', null, refreshBtn, stepper, sections);
   }
 
   // ── Render active view ──────────────────────────────────────

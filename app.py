@@ -413,6 +413,171 @@ def get_bundle_detail(bundle_id: str):
     return {"bundle": bundle, "policy": policy, "evidenceMap": evidence_map}
 
 
+# ── Evidence submission + scripted-check execution ──────────────
+
+@app.post("/api/bundles/{bundle_id}/evidence")
+def submit_bundle_evidence(bundle_id: str, body: dict):
+    """
+    Submit evidence values for one evidence set.
+    Body: { evidenceId: str, content: { artifactId: value, ... } }
+    Calls Domino's /rpc/submit-result-to-policy.
+    """
+    evidence_id = body.get("evidenceId")
+    content = body.get("content") or {}
+    if not evidence_id:
+        raise HTTPException(status_code=400, detail="evidenceId is required")
+
+    bundle = gov_get(f"/bundles/{bundle_id}")
+    policy_id = bundle.get("policyId")
+    if not policy_id:
+        raise HTTPException(status_code=400, detail="Bundle has no policyId")
+
+    return gov_post(
+        "/rpc/submit-result-to-policy",
+        json_body={
+            "bundleId": bundle_id,
+            "policyId": policy_id,
+            "evidenceId": evidence_id,
+            "content": content,
+        },
+    )
+
+
+def _find_hw_tier_id(name, project_id):
+    """Resolve hardware tier name → id via /v4/projects/{id}/hardwareTiers."""
+    if not name or not project_id:
+        return None
+    try:
+        tiers = v4_get(f"/projects/{project_id}/hardwareTiers")
+        for t in (tiers or []):
+            ht = t.get("hardwareTier") or t
+            if (ht.get("name") or "").lower() == name.lower() or ht.get("id") == name:
+                return ht.get("id")
+    except Exception as e:
+        logger.warning(f"hw tier lookup failed for '{name}': {e}")
+    return None
+
+
+def _find_environment_id(name, project_id):
+    """Resolve environment name → id via /v4/environments?projectId=..."""
+    if not name:
+        return None
+    try:
+        envs = v4_get("/environments", params={"projectId": project_id} if project_id else None)
+        items = envs.get("data") if isinstance(envs, dict) else envs
+        for e in (items or []):
+            if (e.get("name") or "").lower() == name.lower() or e.get("id") == name:
+                return e.get("id")
+    except Exception as e:
+        logger.warning(f"environment lookup failed for '{name}': {e}")
+    return None
+
+
+def _v4_post(path, json_body=None):
+    host = get_domino_host()
+    if not host:
+        raise HTTPException(status_code=503, detail="DOMINO_API_HOST not set")
+    headers = get_auth_headers()
+    headers["Content-Type"] = "application/json"
+    resp = requests.post(f"{host}/v4{path}", headers=headers, json=json_body, timeout=30)
+    if resp.status_code not in (200, 201):
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    return resp.json()
+
+
+@app.post("/api/bundles/{bundle_id}/scripted-check/{artifact_id}")
+def run_scripted_check(bundle_id: str, artifact_id: str, body: dict):
+    """
+    Execute a policyScriptedCheck artifact:
+      1) look up the artifact in the policy → get command, environment, hwTier
+      2) start a Domino job in the bundle's project
+      3) write {jobId, parameters, jobStatus} back as evidence draft
+
+    Body: { evidenceId: str, parameters: {name: value, ...} (optional, overrides defaults) }
+    """
+    evidence_id = body.get("evidenceId")
+    user_params = body.get("parameters") or {}
+    if not evidence_id:
+        raise HTTPException(status_code=400, detail="evidenceId is required")
+
+    bundle = gov_get(f"/bundles/{bundle_id}")
+    policy_id = bundle.get("policyId")
+    project_id = bundle.get("projectId")
+    if not (policy_id and project_id):
+        raise HTTPException(status_code=400, detail="Bundle missing policyId or projectId")
+
+    policy = gov_get(f"/policies/{policy_id}")
+    artifact = None
+    for stage in (policy.get("stages") or []):
+        for es in (stage.get("evidenceSet") or []):
+            for a in (es.get("artifacts") or []):
+                if a.get("id") == artifact_id:
+                    artifact = a
+                    break
+            if artifact: break
+        if artifact: break
+    if not artifact:
+        raise HTTPException(status_code=404, detail=f"Artifact {artifact_id} not in policy")
+    if artifact.get("artifactType") != "policyScriptedCheck":
+        raise HTTPException(status_code=400, detail="Artifact is not a scripted check")
+
+    details = artifact.get("details") or {}
+    command = details.get("command")
+    if not command:
+        raise HTTPException(status_code=400, detail="Scripted check has no command")
+
+    # Substitute parameters into command. Spec uses ${name} placeholders.
+    declared_params = details.get("parameters") or []
+    resolved = {}
+    for p in declared_params:
+        pname = p.get("name")
+        if not pname: continue
+        if pname in user_params:
+            resolved[pname] = user_params[pname]
+        elif p.get("default") is not None:
+            resolved[pname] = p.get("default")
+    final_command = command
+    for k, v in resolved.items():
+        final_command = final_command.replace("${" + k + "}", str(v))
+
+    env_id = _find_environment_id(details.get("environment"), project_id)
+    hw_id  = _find_hw_tier_id(details.get("hardwareTier"), project_id)
+
+    job_req = {"projectId": project_id, "commandToRun": final_command}
+    if env_id: job_req["environmentId"] = env_id
+    if hw_id:  job_req["overrideHardwareTierId"] = hw_id
+
+    try:
+        job = _v4_post("/jobs/start", json_body=job_req)
+    except HTTPException as e:
+        logger.error(f"Job start failed for scripted check {artifact_id}: {e.detail}")
+        raise
+
+    job_id = job.get("id")
+
+    # Persist as draft so the Evidence tab shows it on next refresh.
+    try:
+        gov_post(
+            "/rpc/submit-result-to-policy",
+            json_body={
+                "bundleId": bundle_id,
+                "policyId": policy_id,
+                "evidenceId": evidence_id,
+                "content": {
+                    artifact_id: {
+                        "jobId": job_id,
+                        "jobStatus": (job.get("statuses") or {}).get("executionStatus") or "Queued",
+                        "parameters": resolved,
+                    }
+                },
+            },
+        )
+    except HTTPException as e:
+        logger.warning(f"Saving jobId to evidence failed (job still started): {e.detail}")
+
+    return {"jobId": job_id, "parameters": resolved, "command": final_command, "job": job}
+
+
 # ── Stage Reassignment ───────────────────────────────────────────
 
 @app.patch("/api/bundles/{bundle_id}/stages/{stage_id}")
