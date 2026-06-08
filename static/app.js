@@ -5216,46 +5216,64 @@ function ScriptedCheckRow(props) {
   var _r = useState(false);   var resultOpen = _r[0];     var setResultOpen = _r[1];
   var _l = useState('');      var resultLogs = _l[0];     var setResultLogs = _l[1];
   var _ls = useState(null);   var resultStatus = _ls[0];  var setResultStatus = _ls[1];
-  var _lf = useState(false);  var logsLoading = _lf[0];   var setLogsLoading = _lf[1];
+  var _lf = useState(false);  var manualFetching = _lf[0]; var setManualFetching = _lf[1];
+  // Elapsed-time counter for the running indicator. Stays stable across
+  // silent polls so the UI doesn't flicker between "Fetching logs..." and
+  // "(no logs yet)" while waiting for the job to produce output.
+  var _rs = useState(null);   var runStartedAt = _rs[0];  var setRunStartedAt = _rs[1];
+  var _et = useState(0);      var elapsedSec = _et[0];    var setElapsedSec = _et[1];
 
-  function fetchLogs() {
-    if (!jobId) return Promise.resolve(null);
-    setLogsLoading(true);
-    return apiGet('api/jobs/' + jobId + '/logs')
-      .then(function(data) {
-        setResultLogs(data.text || '');
-        setResultStatus(data.status || null);
-        return data;
-      })
-      .catch(function(err) { setResultLogs('Failed to fetch logs: ' + (err.message || err)); return null; })
-      .then(function(data) { setLogsLoading(false); return data; });
-  }
-
-  // Track whether status is terminal (Succeeded / Failed / Stopped).
   function isTerminalStatus(s) {
     if (!s) return false;
     var x = String(s).toLowerCase();
     return x === 'succeeded' || x === 'failed' || x === 'error' || x === 'stopped' || x === 'finished';
   }
+  var liveJobStatus = resultStatus || jobStatus;
+  var jobIsRunning = !!jobId && !isTerminalStatus(liveJobStatus);
 
-  // Auto-poll while we have a jobId and status is non-terminal.
-  // Stops itself on terminal status. Calls onJobFinished() to bubble up
-  // a refresh of the parent's evidence map (so the agent-populated
-  // fields below get re-pulled without the user clicking Refresh).
+  // Silent fetch: used by the polling loop. Does NOT set the loading
+  // spinner state, so the panel doesn't flicker every 3s.
+  function pollLogsOnce() {
+    if (!jobId) return Promise.resolve(null);
+    return apiGet('api/jobs/' + jobId + '/logs')
+      .then(function(data) {
+        // Only overwrite logs if we got something newer/non-empty, so a
+        // momentary empty response doesn't blank the panel.
+        if (data && data.text) setResultLogs(data.text);
+        if (data && data.status) setResultStatus(data.status);
+        return data;
+      })
+      .catch(function() { return null; });
+  }
+
+  // Manual fetch via the Refresh logs link.
+  function fetchLogs() {
+    if (!jobId) return Promise.resolve(null);
+    setManualFetching(true);
+    return apiGet('api/jobs/' + jobId + '/logs')
+      .then(function(data) {
+        setResultLogs((data && data.text) || '');
+        setResultStatus((data && data.status) || null);
+        return data;
+      })
+      .catch(function(err) { setResultLogs('Failed to fetch logs: ' + (err.message || err)); return null; })
+      .then(function(data) { setManualFetching(false); return data; });
+  }
+
+  // Auto-poll while we have a jobId and status is non-terminal. Sets the
+  // run-start timestamp so the running indicator can show elapsed time.
   useEffect(function() {
     if (!jobId) return;
-    if (isTerminalStatus(resultStatus || jobStatus)) return; // no need to poll
-    // Auto-open the panel so the user can see what the agent is doing
+    if (isTerminalStatus(liveJobStatus)) return;
     setResultOpen(true);
+    if (!runStartedAt) setRunStartedAt(Date.now());
     var cancelled = false;
-    var stopAt = Date.now() + 5 * 60 * 1000; // 5-minute safety
+    var stopAt = Date.now() + 5 * 60 * 1000;
     function tick() {
       if (cancelled || Date.now() > stopAt) return;
-      fetchLogs().then(function(data) {
+      pollLogsOnce().then(function(data) {
         if (cancelled) return;
         if (data && isTerminalStatus(data.status)) {
-          // Job finished → tell parent to re-pull evidence so the
-          // agent-written fields appear.
           if (typeof props.onJobFinished === 'function') {
             props.onJobFinished({ jobId: jobId, status: data.status });
           }
@@ -5268,9 +5286,19 @@ function ScriptedCheckRow(props) {
     return function() { cancelled = true; clearTimeout(initial); };
   }, [jobId]);
 
+  // Elapsed-time ticker. Re-renders the elapsed counter every second
+  // while the job is running so the indicator feels alive.
+  useEffect(function() {
+    if (!jobIsRunning || !runStartedAt) return;
+    var iv = setInterval(function() {
+      setElapsedSec(Math.floor((Date.now() - runStartedAt) / 1000));
+    }, 1000);
+    return function() { clearInterval(iv); };
+  }, [jobIsRunning, runStartedAt]);
+
   // Lazy-load when user manually expands a finished job
   useEffect(function() {
-    if (resultOpen && jobId && !resultLogs && !logsLoading) fetchLogs();
+    if (resultOpen && jobId && !resultLogs && !manualFetching && !jobIsRunning) fetchLogs();
   }, [resultOpen, jobId]);
 
   // Editable parameters
@@ -5360,14 +5388,38 @@ function ScriptedCheckRow(props) {
           ),
           resultOpen
             ? h('div', { style: { marginTop: 8 } },
+                jobIsRunning
+                  ? h('div', { style: {
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '8px 12px', borderRadius: 6, marginBottom: 8,
+                      background: 'linear-gradient(135deg, rgba(84,63,222,0.08) 0%, rgba(232,53,167,0.08) 100%)',
+                      border: '1px solid #C9C5F2',
+                    } },
+                      h(Spin, { size: 'small' }),
+                      h('div', { style: { flex: 1, minWidth: 0 } },
+                        h('div', { style: { fontSize: 12, fontWeight: 600, color: '#1820A0' } },
+                          '✨ Agent is running' + (liveJobStatus ? ' (' + liveJobStatus + ')' : '')),
+                        h('div', { style: { fontSize: 11, color: '#65657B', marginTop: 1 } },
+                          'Elapsed ' + Math.floor(elapsedSec / 60) + 'm ' + (elapsedSec % 60) + 's. Evidence will populate when the job finishes.')
+                      )
+                    )
+                  : null,
                 h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', fontSize: 10.5, marginBottom: 6 } },
                   jobHref
                     ? h('a', { href: jobHref, target: '_blank', rel: 'noopener noreferrer', style: { color: '#543FDE' } }, 'Open job ↗')
                     : null,
-                  h('a', { onClick: fetchLogs, style: { color: '#543FDE', cursor: 'pointer' } }, logsLoading ? 'Loading…' : '⟳ Refresh logs')
+                  jobIsRunning
+                    ? null
+                    : h('a', { onClick: fetchLogs, style: { color: '#543FDE', cursor: 'pointer' } }, manualFetching ? 'Loading…' : '⟳ Refresh logs')
                 ),
-                h('pre', { style: { fontSize: 10.5, background: '#1E1E2E', color: '#E4E4F0', padding: 10, borderRadius: 4, maxHeight: 280, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, lineHeight: 1.4, fontFamily: 'Menlo, Monaco, monospace' } },
-                  logsLoading && !resultLogs ? 'Fetching logs…' : (resultLogs || '(no logs yet. Click Refresh.)'))
+                // The logs box only appears once there's content, or after
+                // the job finishes. While running with no output yet, the
+                // banner above carries the message instead of a flickering
+                // "(no logs yet)" placeholder.
+                resultLogs || !jobIsRunning
+                  ? h('pre', { style: { fontSize: 10.5, background: '#1E1E2E', color: '#E4E4F0', padding: 10, borderRadius: 4, maxHeight: 280, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, lineHeight: 1.4, fontFamily: 'Menlo, Monaco, monospace' } },
+                      resultLogs || '(no output produced)')
+                  : null
               )
             : null
         )
