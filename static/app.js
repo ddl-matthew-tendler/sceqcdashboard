@@ -5178,7 +5178,10 @@ function EvidenceField(props) {
     : { padding: '10px 4px', borderBottom: '1px solid #F5F5F8' };
   return h('div', { style: wrapStyle, className: props.flash ? 'evidence-field-flash' : '' },
     h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 } },
-      h('span', { style: { fontSize: 12, fontWeight: 500, color: '#2E2E38', lineHeight: 1.4 } }, label),
+      h('span', { style: { fontSize: 12, fontWeight: 500, color: '#2E2E38', lineHeight: 1.4 } },
+        label,
+        art.required ? h('span', { style: { color: '#C20A29', marginLeft: 3 }, title: 'Required' }, '*') : null
+      ),
       agentic && hasValue
         ? h('span', { style: { fontSize: 9, fontWeight: 600, color: '#543FDE', background: '#FFFFFF', border: '1px solid #C9C5F2', borderRadius: 10, padding: '1px 7px', letterSpacing: '0.04em', textTransform: 'uppercase' } }, '✨ Agent')
         : null
@@ -5409,6 +5412,17 @@ function DetailDrawer(props) {
   var _fl = useState({});  var flashSet = _fl[0];  var setFlashSet = _fl[1];    // artifactId -> true (briefly)
   // Stage transition state
   var _tr = useState(false); var transitioning = _tr[0]; var setTransitioning = _tr[1];
+  // Drawer width — three presets, persisted to localStorage
+  var _dw = useState(function() {
+    try { var v = parseInt(localStorage.getItem('domino:drawerWidth') || '0', 10); if (v === 480 || v === 720 || v === 980) return v; } catch (e) {}
+    return 480;
+  });
+  var drawerWidth = _dw[0]; var setDrawerWidth = _dw[1];
+  function cycleDrawerWidth() {
+    var next = drawerWidth === 480 ? 720 : (drawerWidth === 720 ? 980 : 480);
+    setDrawerWidth(next);
+    try { localStorage.setItem('domino:drawerWidth', String(next)); } catch (e) {}
+  }
 
   function loadEvidence(force) {
     if (!bundle || !bundle.id) return;
@@ -5738,14 +5752,22 @@ function DetailDrawer(props) {
         var dotColor = st === 'done' ? '#FFFFFF' : st === 'active' ? '#543FDE' : '#8F8FA3';
         var dotShadow = st === 'active' ? '0 0 0 3px rgba(84,63,222,0.15)' : 'none';
         var labelColor = st === 'pending' ? '#8F8FA3' : '#543FDE';
-        var isClickable = st === 'pending' && fullBundle.state !== 'Complete';
+        var isClickable = st === 'pending' && fullBundle.state !== 'Complete' && !hasMissing;
+        var blockedClickable = st === 'pending' && fullBundle.state !== 'Complete' && hasMissing;
+        var tooltipText = isClickable
+          ? 'Advance to ' + stage.name
+          : (blockedClickable
+              ? 'Complete ' + missingRequired.length + ' required field' + (missingRequired.length === 1 ? '' : 's') + ' before advancing'
+              : undefined);
         return h('div', { key: i,
           style: {
             flex: 1, minWidth: 70, display: 'flex', flexDirection: 'column', alignItems: 'center',
-            position: 'relative', cursor: isClickable ? 'pointer' : 'default',
+            position: 'relative',
+            cursor: isClickable ? 'pointer' : (blockedClickable ? 'not-allowed' : 'default'),
+            opacity: blockedClickable ? 0.65 : 1,
           },
           onClick: isClickable ? function() { handleTransitionStage(stage.name); } : undefined,
-          title: isClickable ? 'Advance to ' + stage.name : undefined },
+          title: tooltipText },
           i < stages.length - 1
             ? h('div', { style: { position: 'absolute', top: 11, left: 'calc(50% + 12px)', right: 'calc(-50% + 12px)', height: 2, background: (st === 'done' || st === 'active') ? '#543FDE' : '#E0E0E0' } })
             : null,
@@ -5896,7 +5918,10 @@ function DetailDrawer(props) {
           var current = evidenceForm[art.id] != null ? evidenceForm[art.id] : ev.value;
           if (!canEdit) {
             return h('div', { key: art.id, style: { padding: '10px 4px', borderBottom: '1px solid #F5F5F8' } },
-              h('div', { style: { fontSize: 12, fontWeight: 500, color: '#65657B', marginBottom: 4 } }, (art.details || {}).label || (art.details || {}).name),
+              h('div', { style: { fontSize: 12, fontWeight: 500, color: '#65657B', marginBottom: 4 } },
+                (art.details || {}).label || (art.details || {}).name,
+                art.required ? h('span', { style: { color: '#C20A29', marginLeft: 3 }, title: 'Required' }, '*') : null
+              ),
               current != null && current !== ''
                 ? h('div', { style: { fontSize: 12, color: '#2E2E38', whiteSpace: 'pre-wrap' } }, Array.isArray(current) ? current.join(', ') : String(current))
                 : h('div', { style: { fontSize: 12, color: '#B0B0C0', fontStyle: 'italic' } }, 'Not yet submitted')
@@ -5949,7 +5974,38 @@ function DetailDrawer(props) {
     // Find next stage by name, if any
     var currentIdx = stages.findIndex(function(s) { return s.name === currentStageName; });
     var nextStage = currentIdx >= 0 && currentIdx < stages.length - 1 ? stages[currentIdx + 1] : null;
-    var canTransition = !!nextStage && fullBundle.state !== 'Complete';
+
+    // Compute required-but-empty artifacts in the CURRENT stage. Domino
+    // refuses the transition if any required field is empty, so we
+    // pre-check and block the action with a tooltip instead of letting
+    // the user click → confirm → see a 400.
+    function valueLooksFilled(v) {
+      if (v === null || v === undefined || v === '') return false;
+      if (Array.isArray(v) && v.length === 0) return false;
+      return true;
+    }
+    var activeStageForCheck = stages[currentIdx];
+    var missingRequired = [];
+    if (activeStageForCheck) {
+      var collectArts = function(stage) {
+        var out = [];
+        (stage.evidenceSet || []).forEach(function(es) { (es.artifacts || []).forEach(function(a) { out.push(a); }); });
+        (stage.approvals || []).forEach(function(ap) { ((ap.evidence || {}).artifacts || []).forEach(function(a) { out.push(a); }); });
+        return out;
+      };
+      collectArts(activeStageForCheck).forEach(function(a) {
+        if (!a.required) return;
+        if (a.artifactType === 'guidance' || a.artifactType === 'policyScriptedCheck') return;
+        var ev = evidenceMap[a.id] || {};
+        var formVal = evidenceForm[a.id];
+        var current = formVal !== undefined ? formVal : ev.value;
+        if (!valueLooksFilled(current)) {
+          missingRequired.push((a.details || {}).label || (a.details || {}).name || a.id);
+        }
+      });
+    }
+    var hasMissing = missingRequired.length > 0;
+    var canTransition = !!nextStage && fullBundle.state !== 'Complete' && !hasMissing;
 
     var topBar = h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8 } },
       h('div', { style: { fontSize: 11, color: '#65657B' } },
@@ -5962,11 +6018,29 @@ function DetailDrawer(props) {
       ),
       h('div', { style: { display: 'flex', gap: 6 } },
         h(Button, { size: 'small', onClick: function() { loadEvidence(true); } }, '⟳ Refresh'),
-        canTransition
-          ? h(Button, {
-              size: 'small', type: 'primary', loading: transitioning,
-              onClick: function() { handleTransitionStage(nextStage.name); },
-            }, 'Advance to next stage →')
+        nextStage && fullBundle.state !== 'Complete'
+          ? h(Tooltip, {
+              title: hasMissing
+                ? h('div', null,
+                    h('div', { style: { fontWeight: 600, marginBottom: 4 } }, 'Required to advance:'),
+                    h('ul', { style: { margin: 0, paddingLeft: 16 } },
+                      missingRequired.slice(0, 8).map(function(m, i) { return h('li', { key: i }, m); }),
+                      missingRequired.length > 8 ? h('li', null, '…and ' + (missingRequired.length - 8) + ' more') : null
+                    )
+                  )
+                : 'Advance the bundle to ' + nextStage.name,
+              placement: 'bottomRight', overlayStyle: { maxWidth: 320 },
+            },
+              h(Button, {
+                size: 'small', type: 'primary', loading: transitioning,
+                disabled: hasMissing,
+                onClick: function() { handleTransitionStage(nextStage.name); },
+              },
+                hasMissing
+                  ? '🔒 ' + missingRequired.length + ' required'
+                  : 'Advance to next stage →'
+              )
+            )
           : null
       )
     );
@@ -6072,11 +6146,18 @@ function DetailDrawer(props) {
     ),
     open: visible,
     onClose: onClose,
-    width: 480,
+    width: drawerWidth,
     styles: { body: { padding: 0, display: 'flex', flexDirection: 'column', height: '100%' } },
-    extra: dominoUrl
-      ? h(Button, { type: 'primary', size: 'small', onClick: function() { window.open(dominoUrl, '_blank'); } }, '\u2197 View in Domino')
-      : null,
+    extra: h(Space, { size: 6 },
+      h(Tooltip, { title: 'Cycle drawer width (' + drawerWidth + 'px \u2192 ' + (drawerWidth === 480 ? 720 : drawerWidth === 720 ? 980 : 480) + 'px)' },
+        h(Button, { size: 'small', onClick: cycleDrawerWidth },
+          drawerWidth === 980 ? '\u21d4 Narrow' : drawerWidth === 720 ? '\u21d4 Widest' : '\u21d4 Wider'
+        )
+      ),
+      dominoUrl
+        ? h(Button, { type: 'primary', size: 'small', onClick: function() { window.open(dominoUrl, '_blank'); } }, '\u2197 View in Domino')
+        : null
+    ),
   },
     // View selector tabs
     h('div', { style: { borderBottom: '1px solid #E0E0E0', flexShrink: 0 } },
