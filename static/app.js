@@ -5412,17 +5412,51 @@ function DetailDrawer(props) {
   var _fl = useState({});  var flashSet = _fl[0];  var setFlashSet = _fl[1];    // artifactId -> true (briefly)
   // Stage transition state
   var _tr = useState(false); var transitioning = _tr[0]; var setTransitioning = _tr[1];
-  // Drawer width: three presets, persisted to localStorage
+  // Drawer width: drag-to-resize via a handle on the left edge.
+  // Width is persisted to localStorage on mouseup (not on every frame).
   var _dw = useState(function() {
-    try { var v = parseInt(localStorage.getItem('domino:drawerWidth') || '0', 10); if (v === 480 || v === 720 || v === 980) return v; } catch (e) {}
-    return 480;
+    try {
+      var v = parseInt(localStorage.getItem('domino:drawerWidth') || '0', 10);
+      if (v >= 360 && v <= 2000) return v;
+    } catch (e) {}
+    return 560;
   });
   var drawerWidth = _dw[0]; var setDrawerWidth = _dw[1];
-  function cycleDrawerWidth() {
-    var next = drawerWidth === 480 ? 720 : (drawerWidth === 720 ? 980 : 480);
-    setDrawerWidth(next);
-    try { localStorage.setItem('domino:drawerWidth', String(next)); } catch (e) {}
+
+  // useRef-style closure for drag state (need to read live values inside
+  // the document-level mousemove handler).
+  var dragRef = useRef({ active: false, startX: 0, startW: 0 });
+  function onResizeStart(e) {
+    dragRef.current = { active: true, startX: e.clientX, startW: drawerWidth };
+    document.body.style.cursor = 'ew-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onResizeMove);
+    document.addEventListener('mouseup', onResizeEnd);
+    e.preventDefault();
   }
+  function onResizeMove(e) {
+    if (!dragRef.current.active) return;
+    // Drawer is on the right; dragging LEFT (decreasing clientX) widens it.
+    var delta = dragRef.current.startX - e.clientX;
+    var maxW = Math.max(400, window.innerWidth - 80);
+    var w = Math.max(360, Math.min(maxW, dragRef.current.startW + delta));
+    setDrawerWidth(w);
+  }
+  function onResizeEnd() {
+    if (!dragRef.current.active) return;
+    dragRef.current.active = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    document.removeEventListener('mousemove', onResizeMove);
+    document.removeEventListener('mouseup', onResizeEnd);
+    try { localStorage.setItem('domino:drawerWidth', String(drawerWidth)); } catch (e) {}
+  }
+  // Persist the latest width on every change (covers double-click reset too).
+  useEffect(function() {
+    try { localStorage.setItem('domino:drawerWidth', String(drawerWidth)); } catch (e) {}
+  }, [drawerWidth]);
+  // Double-click resets to default 560px.
+  function onResizeDoubleClick() { setDrawerWidth(560); }
 
   function loadEvidence(force) {
     if (!bundle || !bundle.id) return;
@@ -6160,18 +6194,25 @@ function DetailDrawer(props) {
     open: visible,
     onClose: onClose,
     width: drawerWidth,
-    styles: { body: { padding: 0, display: 'flex', flexDirection: 'column', height: '100%' } },
-    extra: h(Space, { size: 6 },
-      h(Tooltip, { title: 'Cycle drawer width (' + drawerWidth + 'px \u2192 ' + (drawerWidth === 480 ? 720 : drawerWidth === 720 ? 980 : 480) + 'px)' },
-        h(Button, { size: 'small', onClick: cycleDrawerWidth },
-          drawerWidth === 980 ? '\u21d4 Narrow' : drawerWidth === 720 ? '\u21d4 Widest' : '\u21d4 Wider'
-        )
-      ),
-      dominoUrl
-        ? h(Button, { type: 'primary', size: 'small', onClick: function() { window.open(dominoUrl, '_blank'); } }, '\u2197 View in Domino')
-        : null
-    ),
+    styles: { body: { padding: 0, display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' } },
+    extra: dominoUrl
+      ? h(Button, { type: 'primary', size: 'small', onClick: function() { window.open(dominoUrl, '_blank'); } }, '\u2197 View in Domino')
+      : null,
   },
+    // Drag-to-resize handle. Sits on the left edge of the drawer body and
+    // widens the drawer when dragged left. Double-click to reset to 560.
+    h('div', {
+      onMouseDown: onResizeStart,
+      onDoubleClick: onResizeDoubleClick,
+      title: 'Drag to resize (double-click to reset)',
+      style: {
+        position: 'absolute', left: 0, top: 0, bottom: 0, width: 6,
+        cursor: 'ew-resize', zIndex: 100,
+        background: 'transparent',
+      },
+      onMouseEnter: function(e) { e.currentTarget.style.background = 'rgba(84,63,222,0.18)'; },
+      onMouseLeave: function(e) { e.currentTarget.style.background = 'transparent'; },
+    }),
     // View selector tabs
     h('div', { style: { borderBottom: '1px solid #E0E0E0', flexShrink: 0 } },
       h(Tabs, {
