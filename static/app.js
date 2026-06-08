@@ -5081,6 +5081,22 @@ function DetailDrawer(props) {
   var bundleId = bundle ? (bundle.id || bundle.name) : null;
   useEffect(function() { setActiveView(initialView || 'attachments'); }, [bundleId, initialView]);
 
+  // Evidence view: lazy-load consolidated detail. Hooks MUST run on every
+  // render — declare them before the !bundle early-return.
+  var _ev = useState(null);    var evidenceData = _ev[0];    var setEvidenceData = _ev[1];
+  var _evL = useState(false);  var evidenceLoading = _evL[0]; var setEvidenceLoading = _evL[1];
+  var _evE = useState(null);   var evidenceError = _evE[0];   var setEvidenceError = _evE[1];
+  useEffect(function() {
+    if (activeView !== 'evidence' || !bundle || !bundle.id) return;
+    if (evidenceData && evidenceData._bundleId === bundle.id) return;
+    setEvidenceLoading(true);
+    setEvidenceError(null);
+    apiGet('api/bundles/' + bundle.id + '/detail')
+      .then(function(data) { data._bundleId = bundle.id; setEvidenceData(data); })
+      .catch(function(err) { setEvidenceError(err.message || String(err)); })
+      .then(function() { setEvidenceLoading(false); });
+  }, [activeView, bundleId]);
+
   if (!bundle) return null;
 
   var stageIdx = deriveBundleStageIndex(bundle);
@@ -5105,20 +5121,6 @@ function DetailDrawer(props) {
     { value: 'gates', label: 'Gates' + (gatesCount > 0 ? ' (' + gatesCount + ')' : '') },
   ];
 
-  // \u2500\u2500 Evidence view: lazy-load consolidated detail \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-  var _ev = useState(null);    var evidenceData = _ev[0];    var setEvidenceData = _ev[1];
-  var _evL = useState(false);  var evidenceLoading = _evL[0]; var setEvidenceLoading = _evL[1];
-  var _evE = useState(null);   var evidenceError = _evE[0];   var setEvidenceError = _evE[1];
-  useEffect(function() {
-    if (activeView !== 'evidence' || !bundle || !bundle.id) return;
-    if (evidenceData && evidenceData._bundleId === bundle.id) return;
-    setEvidenceLoading(true);
-    setEvidenceError(null);
-    apiGet('api/bundles/' + bundle.id + '/detail')
-      .then(function(data) { data._bundleId = bundle.id; setEvidenceData(data); })
-      .catch(function(err) { setEvidenceError(err.message || String(err)); })
-      .then(function() { setEvidenceLoading(false); });
-  }, [activeView, bundleId]);
 
   // ── View: Stage Timeline ────────────────────────────────────
   function renderStageTimeline() {
