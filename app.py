@@ -579,6 +579,34 @@ def run_scripted_check(bundle_id: str, artifact_id: str, body: dict):
     return {"jobId": job_id, "parameters": resolved, "command": final_command, "job": job}
 
 
+@app.get("/api/jobs/{job_id}/logs")
+def get_job_logs(job_id: str, logType: str = "stdoutstderr", limit: int = 2000):
+    """Proxy to /v4/jobs/{id}/logsWithProblemSuggestions, returning just the
+    log lines (joined) plus the job's executionStatus so the frontend can
+    show progress + the final stdout without a second call."""
+    try:
+        logs_resp = v4_get(f"/jobs/{job_id}/logsWithProblemSuggestions",
+                           params={"logType": logType, "limit": limit})
+    except HTTPException as e:
+        # Job-not-found / not-ready is normal early on; surface gracefully
+        return {"jobId": job_id, "status": "unavailable", "text": "", "error": str(e.detail)[:300]}
+
+    # Domino returns {logContent: [{log, timestamp, ...}], ...}
+    lines = []
+    for item in (logs_resp.get("logContent") or []):
+        ln = item.get("log") if isinstance(item, dict) else str(item)
+        if ln is not None:
+            lines.append(ln)
+    # Get job status separately (small call)
+    status = None
+    try:
+        job = v4_get(f"/jobs/{job_id}")
+        status = (job.get("statuses") or {}).get("executionStatus")
+    except Exception:
+        pass
+    return {"jobId": job_id, "status": status, "text": "\n".join(lines), "lineCount": len(lines)}
+
+
 # ── Stage Reassignment ───────────────────────────────────────────
 
 @app.patch("/api/bundles/{bundle_id}/stages/{stage_id}")

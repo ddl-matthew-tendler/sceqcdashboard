@@ -5166,7 +5166,8 @@ function EvidenceField(props) {
   );
 }
 
-// Scripted check row — shows status, params, and a Run button.
+// Scripted check row — shows status, params, Run button, and a
+// collapsible inline log preview (Result panel).
 function ScriptedCheckRow(props) {
   var art = props.artifact;
   var details = art.details || {};
@@ -5176,6 +5177,30 @@ function ScriptedCheckRow(props) {
   var jobId = ev.jobId || (ev.value && ev.value.jobId);
   var jobStatus = ev.jobStatus || (ev.value && ev.value.jobStatus);
   var resolvedParams = ev.parameters || (ev.value && ev.value.parameters) || {};
+
+  // Result panel state: collapsed by default per spec; the AI-populated
+  // evidence below is the primary focus.
+  var _r = useState(false);   var resultOpen = _r[0];     var setResultOpen = _r[1];
+  var _l = useState('');      var resultLogs = _l[0];     var setResultLogs = _l[1];
+  var _ls = useState(null);   var resultStatus = _ls[0];  var setResultStatus = _ls[1];
+  var _lf = useState(false);  var logsLoading = _lf[0];   var setLogsLoading = _lf[1];
+
+  function fetchLogs() {
+    if (!jobId) return;
+    setLogsLoading(true);
+    apiGet('api/jobs/' + jobId + '/logs')
+      .then(function(data) {
+        setResultLogs(data.text || '(no output yet)');
+        setResultStatus(data.status || null);
+      })
+      .catch(function(err) { setResultLogs('Failed to fetch logs: ' + (err.message || err)); })
+      .then(function() { setLogsLoading(false); });
+  }
+
+  // When user expands, fetch once. Re-fetch via the Refresh button inside.
+  useEffect(function() {
+    if (resultOpen && jobId && !resultLogs && !logsLoading) fetchLogs();
+  }, [resultOpen, jobId]);
 
   // Editable parameters
   var declared = details.parameters || [];
@@ -5200,12 +5225,24 @@ function ScriptedCheckRow(props) {
     statusBadge = h('span', { style: { fontSize: 10, color: sc, fontWeight: 600, textTransform: 'uppercase' } }, jobStatus);
   }
 
+  var liveStatus = resultStatus || jobStatus;
+  var liveStatusEl = null;
+  if (liveStatus) {
+    var st = String(liveStatus).toLowerCase();
+    var sc = st === 'succeeded' ? '#28A464' : (st === 'failed' || st === 'error') ? '#C20A29' : '#0070CC';
+    liveStatusEl = h('span', { style: { fontSize: 10, color: sc, fontWeight: 600, textTransform: 'uppercase' } }, liveStatus);
+  }
+
   return h('div', { style: { padding: '12px', margin: '8px 0', background: '#FAFAFA', border: '1px solid #E0E0E0', borderRadius: 6 } },
     h('div', { style: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' } },
       h('div', { style: { flex: 1, minWidth: 0 } },
         h('div', { style: { fontSize: 12, fontWeight: 600, color: '#2E2E38' } }, '⚙ ' + label),
         details.description
           ? h('div', { style: { fontSize: 10.5, color: '#65657B', marginTop: 4, lineHeight: 1.4 } }, details.description)
+          : null,
+        details.command
+          ? h('div', { style: { fontSize: 10.5, color: '#65657B', marginTop: 4, fontFamily: 'monospace', wordBreak: 'break-all' } },
+              h('span', { style: { fontWeight: 600 } }, 'Script: '), details.command)
           : null
       ),
       h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 } },
@@ -5214,11 +5251,11 @@ function ScriptedCheckRow(props) {
           loading: props.running,
           disabled: props.running || !props.canRun,
           onClick: function() { props.onRun(paramValues); },
-        }, jobId ? 'Re-run' : 'Run check'),
+        }, 'Run Script'),
         jobHref
           ? h('a', { href: jobHref, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 10.5, color: '#543FDE' } }, 'Job ' + String(jobId).slice(-8) + ' ↗')
           : null,
-        statusBadge
+        liveStatusEl
       )
     ),
     declared.length
@@ -5237,6 +5274,31 @@ function ScriptedCheckRow(props) {
               })
             );
           })
+        )
+      : null,
+    // Result panel — collapsed by default; AI-populated evidence below is
+    // where the user's attention should be.
+    jobId
+      ? h('div', { style: { marginTop: 10, paddingTop: 8, borderTop: '1px solid #E0E0E0' } },
+          h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', userSelect: 'none' },
+            onClick: function() { setResultOpen(!resultOpen); } },
+            h('span', { style: { fontSize: 11, fontWeight: 600, color: '#65657B' } },
+              (resultOpen ? '▾ ' : '▸ ') + 'Result'),
+            h('span', { style: { fontSize: 10, color: '#8F8FA3' } },
+              resultOpen ? 'click to hide' : 'view stdout / stderr')
+          ),
+          resultOpen
+            ? h('div', { style: { marginTop: 8 } },
+                h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', fontSize: 10.5, marginBottom: 6 } },
+                  jobHref
+                    ? h('a', { href: jobHref, target: '_blank', rel: 'noopener noreferrer', style: { color: '#543FDE' } }, 'Open job ↗')
+                    : null,
+                  h('a', { onClick: fetchLogs, style: { color: '#543FDE', cursor: 'pointer' } }, logsLoading ? 'Loading…' : '⟳ Refresh logs')
+                ),
+                h('pre', { style: { fontSize: 10.5, background: '#1E1E2E', color: '#E4E4F0', padding: 10, borderRadius: 4, maxHeight: 280, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, lineHeight: 1.4, fontFamily: 'Menlo, Monaco, monospace' } },
+                  logsLoading && !resultLogs ? 'Fetching logs…' : (resultLogs || '(no logs yet — click Refresh)'))
+              )
+            : null
         )
       : null
   );
