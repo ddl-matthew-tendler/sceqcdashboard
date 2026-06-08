@@ -1722,3 +1722,20 @@ body {
   .insight-cards-row { grid-template-columns: 1fr; }
 }
 
+
+/* ── Evidence drawer enhancements ─────────────────────────── */
+@keyframes evidenceSavedFlash {
+  0%   { box-shadow: 0 0 0 2px rgba(40,164,100,0.55); background-color: rgba(40,164,100,0.08); }
+  100% { box-shadow: 0 0 0 2px rgba(40,164,100,0);     background-color: transparent; }
+}
+.evidence-field-flash { animation: evidenceSavedFlash 1.6s ease-out; }
+
+@keyframes evidenceAgentShimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.evidence-agent-loading {
+  background: linear-gradient(90deg, rgba(84,63,222,0.05) 25%, rgba(232,53,167,0.12) 50%, rgba(84,63,222,0.05) 75%);
+  background-size: 200% 100%;
+  animation: evidenceAgentShimmer 2s linear infinite;
+}

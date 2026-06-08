@@ -579,6 +579,15 @@ def run_scripted_check(bundle_id: str, artifact_id: str, body: dict):
     return {"jobId": job_id, "parameters": resolved, "command": final_command, "job": job}
 
 
+@app.post("/api/bundles/{bundle_id}/transition")
+def transition_bundle_stage(bundle_id: str, body: dict):
+    """Advance the bundle to a different stage. Body: {stage: "name"}."""
+    stage = body.get("stage")
+    if not stage:
+        raise HTTPException(status_code=400, detail="stage is required")
+    return gov_patch(f"/bundles/{bundle_id}", json_body={"stage": stage})
+
+
 @app.get("/api/jobs/{job_id}/logs")
 def get_job_logs(job_id: str, logType: str = "stdoutstderr", limit: int = 2000):
     """Proxy to /v4/jobs/{id}/logsWithProblemSuggestions, returning just the

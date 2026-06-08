@@ -5010,17 +5010,31 @@ function renderInlineFragments(s) {
 
 function GuidanceBanner(props) {
   var details = props.details || {};
-  var _o = useState(true); var open = _o[0]; var setOpen = _o[1];
-  // Truncated preview when collapsed
+  var _o = useState(false); var open = _o[0]; var setOpen = _o[1];  // collapsed by default
   var fullText = details.text || '';
-  return h('div', { style: { background: '#EDECFB', border: '1px solid #C9C5F2', borderRadius: 6, padding: '10px 12px', margin: '8px 0', color: '#1820A0' } },
-    h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' },
+  // Pull first sentence for a teaser when collapsed
+  var firstSentence = fullText.split(/\n\n/)[0].split(/(?<=[.!?])\s/)[0].slice(0, 110);
+  if (firstSentence.length < fullText.length) firstSentence += '…';
+  return h('div', { style: { background: '#EDECFB', border: '1px solid #C9C5F2', borderRadius: 6, padding: '8px 12px', margin: '6px 0', color: '#1820A0' } },
+    h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', gap: 12 },
       onClick: function() { setOpen(!open); } },
-      h('span', { style: { fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' } }, '⓵ Guidance'),
-      h('span', { style: { fontSize: 10, color: '#1820A0' } }, open ? 'hide' : 'show')
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 } },
+        h('span', { style: { fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' } }, 'ⓘ Guidance'),
+        !open && firstSentence
+          ? h('span', { style: { fontSize: 11, color: '#65657B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 400 } }, firstSentence.replace(/\*\*/g, '').replace(/`/g, ''))
+          : null
+      ),
+      h('span', { style: { fontSize: 10, color: '#1820A0', whiteSpace: 'nowrap' } }, open ? 'hide' : 'show')
     ),
     open ? h('div', { style: { marginTop: 6, color: '#2E2E38' } }, renderInlineMd(fullText)) : null
   );
+}
+
+// Heuristic: a field is "agent-populated" when its helpText explicitly says so.
+// Matches "Populated automatically", "Populated by the agent", "Auto-populated", etc.
+function isAgentPopulated(art) {
+  var help = ((art || {}).details || {}).helpText || '';
+  return /^\s*(populated|auto-populated|generated|agent-)/i.test(help);
 }
 
 function EvidenceDebugPanel(props) {
@@ -5153,10 +5167,24 @@ function EvidenceField(props) {
     });
   }
 
-  return h('div', { style: { padding: '10px 4px', borderBottom: '1px solid #F5F5F8' } },
-    h('div', { style: { fontSize: 12, fontWeight: 500, color: '#2E2E38', lineHeight: 1.4, marginBottom: 4 } }, label),
+  var agentic = isAgentPopulated(art);
+  var hasValue = currentValue != null && currentValue !== '' && !(Array.isArray(currentValue) && !currentValue.length);
+  var wrapStyle = agentic && hasValue
+    ? {
+        padding: '10px 12px', margin: '4px 0', borderRadius: 6,
+        background: 'linear-gradient(135deg, rgba(84,63,222,0.04) 0%, rgba(232,53,167,0.04) 100%)',
+        border: '1px solid #C9C5F2',
+      }
+    : { padding: '10px 4px', borderBottom: '1px solid #F5F5F8' };
+  return h('div', { style: wrapStyle, className: props.flash ? 'evidence-field-flash' : '' },
+    h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 } },
+      h('span', { style: { fontSize: 12, fontWeight: 500, color: '#2E2E38', lineHeight: 1.4 } }, label),
+      agentic && hasValue
+        ? h('span', { style: { fontSize: 9, fontWeight: 600, color: '#543FDE', background: '#FFFFFF', border: '1px solid #C9C5F2', borderRadius: 10, padding: '1px 7px', letterSpacing: '0.04em', textTransform: 'uppercase' } }, '✨ Agent')
+        : null
+    ),
     details.helpText
-      ? h('div', { style: { fontSize: 10.5, color: '#8F8FA3', marginBottom: 6 } }, details.helpText)
+      ? h('div', { style: { fontSize: 10.5, color: agentic ? '#7A5FE0' : '#8F8FA3', marginBottom: 6, fontStyle: agentic ? 'italic' : 'normal' } }, details.helpText)
       : null,
     inputEl,
     props.submittedAt
@@ -5178,26 +5206,63 @@ function ScriptedCheckRow(props) {
   var jobStatus = ev.jobStatus || (ev.value && ev.value.jobStatus);
   var resolvedParams = ev.parameters || (ev.value && ev.value.parameters) || {};
 
-  // Result panel state: collapsed by default per spec; the AI-populated
-  // evidence below is the primary focus.
+  // Result panel: collapsed when idle, auto-expand while job is running.
   var _r = useState(false);   var resultOpen = _r[0];     var setResultOpen = _r[1];
   var _l = useState('');      var resultLogs = _l[0];     var setResultLogs = _l[1];
   var _ls = useState(null);   var resultStatus = _ls[0];  var setResultStatus = _ls[1];
   var _lf = useState(false);  var logsLoading = _lf[0];   var setLogsLoading = _lf[1];
 
   function fetchLogs() {
-    if (!jobId) return;
+    if (!jobId) return Promise.resolve(null);
     setLogsLoading(true);
-    apiGet('api/jobs/' + jobId + '/logs')
+    return apiGet('api/jobs/' + jobId + '/logs')
       .then(function(data) {
-        setResultLogs(data.text || '(no output yet)');
+        setResultLogs(data.text || '');
         setResultStatus(data.status || null);
+        return data;
       })
-      .catch(function(err) { setResultLogs('Failed to fetch logs: ' + (err.message || err)); })
-      .then(function() { setLogsLoading(false); });
+      .catch(function(err) { setResultLogs('Failed to fetch logs: ' + (err.message || err)); return null; })
+      .then(function(data) { setLogsLoading(false); return data; });
   }
 
-  // When user expands, fetch once. Re-fetch via the Refresh button inside.
+  // Track whether status is terminal (Succeeded / Failed / Stopped).
+  function isTerminalStatus(s) {
+    if (!s) return false;
+    var x = String(s).toLowerCase();
+    return x === 'succeeded' || x === 'failed' || x === 'error' || x === 'stopped' || x === 'finished';
+  }
+
+  // Auto-poll while we have a jobId and status is non-terminal.
+  // Stops itself on terminal status. Calls onJobFinished() to bubble up
+  // a refresh of the parent's evidence map (so the agent-populated
+  // fields below get re-pulled without the user clicking Refresh).
+  useEffect(function() {
+    if (!jobId) return;
+    if (isTerminalStatus(resultStatus || jobStatus)) return; // no need to poll
+    // Auto-open the panel so the user can see what the agent is doing
+    setResultOpen(true);
+    var cancelled = false;
+    var stopAt = Date.now() + 5 * 60 * 1000; // 5-minute safety
+    function tick() {
+      if (cancelled || Date.now() > stopAt) return;
+      fetchLogs().then(function(data) {
+        if (cancelled) return;
+        if (data && isTerminalStatus(data.status)) {
+          // Job finished → tell parent to re-pull evidence so the
+          // agent-written fields appear.
+          if (typeof props.onJobFinished === 'function') {
+            props.onJobFinished({ jobId: jobId, status: data.status });
+          }
+          return;
+        }
+        setTimeout(tick, 3000);
+      });
+    }
+    var initial = setTimeout(tick, 800);
+    return function() { cancelled = true; clearTimeout(initial); };
+  }, [jobId]);
+
+  // Lazy-load when user manually expands a finished job
   useEffect(function() {
     if (resultOpen && jobId && !resultLogs && !logsLoading) fetchLogs();
   }, [resultOpen, jobId]);
@@ -5339,6 +5404,11 @@ function DetailDrawer(props) {
   var _dbg = useState({ lastSaveReq: null, lastSaveResp: null, lastRunReq: null, lastRunResp: null, lastError: null });
   var debugState = _dbg[0]; var setDebugState = _dbg[1];
   function mergeDebug(patch) { setDebugState(function(prev) { return Object.assign({}, prev, patch); }); }
+  // Save feedback state
+  var _sa = useState({});  var savedAt = _sa[0];   var setSavedAt = _sa[1];     // evidenceSetId -> Date
+  var _fl = useState({});  var flashSet = _fl[0];  var setFlashSet = _fl[1];    // artifactId -> true (briefly)
+  // Stage transition state
+  var _tr = useState(false); var transitioning = _tr[0]; var setTransitioning = _tr[1];
 
   function loadEvidence(force) {
     if (!bundle || !bundle.id) return;
@@ -5626,8 +5696,11 @@ function DetailDrawer(props) {
 
   // ── View: Evidence (per-stage submitted artifact values) ───
   function renderEvidence() {
-    if (evidenceLoading) return h('div', { style: { textAlign: 'center', padding: 32, color: '#8F8FA3' } }, h(Spin, { size: 'small' }), h('div', { style: { marginTop: 8, fontSize: 12 } }, 'Loading evidence…'));
-    if (evidenceError) return h(Alert, { type: 'error', showIcon: true, message: 'Failed to load evidence', description: evidenceError });
+    // Only render the full spinner on first load (no data yet). For
+    // refreshes, keep prior content visible so the user can see save
+    // confirmations land in place.
+    if (evidenceLoading && !evidenceData) return h('div', { style: { textAlign: 'center', padding: 32, color: '#8F8FA3' } }, h(Spin, { size: 'small' }), h('div', { style: { marginTop: 8, fontSize: 12 } }, 'Loading evidence…'));
+    if (evidenceError && !evidenceData) return h(Alert, { type: 'error', showIcon: true, message: 'Failed to load evidence', description: evidenceError });
     if (!evidenceData) return null;
     var policy = evidenceData.policy || {};
     var fullBundle = evidenceData.bundle || bundle;
@@ -5654,7 +5727,9 @@ function DetailDrawer(props) {
       return isDone ? 'done' : isActive ? 'active' : 'pending';
     });
 
-    // Stepper
+    // Stepper. Future-stage dots are clickable and trigger the same
+    // "Advance to..." confirm dialog as the header button. Done/active
+    // dots are non-interactive.
     var stepper = h('div', { style: { display: 'flex', alignItems: 'center', padding: '4px 0 16px', borderBottom: '1px solid #E0E0E0', marginBottom: 12, overflowX: 'auto' } },
       stages.map(function(stage, i) {
         var st = stageStates[i];
@@ -5663,11 +5738,26 @@ function DetailDrawer(props) {
         var dotColor = st === 'done' ? '#FFFFFF' : st === 'active' ? '#543FDE' : '#8F8FA3';
         var dotShadow = st === 'active' ? '0 0 0 3px rgba(84,63,222,0.15)' : 'none';
         var labelColor = st === 'pending' ? '#8F8FA3' : '#543FDE';
-        return h('div', { key: i, style: { flex: 1, minWidth: 70, display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' } },
+        var isClickable = st === 'pending' && fullBundle.state !== 'Complete';
+        return h('div', { key: i,
+          style: {
+            flex: 1, minWidth: 70, display: 'flex', flexDirection: 'column', alignItems: 'center',
+            position: 'relative', cursor: isClickable ? 'pointer' : 'default',
+          },
+          onClick: isClickable ? function() { handleTransitionStage(stage.name); } : undefined,
+          title: isClickable ? 'Advance to ' + stage.name : undefined },
           i < stages.length - 1
             ? h('div', { style: { position: 'absolute', top: 11, left: 'calc(50% + 12px)', right: 'calc(-50% + 12px)', height: 2, background: (st === 'done' || st === 'active') ? '#543FDE' : '#E0E0E0' } })
             : null,
-          h('div', { style: { width: 24, height: 24, borderRadius: '50%', border: '2px solid ' + dotBorder, background: dotBg, color: dotColor, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, boxShadow: dotShadow, position: 'relative', zIndex: 1 } },
+          h('div', { style: {
+            width: 24, height: 24, borderRadius: '50%', border: '2px solid ' + dotBorder, background: dotBg, color: dotColor,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700,
+            boxShadow: dotShadow, position: 'relative', zIndex: 1,
+            transition: 'transform 0.15s, box-shadow 0.15s',
+          },
+          onMouseEnter: isClickable ? function(e) { e.currentTarget.style.transform = 'scale(1.15)'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(84,63,222,0.2)'; e.currentTarget.style.borderColor = '#543FDE'; } : undefined,
+          onMouseLeave: isClickable ? function(e) { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = ''; e.currentTarget.style.borderColor = dotBorder; } : undefined,
+          },
             st === 'done' ? '✓' : String(i + 1)
           ),
           h('div', { style: { marginTop: 6, fontSize: 10.5, color: labelColor, fontWeight: st === 'pending' ? 400 : 500, textAlign: 'center', lineHeight: 1.2, maxWidth: 90 } }, stage.name)
@@ -5683,8 +5773,9 @@ function DetailDrawer(props) {
 
     function handleSaveEvidenceSet(evSetId, artifactIds) {
       var content = {};
+      var savedIds = [];
       artifactIds.forEach(function(aid) {
-        if (evidenceDirty[aid]) content[aid] = evidenceForm[aid];
+        if (evidenceDirty[aid]) { content[aid] = evidenceForm[aid]; savedIds.push(aid); }
       });
       if (!Object.keys(content).length) {
         antd.message.info('No changes to save');
@@ -5696,7 +5787,25 @@ function DetailDrawer(props) {
       apiPost('api/bundles/' + bundle.id + '/evidence', req)
         .then(function(resp) {
           mergeDebug({ lastSaveResp: resp });
-          antd.message.success('Evidence saved');
+          antd.notification.success({
+            message: '✓ Saved to Domino',
+            description: savedIds.length + ' field' + (savedIds.length === 1 ? '' : 's') + ' updated',
+            placement: 'topRight', duration: 3,
+          });
+          // Record save time + flash fields
+          setSavedAt(function(prev) { var n = Object.assign({}, prev); n[evSetId] = Date.now(); return n; });
+          setFlashSet(function(prev) {
+            var n = Object.assign({}, prev);
+            savedIds.forEach(function(aid) { n[aid] = true; });
+            return n;
+          });
+          setTimeout(function() {
+            setFlashSet(function(prev) {
+              var n = Object.assign({}, prev);
+              savedIds.forEach(function(aid) { delete n[aid]; });
+              return n;
+            });
+          }, 1700);
           loadEvidence(true);
         })
         .catch(function(err) {
@@ -5706,6 +5815,27 @@ function DetailDrawer(props) {
         .then(function() {
           setEvidenceSaving(function(prev) { var n = Object.assign({}, prev); delete n[evSetId]; return n; });
         });
+    }
+
+    function handleTransitionStage(toStage) {
+      Modal.confirm({
+        title: 'Advance to "' + toStage + '"?',
+        content: h('div', { style: { fontSize: 12, color: '#65657B' } },
+          'This will transition the bundle from "' + (fullBundle.stage || 'current') + '" to "' + toStage + '" in Domino.'),
+        okText: 'Advance Stage', cancelText: 'Cancel',
+        onOk: function() {
+          setTransitioning(true);
+          return apiPost('api/bundles/' + bundle.id + '/transition', { stage: toStage })
+            .then(function() {
+              antd.notification.success({ message: '✓ Stage advanced', description: 'Now on: ' + toStage, placement: 'topRight', duration: 4 });
+              loadEvidence(true);
+            })
+            .catch(function(err) {
+              antd.notification.error({ message: 'Transition failed', description: parseServerError(err.message || String(err)), duration: 8 });
+            })
+            .then(function() { setTransitioning(false); });
+        },
+      });
     }
 
     function handleRunCheck(artId, evSetId, params) {
@@ -5753,6 +5883,14 @@ function DetailDrawer(props) {
               key: art.id, artifact: art, evidence: ev, fullBundle: fullBundle,
               running: !!checkRunning[art.id], canRun: canEdit,
               onRun: function(params) { handleRunCheck(art.id, es.id, params); },
+              onJobFinished: function(info) {
+                antd.notification.success({
+                  message: info.status === 'Succeeded' ? '✨ Agent finished' : 'Agent run finished',
+                  description: 'Status: ' + info.status + ' — reloading evidence',
+                  placement: 'topRight', duration: 4,
+                });
+                loadEvidence(true);
+              },
             });
           }
           var current = evidenceForm[art.id] != null ? evidenceForm[art.id] : ev.value;
@@ -5767,19 +5905,28 @@ function DetailDrawer(props) {
           return h(EvidenceField, {
             key: art.id, artifact: art, value: current,
             submittedAt: ev.submittedAt, submittedBy: ev.submittedBy,
+            flash: !!flashSet[art.id],
             onChange: function(v) { handleFieldChange(art.id, v); },
           });
         });
 
+        var savedTs = savedAt[es.id];
+        var savedAgo = savedTs
+          ? h('span', { style: { fontSize: 11, color: '#28A464', display: 'inline-flex', alignItems: 'center', gap: 4 } },
+              h('span', null, '✓'),
+              h('span', null, 'Saved ' + dayjs(savedTs).fromNow()))
+          : null;
+
         sectionContent.push(h('div', { key: es.id || esIdx, style: { marginBottom: 8 } },
           fieldEls,
           canEdit
-            ? h('div', { style: { display: 'flex', justifyContent: 'flex-end', marginTop: 10, gap: 8 } },
+            ? h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, gap: 8 } },
+                h('div', null, savedAgo),
                 h(Button, {
                   size: 'small', type: 'primary',
                   loading: !!evidenceSaving[es.id], disabled: dirtyCount === 0,
                   onClick: function() { handleSaveEvidenceSet(es.id, artIds); },
-                }, dirtyCount > 0 ? 'Save (' + dirtyCount + ')' : 'Save')
+                }, dirtyCount > 0 ? 'Save (' + dirtyCount + ')' : (savedTs ? 'Saved' : 'Save'))
               )
             : null
         ));
@@ -5799,9 +5946,95 @@ function DetailDrawer(props) {
       }, sectionContent);
     });
 
-    var refreshBtn = h('div', { style: { display: 'flex', justifyContent: 'flex-end', marginBottom: 8 } },
-      h(Button, { size: 'small', onClick: function() { loadEvidence(true); } }, '⟳ Refresh')
+    // Find next stage by name, if any
+    var currentIdx = stages.findIndex(function(s) { return s.name === currentStageName; });
+    var nextStage = currentIdx >= 0 && currentIdx < stages.length - 1 ? stages[currentIdx + 1] : null;
+    var canTransition = !!nextStage && fullBundle.state !== 'Complete';
+
+    var topBar = h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8 } },
+      h('div', { style: { fontSize: 11, color: '#65657B' } },
+        fullBundle.stage
+          ? h(React.Fragment, null,
+              'Current stage: ',
+              h('strong', { style: { color: '#2E2E38' } }, fullBundle.stage)
+            )
+          : null
+      ),
+      h('div', { style: { display: 'flex', gap: 6 } },
+        h(Button, { size: 'small', onClick: function() { loadEvidence(true); } }, '⟳ Refresh'),
+        canTransition
+          ? h(Button, {
+              size: 'small', type: 'primary', loading: transitioning,
+              onClick: function() { handleTransitionStage(nextStage.name); },
+            }, 'Advance to next stage →')
+          : null
+      )
     );
+    // Find the first scripted check in the current active stage, if any —
+    // used by the "Assign to Agent" affordance to one-click-run the first
+    // automated step for this stage.
+    var firstAgentTask = null;  // { artifactId, evidenceSetId, label, defaults, alreadyRanWithJobId }
+    var activeStage = stages.find(function(s) { return s.name === currentStageName; });
+    if (activeStage && fullBundle.state !== 'Complete') {
+      outer: for (var i = 0; i < (activeStage.evidenceSet || []).length; i++) {
+        var es = activeStage.evidenceSet[i];
+        for (var j = 0; j < (es.artifacts || []).length; j++) {
+          var a = es.artifacts[j];
+          if (a.artifactType === 'policyScriptedCheck') {
+            var defaults = {};
+            (a.details.parameters || []).forEach(function(p) {
+              if (p.name && p.default != null) defaults[p.name] = p.default;
+            });
+            var prior = (evidenceMap[a.id] || {});
+            var priorJobId = prior.jobId || (prior.value && prior.value.jobId);
+            firstAgentTask = {
+              artifactId: a.id,
+              evidenceSetId: es.id,
+              label: a.details.label || a.details.name || 'Scripted Check',
+              defaults: defaults,
+              alreadyRanWithJobId: priorJobId || null,
+            };
+            break outer;
+          }
+        }
+      }
+    }
+
+    var agentBar = firstAgentTask
+      ? h('div', { style: {
+          margin: '0 0 12px', padding: '12px 14px', borderRadius: 8,
+          background: 'linear-gradient(135deg, rgba(84,63,222,0.07) 0%, rgba(232,53,167,0.07) 100%)',
+          border: '1px solid #C9C5F2',
+          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+        } },
+          h('div', { style: { flex: 1, minWidth: 0 } },
+            h('div', { style: { fontSize: 12, fontWeight: 600, color: '#2E2E38', display: 'flex', alignItems: 'center', gap: 6 } },
+              h('span', { style: { fontSize: 14 } }, '✨'),
+              firstAgentTask.alreadyRanWithJobId ? 'Re-assign to Agent' : 'Assign to Agent'
+            ),
+            h('div', { style: { fontSize: 11, color: '#65657B', marginTop: 2 } },
+              firstAgentTask.alreadyRanWithJobId
+                ? 'Agent has run once. Click to run again with default parameters.'
+                : 'Hand this stage off — the agent runs ' + firstAgentTask.label + ' and writes results to the evidence fields below.')
+          ),
+          h(Button, {
+            type: 'primary',
+            loading: !!checkRunning[firstAgentTask.artifactId],
+            disabled: !!checkRunning[firstAgentTask.artifactId],
+            onClick: function() {
+              handleRunCheck(firstAgentTask.artifactId, firstAgentTask.evidenceSetId, firstAgentTask.defaults);
+            },
+            style: {
+              background: 'linear-gradient(135deg, #543FDE 0%, #8B5CF6 100%)',
+              border: 'none',
+              boxShadow: '0 1px 4px rgba(84,63,222,0.4)',
+            },
+          }, firstAgentTask.alreadyRanWithJobId ? '✨ Re-run agent' : '✨ Assign to Agent')
+        )
+      : null;
+
+    // Keep the old name for diff compatibility — refresh button is now in topBar
+    var refreshBtn = topBar;
 
     var debugPanel = h(EvidenceDebugPanel, {
       detail: evidenceData,
@@ -5812,7 +6045,7 @@ function DetailDrawer(props) {
       lastError: debugState.lastError,
     });
 
-    return h('div', null, refreshBtn, stepper, sections, debugPanel);
+    return h('div', null, refreshBtn, agentBar, stepper, sections, debugPanel);
   }
 
   // ── Render active view ──────────────────────────────────────
