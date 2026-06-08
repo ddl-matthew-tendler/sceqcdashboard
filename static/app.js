@@ -4992,7 +4992,7 @@ function renderInlineMd(text) {
 
 function renderInlineFragments(s) {
   if (!s) return null;
-  // **bold** and `code` — naive tokenizer
+  // **bold** and `code` - naive tokenizer
   var out = []; var rest = String(s); var k = 0;
   while (rest.length) {
     var bm = rest.match(/^\*\*([^*]+)\*\*/);
@@ -5197,7 +5197,7 @@ function EvidenceField(props) {
   );
 }
 
-// Scripted check row — shows status, params, Run button, and a
+// Scripted check row: shows status, params, Run button, and a
 // collapsible inline log preview (Result panel).
 function ScriptedCheckRow(props) {
   var art = props.artifact;
@@ -5344,7 +5344,7 @@ function ScriptedCheckRow(props) {
           })
         )
       : null,
-    // Result panel — collapsed by default; AI-populated evidence below is
+    // Result panel: collapsed by default; AI-populated evidence below is
     // where the user's attention should be.
     jobId
       ? h('div', { style: { marginTop: 10, paddingTop: 8, borderTop: '1px solid #E0E0E0' } },
@@ -5364,7 +5364,7 @@ function ScriptedCheckRow(props) {
                   h('a', { onClick: fetchLogs, style: { color: '#543FDE', cursor: 'pointer' } }, logsLoading ? 'Loading…' : '⟳ Refresh logs')
                 ),
                 h('pre', { style: { fontSize: 10.5, background: '#1E1E2E', color: '#E4E4F0', padding: 10, borderRadius: 4, maxHeight: 280, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0, lineHeight: 1.4, fontFamily: 'Menlo, Monaco, monospace' } },
-                  logsLoading && !resultLogs ? 'Fetching logs…' : (resultLogs || '(no logs yet — click Refresh)'))
+                  logsLoading && !resultLogs ? 'Fetching logs…' : (resultLogs || '(no logs yet. Click Refresh.)'))
               )
             : null
         )
@@ -5395,7 +5395,7 @@ function DetailDrawer(props) {
   useEffect(function() { setActiveView(initialView || 'attachments'); }, [bundleId, initialView]);
 
   // Evidence view: lazy-load consolidated detail. Hooks MUST run on every
-  // render — declare them before the !bundle early-return.
+  // render. Declare them before the !bundle early-return.
   var _ev = useState(null);    var evidenceData = _ev[0];    var setEvidenceData = _ev[1];
   var _evL = useState(false);  var evidenceLoading = _evL[0]; var setEvidenceLoading = _evL[1];
   var _evE = useState(null);   var evidenceError = _evE[0];   var setEvidenceError = _evE[1];
@@ -5412,7 +5412,7 @@ function DetailDrawer(props) {
   var _fl = useState({});  var flashSet = _fl[0];  var setFlashSet = _fl[1];    // artifactId -> true (briefly)
   // Stage transition state
   var _tr = useState(false); var transitioning = _tr[0]; var setTransitioning = _tr[1];
-  // Drawer width — three presets, persisted to localStorage
+  // Drawer width: three presets, persisted to localStorage
   var _dw = useState(function() {
     try { var v = parseInt(localStorage.getItem('domino:drawerWidth') || '0', 10); if (v === 480 || v === 720 || v === 980) return v; } catch (e) {}
     return 480;
@@ -5741,10 +5741,44 @@ function DetailDrawer(props) {
       return isDone ? 'done' : isActive ? 'active' : 'pending';
     });
 
+    // Compute required-but-empty artifacts in the CURRENT stage. Domino
+    // rejects the transition if any required field is empty, so we
+    // pre-check and gray out the action instead of letting the user
+    // click and see a 400 response.
+    function valueLooksFilled(v) {
+      if (v === null || v === undefined || v === '') return false;
+      if (Array.isArray(v) && v.length === 0) return false;
+      return true;
+    }
+    var currentIdx = stages.findIndex(function(s) { return s.name === currentStageName; });
+    var nextStage = currentIdx >= 0 && currentIdx < stages.length - 1 ? stages[currentIdx + 1] : null;
+    var activeStageForCheck = stages[currentIdx];
+    var missingRequired = [];
+    if (activeStageForCheck) {
+      var collectArts = function(stage) {
+        var out = [];
+        (stage.evidenceSet || []).forEach(function(es) { (es.artifacts || []).forEach(function(a) { out.push(a); }); });
+        (stage.approvals || []).forEach(function(ap) { ((ap.evidence || {}).artifacts || []).forEach(function(a) { out.push(a); }); });
+        return out;
+      };
+      collectArts(activeStageForCheck).forEach(function(a) {
+        if (!a.required) return;
+        if (a.artifactType === 'guidance' || a.artifactType === 'policyScriptedCheck') return;
+        var ev = evidenceMap[a.id] || {};
+        var formVal = evidenceForm[a.id];
+        var current = formVal !== undefined ? formVal : ev.value;
+        if (!valueLooksFilled(current)) {
+          missingRequired.push((a.details || {}).label || (a.details || {}).name || a.id);
+        }
+      });
+    }
+    var hasMissing = missingRequired.length > 0;
+    var canTransition = !!nextStage && fullBundle.state !== 'Complete' && !hasMissing;
+
     // Stepper. Future-stage dots are clickable and trigger the same
     // "Advance to..." confirm dialog as the header button. Done/active
     // dots are non-interactive.
-    var stepper = h('div', { style: { display: 'flex', alignItems: 'center', padding: '4px 0 16px', borderBottom: '1px solid #E0E0E0', marginBottom: 12, overflowX: 'auto' } },
+    var stepper = h('div', { style: { display: 'flex', alignItems: 'flex-start', padding: '4px 0 16px', borderBottom: '1px solid #E0E0E0', marginBottom: 12, overflowX: 'auto' } },
       stages.map(function(stage, i) {
         var st = stageStates[i];
         var dotBg = st === 'done' ? '#543FDE' : '#FFFFFF';
@@ -5761,20 +5795,33 @@ function DetailDrawer(props) {
               : undefined);
         return h('div', { key: i,
           style: {
-            flex: 1, minWidth: 70, display: 'flex', flexDirection: 'column', alignItems: 'center',
-            position: 'relative',
+            // flex: '1 1 0' + minWidth: 0 guarantees equal column widths,
+            // which keeps the absolutely positioned connector lines aligned.
+            flex: '1 1 0', minWidth: 0,
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
+            position: 'relative', padding: '0 4px',
             cursor: isClickable ? 'pointer' : (blockedClickable ? 'not-allowed' : 'default'),
-            opacity: blockedClickable ? 0.65 : 1,
+            opacity: blockedClickable ? 0.55 : 1,
           },
           onClick: isClickable ? function() { handleTransitionStage(stage.name); } : undefined,
           title: tooltipText },
+          // Connector line. Starts at this column's center+13 and runs to
+          // the next column's center-13 (dot radius 12 + 1px breathing room).
           i < stages.length - 1
-            ? h('div', { style: { position: 'absolute', top: 11, left: 'calc(50% + 12px)', right: 'calc(-50% + 12px)', height: 2, background: (st === 'done' || st === 'active') ? '#543FDE' : '#E0E0E0' } })
+            ? h('div', { style: {
+                position: 'absolute',
+                top: 11, height: 2,
+                left: 'calc(50% + 13px)', right: 'calc(-50% + 13px)',
+                background: (st === 'done' || st === 'active') ? '#543FDE' : '#E0E0E0',
+                zIndex: 0,
+              } })
             : null,
           h('div', { style: {
-            width: 24, height: 24, borderRadius: '50%', border: '2px solid ' + dotBorder, background: dotBg, color: dotColor,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700,
-            boxShadow: dotShadow, position: 'relative', zIndex: 1,
+            width: 24, height: 24, borderRadius: '50%', boxSizing: 'border-box',
+            border: '2px solid ' + dotBorder, background: dotBg, color: dotColor,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 11, fontWeight: 700, lineHeight: 1,
+            boxShadow: dotShadow, position: 'relative', zIndex: 1, flexShrink: 0,
             transition: 'transform 0.15s, box-shadow 0.15s',
           },
           onMouseEnter: isClickable ? function(e) { e.currentTarget.style.transform = 'scale(1.15)'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(84,63,222,0.2)'; e.currentTarget.style.borderColor = '#543FDE'; } : undefined,
@@ -5782,7 +5829,7 @@ function DetailDrawer(props) {
           },
             st === 'done' ? '✓' : String(i + 1)
           ),
-          h('div', { style: { marginTop: 6, fontSize: 10.5, color: labelColor, fontWeight: st === 'pending' ? 400 : 500, textAlign: 'center', lineHeight: 1.2, maxWidth: 90 } }, stage.name)
+          h('div', { style: { marginTop: 6, fontSize: 10.5, color: labelColor, fontWeight: st === 'pending' ? 400 : 500, textAlign: 'center', lineHeight: 1.2 } }, stage.name)
         );
       })
     );
@@ -5890,7 +5937,7 @@ function DetailDrawer(props) {
       // Walk each evidenceSet separately so we can render a Save button per set.
       var sectionContent = [];
       (stage.evidenceSet || []).forEach(function(es, esIdx) {
-        var arts = (es.artifacts || []);  // include guidance — rendered as banners
+        var arts = (es.artifacts || []);  // include guidance (rendered as banners)
         if (!arts.length) return;
         var savableIds = arts.filter(function(a) { return a.artifactType === 'input'; }).map(function(a) { return a.id; });
         var dirtyCount = savableIds.filter(function(aid) { return evidenceDirty[aid]; }).length;
@@ -5908,7 +5955,7 @@ function DetailDrawer(props) {
               onJobFinished: function(info) {
                 antd.notification.success({
                   message: info.status === 'Succeeded' ? '✨ Agent finished' : 'Agent run finished',
-                  description: 'Status: ' + info.status + ' — reloading evidence',
+                  description: 'Status: ' + info.status + '. Reloading evidence.',
                   placement: 'topRight', duration: 4,
                 });
                 loadEvidence(true);
@@ -5971,41 +6018,7 @@ function DetailDrawer(props) {
       }, sectionContent);
     });
 
-    // Find next stage by name, if any
-    var currentIdx = stages.findIndex(function(s) { return s.name === currentStageName; });
-    var nextStage = currentIdx >= 0 && currentIdx < stages.length - 1 ? stages[currentIdx + 1] : null;
-
-    // Compute required-but-empty artifacts in the CURRENT stage. Domino
-    // refuses the transition if any required field is empty, so we
-    // pre-check and block the action with a tooltip instead of letting
-    // the user click → confirm → see a 400.
-    function valueLooksFilled(v) {
-      if (v === null || v === undefined || v === '') return false;
-      if (Array.isArray(v) && v.length === 0) return false;
-      return true;
-    }
-    var activeStageForCheck = stages[currentIdx];
-    var missingRequired = [];
-    if (activeStageForCheck) {
-      var collectArts = function(stage) {
-        var out = [];
-        (stage.evidenceSet || []).forEach(function(es) { (es.artifacts || []).forEach(function(a) { out.push(a); }); });
-        (stage.approvals || []).forEach(function(ap) { ((ap.evidence || {}).artifacts || []).forEach(function(a) { out.push(a); }); });
-        return out;
-      };
-      collectArts(activeStageForCheck).forEach(function(a) {
-        if (!a.required) return;
-        if (a.artifactType === 'guidance' || a.artifactType === 'policyScriptedCheck') return;
-        var ev = evidenceMap[a.id] || {};
-        var formVal = evidenceForm[a.id];
-        var current = formVal !== undefined ? formVal : ev.value;
-        if (!valueLooksFilled(current)) {
-          missingRequired.push((a.details || {}).label || (a.details || {}).name || a.id);
-        }
-      });
-    }
-    var hasMissing = missingRequired.length > 0;
-    var canTransition = !!nextStage && fullBundle.state !== 'Complete' && !hasMissing;
+    // (hasMissing + missingRequired + nextStage computed above the stepper)
 
     var topBar = h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8 } },
       h('div', { style: { fontSize: 11, color: '#65657B' } },
@@ -6022,29 +6035,29 @@ function DetailDrawer(props) {
           ? h(Tooltip, {
               title: hasMissing
                 ? h('div', null,
-                    h('div', { style: { fontWeight: 600, marginBottom: 4 } }, 'Required to advance:'),
+                    h('div', { style: { fontWeight: 600, marginBottom: 4 } }, 'Required fields not yet completed:'),
                     h('ul', { style: { margin: 0, paddingLeft: 16 } },
                       missingRequired.slice(0, 8).map(function(m, i) { return h('li', { key: i }, m); }),
-                      missingRequired.length > 8 ? h('li', null, '…and ' + (missingRequired.length - 8) + ' more') : null
+                      missingRequired.length > 8 ? h('li', null, 'and ' + (missingRequired.length - 8) + ' more') : null
                     )
                   )
                 : 'Advance the bundle to ' + nextStage.name,
               placement: 'bottomRight', overlayStyle: { maxWidth: 320 },
             },
-              h(Button, {
-                size: 'small', type: 'primary', loading: transitioning,
-                disabled: hasMissing,
-                onClick: function() { handleTransitionStage(nextStage.name); },
-              },
-                hasMissing
-                  ? '🔒 ' + missingRequired.length + ' required'
-                  : 'Advance to next stage →'
+              // Wrap the disabled button so the tooltip still fires on hover
+              // (disabled buttons swallow pointer events in some browsers).
+              h('span', { style: { display: 'inline-block' } },
+                h(Button, {
+                  size: 'small', type: 'primary', loading: transitioning,
+                  disabled: hasMissing,
+                  onClick: function() { handleTransitionStage(nextStage.name); },
+                }, 'Advance to next stage')
               )
             )
           : null
       )
     );
-    // Find the first scripted check in the current active stage, if any —
+    // Find the first scripted check in the current active stage, if any.
     // used by the "Assign to Agent" affordance to one-click-run the first
     // automated step for this stage.
     var firstAgentTask = null;  // { artifactId, evidenceSetId, label, defaults, alreadyRanWithJobId }
@@ -6089,7 +6102,7 @@ function DetailDrawer(props) {
             h('div', { style: { fontSize: 11, color: '#65657B', marginTop: 2 } },
               firstAgentTask.alreadyRanWithJobId
                 ? 'Agent has run once. Click to run again with default parameters.'
-                : 'Hand this stage off — the agent runs ' + firstAgentTask.label + ' and writes results to the evidence fields below.')
+                : 'Hand this stage off. The agent runs ' + firstAgentTask.label + ' and writes results to the evidence fields below.')
           ),
           h(Button, {
             type: 'primary',
@@ -6107,7 +6120,7 @@ function DetailDrawer(props) {
         )
       : null;
 
-    // Keep the old name for diff compatibility — refresh button is now in topBar
+    // Keep the old name for diff compatibility (refresh button is now in topBar)
     var refreshBtn = topBar;
 
     var debugPanel = h(EvidenceDebugPanel, {
