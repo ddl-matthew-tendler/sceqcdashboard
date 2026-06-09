@@ -2834,6 +2834,7 @@ function StagePopoverContent(props) {
 function StagePipeline(props) {
   var bundle = props.bundle;
   var onFindingsClick = props.onFindingsClick;
+  var onSelectBundle = props.onSelectBundle;
   var stageNames = getBundleStageNames(bundle);
   if (stageNames.length === 0) return h('span', { style: { color: '#8F8FA3', fontSize: 12 } }, 'No stages');
   var currentIdx = deriveBundleStageIndex(bundle);
@@ -2863,6 +2864,13 @@ function StagePipeline(props) {
           onClose: function() {},
         });
 
+        // Clicking a dot opens the drawer on the Evidence tab. Hover still
+        // shows the popover for at-a-glance details.
+        var openEvidence = function(e) {
+          e.stopPropagation();
+          if (onSelectBundle) onSelectBundle(bundle, 'evidence');
+        };
+
         return h('div', { key: j, className: 'stage-pip-item' },
           h(Popover, {
             content: popContent,
@@ -2873,7 +2881,12 @@ function StagePipeline(props) {
             overlayClassName: 'stage-popover-overlay',
             arrow: { pointAtCenter: true },
           },
-            h('div', { className: 'stage-pip-dot ' + dotState })
+            h('div', {
+              className: 'stage-pip-dot ' + dotState,
+              onClick: openEvidence,
+              style: { cursor: 'pointer' },
+              title: 'Open Evidence for ' + name,
+            })
           ),
           !isLast
             ? h('div', { className: 'stage-pip-line ' + lineState })
@@ -4305,7 +4318,11 @@ function QCTrackerPage(props) {
       render: function(t) { return t ? h(Tag, { style: { fontSize: 10 } }, t) : '\u2013'; } },
     { title: 'Progress', key: 'progress', width: 130,
       sorter: function(a, b) { return getBundleProgress(a) - getBundleProgress(b); },
-      render: function(_, record) { return h(StagePipeline, { bundle: record, onFindingsClick: function(b) { setFindingsDrawerBundle(b); setFindingsDrawerOpen(true); } }); } },
+      render: function(_, record) { return h(StagePipeline, {
+        bundle: record,
+        onFindingsClick: function(b) { setFindingsDrawerBundle(b); setFindingsDrawerOpen(true); },
+        onSelectBundle: onSelectBundle,
+      }); } },
     { title: 'Current Stage', dataIndex: 'stage', key: 'stage', width: 130, ellipsis: true,
       filters: allStageNames.map(function(s) { return { text: s, value: s }; }),
       filterSearch: true,
