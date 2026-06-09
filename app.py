@@ -600,9 +600,11 @@ def get_job_logs(job_id: str, logType: str = "stdoutstderr", limit: int = 2000):
         # Job-not-found / not-ready is normal early on; surface gracefully
         return {"jobId": job_id, "status": "unavailable", "text": "", "error": str(e.detail)[:300]}
 
-    # Domino returns {logContent: [{log, timestamp, ...}], ...}
+    # Domino returns {logset: {logContent: [{log, logType, timestamp, size}, ...], isComplete, pagination}, problemSuggestion}
+    # NOT {logContent: [...]} at the top level (that was wrong in earlier versions).
+    logset = logs_resp.get("logset") or {}
     lines = []
-    for item in (logs_resp.get("logContent") or []):
+    for item in (logset.get("logContent") or []):
         ln = item.get("log") if isinstance(item, dict) else str(item)
         if ln is not None:
             lines.append(ln)

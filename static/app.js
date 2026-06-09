@@ -6091,7 +6091,7 @@ function DetailDrawer(props) {
                 h(Button, {
                   size: 'small', type: 'primary',
                   loading: !!evidenceSaving[es.id], disabled: dirtyCount === 0,
-                  onClick: function() { handleSaveEvidenceSet(es.id, artIds); },
+                  onClick: function() { handleSaveEvidenceSet(es.id, savableIds); },
                 }, dirtyCount > 0 ? 'Save (' + dirtyCount + ')' : (savedTs ? 'Saved' : 'Save'))
               )
             : null
