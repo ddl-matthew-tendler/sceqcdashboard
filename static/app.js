@@ -12770,17 +12770,48 @@ function App() {
     }, []);
   }, [bundles]);
 
-  // Derive tag options from projectTagsMap (live data)
+  // Build a stable string key for a Domino tag that incorporates its
+  // taxonomy namespace. Tags belonging to a namespace become
+  // "Namespace::Name" so filtering against "Therapeutic_Modality::Biologic"
+  // doesn't collide with an ungrouped tag also named "Biologic".
+  function tagFilterKey(t) {
+    var ns = t && t.namespaceLabel;
+    var name = (t && t.name) || (t && (t.key + ': ' + t.value)) || '';
+    return ns ? (ns + '::' + name) : name;
+  }
+
+  // Derive tag options from projectTagsMap (live data). Returns AntD
+  // grouped options when tags have a namespaceLabel, falling back to a
+  // flat "(uncategorized)" group for tags with no namespace.
   var scopeTagOptions = useMemo(function() {
-    var tags = {};
+    var byNamespace = {};            // namespaceLabel -> {tagKey: {label, value}}
+    var UNCATEGORIZED = '(uncategorized)';
     bundles.forEach(function(b) {
       var pTags = projectTagsMap[b.projectId] || [];
       pTags.forEach(function(t) {
-        var label = t.name || (t.key + ': ' + t.value);
-        tags[label] = true;
+        var ns = (t && t.namespaceLabel) || UNCATEGORIZED;
+        var name = (t && t.name) || (t && (t.key + ': ' + t.value)) || '';
+        if (!name) return;
+        if (!byNamespace[ns]) byNamespace[ns] = {};
+        var key = tagFilterKey(t);
+        if (!byNamespace[ns][key]) {
+          byNamespace[ns][key] = {
+            label: name,                  // display the leaf name; group provides context
+            value: key,                   // namespaced filter key
+            title: t && t.description || undefined,
+          };
+        }
       });
     });
-    return Object.keys(tags).sort().map(function(t) { return { label: t, value: t }; });
+    var namespaces = Object.keys(byNamespace).sort(function(a, b) {
+      if (a === UNCATEGORIZED) return 1;
+      if (b === UNCATEGORIZED) return -1;
+      return a.localeCompare(b);
+    });
+    return namespaces.map(function(ns) {
+      var opts = Object.keys(byNamespace[ns]).sort().map(function(k) { return byNamespace[ns][k]; });
+      return { label: ns.replace(/_/g, ' '), title: ns, options: opts };
+    });
   }, [bundles, projectTagsMap]);
 
   // Derive user options for "My Work" persona selector from live project members
@@ -12809,11 +12840,12 @@ function App() {
     return bundles.filter(function(b) {
       // Project filter
       if (scopeProjects.length > 0 && scopeProjects.indexOf(b.projectName) < 0) return false;
-      // Tag filter
+      // Tag filter. scopeTags carries the namespaced "Namespace::Name"
+      // keys produced by tagFilterKey, so match against the same shape.
       if (scopeTags.length > 0) {
         var pTags = projectTagsMap[b.projectId] || [];
-        var tagLabels = pTags.map(function(t) { return t.name || (t.key + ': ' + t.value); });
-        var matchesTag = scopeTags.some(function(ft) { return tagLabels.indexOf(ft) >= 0; });
+        var tagKeys = pTags.map(tagFilterKey);
+        var matchesTag = scopeTags.some(function(ft) { return tagKeys.indexOf(ft) >= 0; });
         if (!matchesTag) return false;
       }
       // State filter
