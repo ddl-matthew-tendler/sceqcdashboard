@@ -6103,12 +6103,17 @@ function DetailDrawer(props) {
       }
 
       return h(EvidenceStageSection, {
-        key: idx,
+        // Include the current stage name in the key so that when the
+        // bundle transitions to a new stage, every section remounts and
+        // picks up its new defaultOpen (only the new active stage opens).
+        // Normal refreshes do not change currentStageName, so user toggle
+        // state is preserved between saves.
+        key: currentStageName + ':' + idx,
         stageName: stage.name,
         statusLabel: statusLabel,
         statusColor: statusColor,
         assignee: assignee,
-        defaultOpen: st === 'active' || st === 'done',
+        defaultOpen: st === 'active',
       }, sectionContent);
     });
 
