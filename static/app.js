@@ -5115,9 +5115,14 @@ function EvidenceStageSection(props) {
       h('div', { style: { display: 'flex', alignItems: 'center', gap: 10 } },
         h('span', { style: { fontSize: 13, fontWeight: isPending ? 500 : 600, color: titleColor } }, props.stageName),
         h('span', { style: { fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 10, textTransform: 'uppercase', letterSpacing: '0.04em', background: statusColor.bg, color: statusColor.fg } }, props.statusLabel),
-        props.assignee
-          ? h('span', { style: { fontSize: 11, color: isPending ? '#B0B0C0' : '#65657B' } }, '· ' + props.assignee)
-          : null
+        props.assigneeNode
+          ? h('span', { style: { display: 'inline-flex', alignItems: 'center' }, onClick: function(e) { e.stopPropagation(); } },
+              h('span', { style: { fontSize: 11, color: isPending ? '#B0B0C0' : '#65657B', marginRight: 6 } }, '·'),
+              props.assigneeNode
+            )
+          : (props.assignee
+              ? h('span', { style: { fontSize: 11, color: isPending ? '#B0B0C0' : '#65657B' } }, '· ' + props.assignee)
+              : null)
       ),
       h('span', { style: { color: isPending ? '#C5C5D0' : '#8F8FA3', fontSize: 11, transition: 'transform 0.2s', display: 'inline-block', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' } }, '▼')
     ),
@@ -5282,25 +5287,35 @@ function ScriptedCheckRow(props) {
       .then(function(data) { setManualFetching(false); return data; });
   }
 
-  // Auto-poll while we have a jobId and status is non-terminal. Sets the
-  // run-start timestamp so the running indicator can show elapsed time.
+  // Auto-poll while we have a jobId and status is non-terminal.
+  //
+  // Important: only fire onJobFinished when we actually witness the
+  // transition non-terminal -> terminal during this poll session. If the
+  // first poll comes back terminal immediately (because the job already
+  // finished long before the page loaded), do NOT fire the "agent
+  // finished" toast - the user has already seen this result.
   useEffect(function() {
     if (!jobId) return;
     if (isTerminalStatus(liveJobStatus)) return;
-    setResultOpen(true);
     if (!runStartedAt) setRunStartedAt(Date.now());
     var cancelled = false;
     var stopAt = Date.now() + 5 * 60 * 1000;
+    var sawNonTerminal = false;
     function tick() {
       if (cancelled || Date.now() > stopAt) return;
       pollLogsOnce().then(function(data) {
         if (cancelled) return;
         if (data && isTerminalStatus(data.status)) {
-          if (typeof props.onJobFinished === 'function') {
+          // Only celebrate if we saw the job in a non-terminal state at
+          // least once during this session. Otherwise this is a stale
+          // jobStatus from persisted evidence and the job actually
+          // finished before we mounted.
+          if (sawNonTerminal && typeof props.onJobFinished === 'function') {
             props.onJobFinished({ jobId: jobId, status: data.status });
           }
           return;
         }
+        sawNonTerminal = true;
         setTimeout(tick, 3000);
       });
     }
@@ -5372,7 +5387,7 @@ function ScriptedCheckRow(props) {
           loading: props.running,
           disabled: props.running || !props.canRun,
           onClick: function() { props.onRun(paramValues); },
-        }, 'Run Script'),
+        }, '✨ Run Agent'),
         jobHref
           ? h('a', { href: jobHref, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 10.5, color: '#543FDE' } }, 'Job ' + String(jobId).slice(-8) + ' ↗')
           : null,
@@ -5463,13 +5478,13 @@ function DetailDrawer(props) {
   var initialView = props.initialView || null;
   var debugMode = props.debugMode || false;
 
-  var _view = useState('stage-timeline');
+  var _view = useState('evidence');
   var activeView = _view[0];
   var setActiveView = _view[1];
 
   // Reset to initialView (or Attachments) when a new bundle is selected
   var bundleId = bundle ? (bundle.id || bundle.name) : null;
-  useEffect(function() { setActiveView(initialView || 'stage-timeline'); }, [bundleId, initialView]);
+  useEffect(function() { setActiveView(initialView || 'evidence'); }, [bundleId, initialView]);
 
   // Evidence view: lazy-load consolidated detail. Hooks MUST run on every
   // render. Declare them before the !bundle early-return.
@@ -5579,8 +5594,9 @@ function DetailDrawer(props) {
   var attachCount = bundle._attachments ? bundle._attachments.length : 0;
   var staleCount = countStaleAttachments(bundle);
 
+  // Stage Timeline tab was consolidated into Evidence (assignee select
+  // now lives on each stage header in the Evidence tab).
   var viewOptions = [
-    { value: 'stage-timeline', label: 'Stage Timeline' },
     { value: 'evidence', label: 'Evidence' },
     { value: 'attachments', label: 'Attachments' + (attachCount > 0 ? ' (' + attachCount + ')' : '') + (staleCount > 0 ? ' \u26A0' : '') },
     { value: 'overview', label: B + ' Overview' },
@@ -6037,12 +6053,64 @@ function DetailDrawer(props) {
         });
     }
 
+    // Build a Select-style assignee control for a stage. Pulled out of
+    // the old Stage Timeline tab so we can render it inside each stage's
+    // section header in the Evidence tab. Falls back to a static label
+    // if the API_GAPS gate marks stage reassignment as unavailable.
+    function buildAssigneeControl(stageDataFromBundle, currentName) {
+      var stageId = stageDataFromBundle && (stageDataFromBundle.stageId || (stageDataFromBundle.stage && stageDataFromBundle.stage.id));
+      var assignee = stageDataFromBundle && stageDataFromBundle.assignee;
+      var assigneeName = assignee ? (assignee.name || assignee.userName) : null;
+      var members = projectMembersCache[fullBundle.projectId] || [];
+      var memberOptions = members.map(function(m) {
+        return { label: (m.firstName || '') + ' ' + (m.lastName || '') + ' (' + m.userName + ')', value: m.id };
+      });
+      var resolvedAssigneeId = assignee ? assignee.id : undefined;
+      if (resolvedAssigneeId && !memberOptions.some(function(o) { return o.value === resolvedAssigneeId; })) {
+        var userNameMatch = assigneeName ? members.find(function(m) { return m.userName === assigneeName; }) : null;
+        if (userNameMatch) {
+          resolvedAssigneeId = userNameMatch.id;
+        } else {
+          memberOptions.unshift({ label: assigneeName || ('Unknown (' + (resolvedAssigneeId || '?') + ')'), value: resolvedAssigneeId });
+        }
+      }
+      var gapInfo = (typeof API_GAPS !== 'undefined' && API_GAPS && API_GAPS.stageReassign) || { ready: true };
+      if (!gapInfo.ready) {
+        return assigneeName
+          ? h('span', { style: { fontSize: 11, color: '#65657B', fontWeight: 500 } }, assigneeName)
+          : h('span', { style: { fontSize: 11, color: '#B0B0C0', fontStyle: 'italic' } }, 'Unassigned');
+      }
+      return h(Select, {
+        size: 'small', placeholder: 'Assign...', value: resolvedAssigneeId || undefined,
+        style: { minWidth: 150, fontSize: 11 }, showSearch: true, allowClear: true, options: memberOptions,
+        onChange: function(userId) {
+          if (!stageId) { antd.message.error('Missing stage ID'); return; }
+          var memberObj = userId ? members.find(function(m) { return m.id === userId; }) : null;
+          apiPatch('api/bundles/' + bundle.id + '/stages/' + stageId, { assignee: userId ? { id: userId, userName: memberObj ? memberObj.userName : undefined, name: memberObj ? memberObj.userName : undefined } : null })
+            .then(function(resp) {
+              if (resp && resp.verified === false) {
+                antd.notification.warning({ message: 'Assignment may not have saved', description: 'Domino read-back did not match. Refresh to see current state.', duration: 8 });
+              } else {
+                antd.message.success('Stage reassigned');
+              }
+              loadEvidence(true);
+            })
+            .catch(function(err) {
+              antd.notification.error({ message: 'Reassignment failed', description: parseServerError(err.message || String(err)), duration: 8 });
+            });
+        },
+        optionFilterProp: 'label',
+      });
+    }
+
     // Per-stage sections
     var sections = stages.map(function(stage, idx) {
       var st = stageStates[idx];
       var statusLabel = st === 'done' ? 'Complete' : st === 'active' ? 'Active' : 'Pending';
       var statusColor = st === 'done' ? { bg: '#D1FAE5', fg: '#065F46' } : st === 'active' ? { bg: '#DBEAFE', fg: '#1E40AF' } : { bg: '#F3F4F6', fg: '#6B7280' };
       var assignee = stageAssignees[stage.name];
+      var bundleStageData = (fullBundle.stages || []).find(function(s) { return s.stage && s.stage.name === stage.name; });
+      var assigneeNode = buildAssigneeControl(bundleStageData, stage.name);
       var canEdit = st === 'active' || st === 'done';
 
       // Walk each evidenceSet separately so we can render a Save button per set.
@@ -6053,26 +6121,13 @@ function DetailDrawer(props) {
         var savableIds = arts.filter(function(a) { return a.artifactType === 'input'; }).map(function(a) { return a.id; });
         var dirtyCount = savableIds.filter(function(aid) { return evidenceDirty[aid]; }).length;
 
-        var fieldEls = arts.map(function(art) {
+        // Walk artifacts sequentially. Inputs that immediately follow a
+        // policyScriptedCheck AND are flagged agent-populated get grouped
+        // into a visually-indented "Agent outputs" container so it's clear
+        // they belong to the check above. The grouping stops as soon as a
+        // non-agent input, guidance, or another scripted check appears.
+        function renderInputEl(art) {
           var ev = evidenceMap[art.id] || {};
-          if (art.artifactType === 'guidance') {
-            return h(GuidanceBanner, { key: art.id, details: art.details || {} });
-          }
-          if (art.artifactType === 'policyScriptedCheck') {
-            return h(ScriptedCheckRow, {
-              key: art.id, artifact: art, evidence: ev, fullBundle: fullBundle,
-              running: !!checkRunning[art.id], canRun: canEdit,
-              onRun: function(params) { handleRunCheck(art.id, es.id, params); },
-              onJobFinished: function(info) {
-                antd.notification.success({
-                  message: info.status === 'Succeeded' ? '✨ Agent finished' : 'Agent run finished',
-                  description: 'Status: ' + info.status + '. Reloading evidence.',
-                  placement: 'topRight', duration: 4,
-                });
-                loadEvidence(true);
-              },
-            });
-          }
           var current = evidenceForm[art.id] != null ? evidenceForm[art.id] : ev.value;
           if (!canEdit) {
             return h('div', { key: art.id, style: { padding: '10px 4px', borderBottom: '1px solid #F5F5F8' } },
@@ -6091,7 +6146,69 @@ function DetailDrawer(props) {
             flash: !!flashSet[art.id],
             onChange: function(v) { handleFieldChange(art.id, v); },
           });
+        }
+
+        var fieldEls = [];
+        var pendingAgentOutputs = [];   // collect EvidenceField elements for current cluster
+        var currentCheckLabel = null;    // label of the scripted check whose outputs we are collecting
+
+        function flushAgentOutputs() {
+          if (!pendingAgentOutputs.length) return;
+          var label = currentCheckLabel || 'Agent';
+          fieldEls.push(h('div', {
+            key: 'agentout-' + fieldEls.length,
+            style: {
+              marginLeft: 18,
+              paddingLeft: 14,
+              borderLeft: '3px solid #C9C5F2',
+              marginBottom: 8,
+              background: 'linear-gradient(90deg, rgba(84,63,222,0.025), transparent 90%)',
+              borderRadius: '0 4px 4px 0',
+            },
+          },
+            h('div', { style: { fontSize: 10, fontWeight: 600, color: '#7A5FE0', textTransform: 'uppercase', letterSpacing: '0.05em', padding: '6px 0 2px' } },
+              '↳ Outputs from ' + label
+            ),
+            pendingAgentOutputs
+          ));
+          pendingAgentOutputs = [];
+          currentCheckLabel = null;
+        }
+
+        arts.forEach(function(art) {
+          var ev = evidenceMap[art.id] || {};
+          if (art.artifactType === 'guidance') {
+            flushAgentOutputs();
+            fieldEls.push(h(GuidanceBanner, { key: art.id, details: art.details || {} }));
+            return;
+          }
+          if (art.artifactType === 'policyScriptedCheck') {
+            flushAgentOutputs();
+            fieldEls.push(h(ScriptedCheckRow, {
+              key: art.id, artifact: art, evidence: ev, fullBundle: fullBundle,
+              running: !!checkRunning[art.id], canRun: canEdit,
+              onRun: function(params) { handleRunCheck(art.id, es.id, params); },
+              onJobFinished: function(info) {
+                antd.notification.success({
+                  message: info.status === 'Succeeded' ? '✨ Agent finished' : 'Agent run finished',
+                  description: 'Status: ' + info.status + '. Reloading evidence.',
+                  placement: 'topRight', duration: 4,
+                });
+                loadEvidence(true);
+              },
+            }));
+            currentCheckLabel = (art.details && (art.details.label || art.details.name)) || 'Agent';
+            return;
+          }
+          // input artifact
+          if (currentCheckLabel && isAgentPopulated(art)) {
+            pendingAgentOutputs.push(renderInputEl(art));
+          } else {
+            flushAgentOutputs();
+            fieldEls.push(renderInputEl(art));
+          }
         });
+        flushAgentOutputs();
 
         var savedTs = savedAt[es.id];
         var savedAgo = savedTs
@@ -6130,6 +6247,7 @@ function DetailDrawer(props) {
         statusLabel: statusLabel,
         statusColor: statusColor,
         assignee: assignee,
+        assigneeNode: assigneeNode,
         defaultOpen: st === 'active',
       }, sectionContent);
     });
@@ -6173,68 +6291,11 @@ function DetailDrawer(props) {
           : null
       )
     );
-    // Find the first scripted check in the current active stage, if any.
-    // used by the "Assign to Agent" affordance to one-click-run the first
-    // automated step for this stage.
-    var firstAgentTask = null;  // { artifactId, evidenceSetId, label, defaults, alreadyRanWithJobId }
-    var activeStage = stages.find(function(s) { return s.name === currentStageName; });
-    if (activeStage && fullBundle.state !== 'Complete') {
-      outer: for (var i = 0; i < (activeStage.evidenceSet || []).length; i++) {
-        var es = activeStage.evidenceSet[i];
-        for (var j = 0; j < (es.artifacts || []).length; j++) {
-          var a = es.artifacts[j];
-          if (a.artifactType === 'policyScriptedCheck') {
-            var defaults = {};
-            (a.details.parameters || []).forEach(function(p) {
-              if (p.name && p.default != null) defaults[p.name] = p.default;
-            });
-            var prior = (evidenceMap[a.id] || {});
-            var priorJobId = prior.jobId || (prior.value && prior.value.jobId);
-            firstAgentTask = {
-              artifactId: a.id,
-              evidenceSetId: es.id,
-              label: a.details.label || a.details.name || 'Scripted Check',
-              defaults: defaults,
-              alreadyRanWithJobId: priorJobId || null,
-            };
-            break outer;
-          }
-        }
-      }
-    }
-
-    var agentBar = firstAgentTask
-      ? h('div', { style: {
-          margin: '0 0 12px', padding: '12px 14px', borderRadius: 8,
-          background: 'linear-gradient(135deg, rgba(84,63,222,0.07) 0%, rgba(232,53,167,0.07) 100%)',
-          border: '1px solid #C9C5F2',
-          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-        } },
-          h('div', { style: { flex: 1, minWidth: 0 } },
-            h('div', { style: { fontSize: 12, fontWeight: 600, color: '#2E2E38', display: 'flex', alignItems: 'center', gap: 6 } },
-              h('span', { style: { fontSize: 14 } }, '✨'),
-              firstAgentTask.alreadyRanWithJobId ? 'Re-assign to Agent' : 'Assign to Agent'
-            ),
-            h('div', { style: { fontSize: 11, color: '#65657B', marginTop: 2 } },
-              firstAgentTask.alreadyRanWithJobId
-                ? 'Agent has run once. Click to run again with default parameters.'
-                : 'Hand this stage off. The agent runs ' + firstAgentTask.label + ' and writes results to the evidence fields below.')
-          ),
-          h(Button, {
-            type: 'primary',
-            loading: !!checkRunning[firstAgentTask.artifactId],
-            disabled: !!checkRunning[firstAgentTask.artifactId],
-            onClick: function() {
-              handleRunCheck(firstAgentTask.artifactId, firstAgentTask.evidenceSetId, firstAgentTask.defaults);
-            },
-            style: {
-              background: 'linear-gradient(135deg, #543FDE 0%, #8B5CF6 100%)',
-              border: 'none',
-              boxShadow: '0 1px 4px rgba(84,63,222,0.4)',
-            },
-          }, firstAgentTask.alreadyRanWithJobId ? '✨ Re-run agent' : '✨ Assign to Agent')
-        )
-      : null;
+    // (Per-scripted-check Run Agent buttons live on each row. The earlier
+    // global "Assign to Agent" banner above the stepper was misleading
+    // because it only ran the FIRST scripted check in the stage even when
+    // the stage had multiple agents. Removed in favour of the row-level
+    // buttons which are unambiguously scoped.)
 
     // Keep the old name for diff compatibility (refresh button is now in topBar)
     var refreshBtn = topBar;
@@ -6248,20 +6309,20 @@ function DetailDrawer(props) {
       lastError: debugState.lastError,
     });
 
-    return h('div', null, refreshBtn, agentBar, stepper, sections, debugPanel);
+    return h('div', null, refreshBtn, stepper, sections, debugPanel);
   }
 
   // ── Render active view ──────────────────────────────────────
   function renderActiveView() {
     switch (activeView) {
-      case 'stage-timeline': return renderStageTimeline();
+      case 'stage-timeline': return renderEvidence();  // legacy alias; merged into Evidence
       case 'evidence': return renderEvidence();
       case 'overview': return renderOverview();
       case 'findings': return renderFindings();
       case 'approvals': return renderApprovals();
       case 'gates': return renderGates();
       case 'attachments': return renderAttachments();
-      default: return renderStageTimeline();
+      default: return renderEvidence();
     }
   }
 
