@@ -5979,7 +5979,7 @@ function DetailDrawer(props) {
           if (ownerEnc && projEnc) {
             var path = id.filename.split('/').map(encodeURIComponent).join('/');
             try {
-              fileUrl = window.location.origin + '/u/' + ownerEnc + '/' + projEnc + '/view/' + path
+              fileUrl = window.location.origin + '/u/' + ownerEnc + '/' + projEnc + '/dfs/view/' + path
                 + (id.commit ? '?commitId=' + encodeURIComponent(id.commit) : '');
             } catch (e) { /* keep null */ }
           }
