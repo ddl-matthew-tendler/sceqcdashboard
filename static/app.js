@@ -5111,12 +5111,22 @@ function EvidenceDebugPanel(props) {
 function EvidenceStageSection(props) {
   var _o = useState(props.defaultOpen !== false);
   var open = _o[0]; var setOpen = _o[1];
-  // Guidance panel is closed by default; opens via the small
-  // "ⓘ Instructions" link in the header. Lives at the top of the
-  // expanded section content so it doesn't push the stage's actionable
-  // content down when nobody is reading it.
   var _g = useState(false);
   var guidanceOpen = _g[0]; var setGuidanceOpen = _g[1];
+  // Completion moment: brief pop-animation when the last required field is filled.
+  var _comp = useState(false); var justCompleted = _comp[0]; var setJustCompleted = _comp[1];
+  var prevFilledRef = useRef(props.requiredFilled);
+  useEffect(function() {
+    if (props.requiredTotal > 0 &&
+        props.requiredFilled === props.requiredTotal &&
+        prevFilledRef.current < props.requiredTotal) {
+      setJustCompleted(true);
+      var t = setTimeout(function() { setJustCompleted(false); }, 600);
+      prevFilledRef.current = props.requiredFilled;
+      return function() { clearTimeout(t); };
+    }
+    prevFilledRef.current = props.requiredFilled;
+  }, [props.requiredFilled, props.requiredTotal]);
   var statusColor = props.statusColor;
   var hasGuidance = props.guidance && props.guidance.length > 0;
   // Only the ACTIVE stage is bold + dark. Done and pending stages are
@@ -5164,11 +5174,13 @@ function EvidenceStageSection(props) {
           : null,
         props.requiredTotal > 0
           ? h('span', {
+              className: justCompleted ? 'stage-just-completed' : '',
               style: {
                 fontSize: 10.5,
                 fontWeight: 500,
                 padding: '2px 8px',
                 borderRadius: 10,
+                display: 'inline-block',
                 background: muted
                   ? '#F3F4F6'
                   : (props.requiredFilled === props.requiredTotal ? '#D1FAE5' : '#FEE2E2'),
@@ -5241,6 +5253,10 @@ function EvidenceField(props) {
   var currentValue = props.value;
   var onChange = props.onChange;
 
+  var _t = useState(false); var touched = _t[0]; var setTouched = _t[1];
+  var valueFilled = currentValue != null && currentValue !== '' && !(Array.isArray(currentValue) && !currentValue.length);
+  var showRequired = art.required && touched && !valueFilled;
+
   var inputEl;
   if (type === 'radio') {
     var opts = (details.options || ['Yes', 'No']).map(function(o) {
@@ -5250,7 +5266,8 @@ function EvidenceField(props) {
     });
     inputEl = h(Radio.Group, {
       size: 'small', value: currentValue != null ? currentValue : undefined,
-      options: opts, onChange: function(e) { onChange(e.target.value); },
+      options: opts,
+      onChange: function(e) { setTouched(true); onChange(e.target.value); },
     });
   } else if (type === 'checkbox') {
     var copts = (details.options || []).map(function(o) {
@@ -5260,12 +5277,15 @@ function EvidenceField(props) {
     });
     inputEl = h(Checkbox.Group, {
       value: Array.isArray(currentValue) ? currentValue : [],
-      options: copts, onChange: function(vals) { onChange(vals); },
+      options: copts,
+      onChange: function(vals) { setTouched(true); onChange(vals); },
     });
   } else if (type === 'textarea') {
     inputEl = h(Input.TextArea, {
       size: 'small', autoSize: { minRows: details.height || 2, maxRows: Math.max((details.height || 2) + 4, 8) },
-      value: currentValue || '', onChange: function(e) { onChange(e.target.value); },
+      value: currentValue || '',
+      onChange: function(e) { onChange(e.target.value); },
+      onBlur: function() { setTouched(true); },
       placeholder: details.placeholder || 'Enter response…',
     });
   } else if (type === 'select') {
@@ -5277,18 +5297,21 @@ function EvidenceField(props) {
     inputEl = h(Select, {
       size: 'small', style: { width: '100%' },
       value: currentValue != null ? currentValue : undefined,
-      options: sopts, onChange: function(v) { onChange(v); }, allowClear: true,
+      options: sopts,
+      onChange: function(v) { setTouched(true); onChange(v); },
+      allowClear: true,
     });
   } else {
     inputEl = h(Input, {
       size: 'small', value: currentValue || '',
       onChange: function(e) { onChange(e.target.value); },
+      onBlur: function() { setTouched(true); },
       placeholder: details.placeholder || '',
     });
   }
 
   var agentic = isAgentPopulated(art);
-  var hasValue = currentValue != null && currentValue !== '' && !(Array.isArray(currentValue) && !currentValue.length);
+  var hasValue = valueFilled;
   var wrapStyle = agentic && hasValue
     ? {
         padding: '10px 12px', margin: '4px 0', borderRadius: 6,
@@ -5296,7 +5319,7 @@ function EvidenceField(props) {
         border: '1px solid #C9C5F2',
       }
     : { padding: '10px 4px', borderBottom: '1px solid #F5F5F8' };
-  return h('div', { style: wrapStyle, className: props.flash ? 'evidence-field-flash' : '' },
+  return h('div', { style: wrapStyle, className: props.flash ? 'evidence-field-flash' : '', 'data-artifact-id': art.id },
     h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 } },
       h('span', { style: { fontSize: 12, fontWeight: 500, color: '#2E2E38', lineHeight: 1.4 } },
         label,
@@ -5310,6 +5333,13 @@ function EvidenceField(props) {
       ? h('div', { style: { fontSize: 10.5, color: agentic ? '#7A5FE0' : '#8F8FA3', marginBottom: 6, fontStyle: agentic ? 'italic' : 'normal' } }, details.helpText)
       : null,
     inputEl,
+    type === 'textarea'
+      ? h('div', { style: { fontSize: 10, color: '#C0C0CC', textAlign: 'right', marginTop: 2 } },
+          (currentValue || '').length + ' chars')
+      : null,
+    showRequired
+      ? h('div', { style: { fontSize: 10.5, color: '#C20A29', marginTop: 4 } }, 'This field is required')
+      : null,
     props.submittedAt
       ? h('div', { style: { fontSize: 10, color: '#B0B0C0', marginTop: 4 } },
           'Last saved ' + dayjs(props.submittedAt).fromNow() + (props.submittedBy ? ' by ' + props.submittedBy : ''))
@@ -5648,6 +5678,38 @@ function DetailDrawer(props) {
         setGitInfoCache(function(prev) { var n = Object.assign({}, prev); n[bundle.projectId] = null; return n; });
       });
   }, [bundle && bundle.projectId]);
+
+  // Auto-focus the first unfilled required field in the active stage when
+  // evidence first loads, or when initialStage changes (user clicked a dot).
+  useEffect(function() {
+    if (!evidenceData) return;
+    var policy = evidenceData.policy || {};
+    var stgs = policy.stages || [];
+    var fb = evidenceData.bundle || bundle;
+    var targetStageName = initialStage || fb.stage || '';
+    var targetStage = stgs.find(function(s) { return s.name === targetStageName; });
+    if (!targetStage) return;
+    var em = evidenceData.evidenceMap || {};
+    var firstMissingId = null;
+    var arts = [];
+    (targetStage.evidenceSet || []).forEach(function(es) { (es.artifacts || []).forEach(function(a) { arts.push(a); }); });
+    for (var i = 0; i < arts.length; i++) {
+      var a = arts[i];
+      if (!a.required || a.artifactType !== 'input') continue;
+      var v = (em[a.id] || {}).value;
+      var filled = v !== null && v !== undefined && v !== '' && !(Array.isArray(v) && !v.length);
+      if (!filled) { firstMissingId = a.id; break; }
+    }
+    if (!firstMissingId) return;
+    var timer = setTimeout(function() {
+      var el = document.querySelector('[data-artifact-id="' + firstMissingId + '"]');
+      if (!el) return;
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      var input = el.querySelector('input, textarea');
+      if (input) input.focus();
+    }, 450);
+    return function() { clearTimeout(timer); };
+  }, [evidenceData, initialStage]);
 
   // useRef-style closure for drag state (need to read live values inside
   // the document-level mousemove handler).
@@ -6086,6 +6148,7 @@ function DetailDrawer(props) {
     var nextStage = currentIdx >= 0 && currentIdx < stages.length - 1 ? stages[currentIdx + 1] : null;
     var activeStageForCheck = stages[currentIdx];
     var missingRequired = [];
+    var missingRequiredIds = [];
     if (activeStageForCheck) {
       var collectArts = function(stage) {
         var out = [];
@@ -6101,11 +6164,25 @@ function DetailDrawer(props) {
         var current = formVal !== undefined ? formVal : ev.value;
         if (!valueLooksFilled(current)) {
           missingRequired.push((a.details || {}).label || (a.details || {}).name || a.id);
+          missingRequiredIds.push(a.id);
         }
       });
     }
     var hasMissing = missingRequired.length > 0;
     var canTransition = !!nextStage && fullBundle.state !== 'Complete' && !hasMissing;
+
+    function scrollToFirstMissing() {
+      if (!missingRequiredIds.length) return;
+      var el = document.querySelector('[data-artifact-id="' + missingRequiredIds[0] + '"]');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.classList.remove('evidence-field-error-flash');
+        void el.offsetWidth; // reflow to restart animation
+        el.classList.add('evidence-field-error-flash');
+        var input = el.querySelector('input, textarea');
+        if (input) setTimeout(function() { input.focus(); }, 300);
+      }
+    }
 
     // Stepper. Future-stage dots are clickable and trigger the same
     // "Advance to..." confirm dialog as the header button. Done/active
@@ -6643,6 +6720,45 @@ function DetailDrawer(props) {
 
     // (hasMissing + missingRequired + nextStage computed above the stepper)
 
+    // Shared action button element — rendered in the sticky footer so it's
+    // always accessible without scrolling back to the top.
+    var actionTooltipTitle = hasMissing
+      ? h('div', null,
+          h('div', { style: { fontWeight: 600, marginBottom: 4 } }, 'Required fields not yet completed:'),
+          h('ul', { style: { margin: 0, paddingLeft: 16 } },
+            missingRequired.slice(0, 8).map(function(m, i) { return h('li', { key: i }, m); }),
+            missingRequired.length > 8 ? h('li', null, 'and ' + (missingRequired.length - 8) + ' more') : null
+          ),
+          h('div', { style: { marginTop: 6, fontSize: 10.5, color: '#F9A8D4' } }, 'Click to jump to the first missing field')
+        )
+      : null;
+
+    var primaryActionBtn = fullBundle.state === 'Complete'
+      ? null
+      : h(Tooltip, {
+          title: hasMissing
+            ? actionTooltipTitle
+            : nextStage
+              ? 'Advance the bundle to ' + nextStage.name
+              : 'Close out the bundle. Marks it Complete in Domino.',
+          placement: 'topRight', overlayStyle: { maxWidth: 340 },
+        },
+          h('span', {
+            style: { display: 'inline-block' },
+            onClick: hasMissing ? scrollToFirstMissing : undefined,
+          },
+            h(Button, {
+              size: 'small', type: 'primary', loading: transitioning,
+              disabled: hasMissing,
+              onClick: !hasMissing
+                ? (nextStage
+                    ? function() { handleTransitionStage(nextStage.name); }
+                    : handleCompleteBundle)
+                : undefined,
+            }, nextStage ? 'Advance to next stage' : '✓ Mark as Complete')
+          )
+        );
+
     var topBar = h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 8 } },
       h('div', { style: { fontSize: 11, color: '#65657B' } },
         fullBundle.stage
@@ -6652,65 +6768,32 @@ function DetailDrawer(props) {
             )
           : null
       ),
-      h('div', { style: { display: 'flex', gap: 6 } },
-        h(Button, { size: 'small', onClick: function() { loadEvidence(true); } }, '⟳ Refresh'),
-        // Two cases for the primary action:
-        //   - There is a next stage  -> "Advance to next stage"
-        //   - Final stage, bundle still Active -> "Mark as Complete"
-        //   - Bundle already Complete -> nothing
-        fullBundle.state === 'Complete'
-          ? null
-          : nextStage
-            ? h(Tooltip, {
-                title: hasMissing
-                  ? h('div', null,
-                      h('div', { style: { fontWeight: 600, marginBottom: 4 } }, 'Required fields not yet completed:'),
-                      h('ul', { style: { margin: 0, paddingLeft: 16 } },
-                        missingRequired.slice(0, 8).map(function(m, i) { return h('li', { key: i }, m); }),
-                        missingRequired.length > 8 ? h('li', null, 'and ' + (missingRequired.length - 8) + ' more') : null
-                      )
-                    )
-                  : 'Advance the bundle to ' + nextStage.name,
-                placement: 'bottomRight', overlayStyle: { maxWidth: 320 },
-              },
-                h('span', { style: { display: 'inline-block' } },
-                  h(Button, {
-                    size: 'small', type: 'primary', loading: transitioning,
-                    disabled: hasMissing,
-                    onClick: function() { handleTransitionStage(nextStage.name); },
-                  }, 'Advance to next stage')
-                )
-              )
-            : h(Tooltip, {
-                title: hasMissing
-                  ? h('div', null,
-                      h('div', { style: { fontWeight: 600, marginBottom: 4 } }, 'Required fields not yet completed:'),
-                      h('ul', { style: { margin: 0, paddingLeft: 16 } },
-                        missingRequired.slice(0, 8).map(function(m, i) { return h('li', { key: i }, m); }),
-                        missingRequired.length > 8 ? h('li', null, 'and ' + (missingRequired.length - 8) + ' more') : null
-                      )
-                    )
-                  : 'Close out the bundle. Marks it Complete in Domino.',
-                placement: 'bottomRight', overlayStyle: { maxWidth: 320 },
-              },
-                h('span', { style: { display: 'inline-block' } },
-                  h(Button, {
-                    size: 'small', type: 'primary', loading: transitioning,
-                    disabled: hasMissing,
-                    onClick: handleCompleteBundle,
-                  }, '✓ Mark as Complete')
-                )
-              )
-      )
+      h(Button, { size: 'small', onClick: function() { loadEvidence(true); } }, '⟳ Refresh')
     );
+
+    // Sticky footer keeps the primary action visible regardless of scroll depth.
+    var stickyFooter = primaryActionBtn
+      ? h('div', {
+          style: {
+            position: 'sticky', bottom: 0, zIndex: 10,
+            background: '#FFFFFF',
+            borderTop: '1px solid #E8E8F0',
+            padding: '10px 0 10px',
+            display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8,
+          },
+        },
+          hasMissing
+            ? h('span', { style: { fontSize: 11, color: '#991B1B' } },
+                missingRequired.length + ' required field' + (missingRequired.length === 1 ? '' : 's') + ' incomplete')
+            : null,
+          primaryActionBtn
+        )
+      : null;
     // (Per-scripted-check Run Agent buttons live on each row. The earlier
     // global "Assign to Agent" banner above the stepper was misleading
     // because it only ran the FIRST scripted check in the stage even when
     // the stage had multiple agents. Removed in favour of the row-level
     // buttons which are unambiguously scoped.)
-
-    // Keep the old name for diff compatibility (refresh button is now in topBar)
-    var refreshBtn = topBar;
 
     var debugPanel = h(EvidenceDebugPanel, {
       detail: evidenceData,
@@ -6721,7 +6804,7 @@ function DetailDrawer(props) {
       lastError: debugState.lastError,
     });
 
-    return h('div', null, refreshBtn, stepper, sections, debugPanel);
+    return h('div', null, topBar, stepper, sections, debugPanel, stickyFooter);
   }
 
   // ── Render active view ──────────────────────────────────────

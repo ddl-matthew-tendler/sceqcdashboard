@@ -1730,6 +1730,21 @@ body {
 }
 .evidence-field-flash { animation: evidenceSavedFlash 1.6s ease-out; }
 
+@keyframes evidenceErrorFlash {
+  0%   { box-shadow: 0 0 0 2px rgba(194,10,41,0.6); background-color: rgba(194,10,41,0.06); }
+  60%  { box-shadow: 0 0 0 2px rgba(194,10,41,0.4); background-color: rgba(194,10,41,0.04); }
+  100% { box-shadow: 0 0 0 2px rgba(194,10,41,0);   background-color: transparent; }
+}
+.evidence-field-error-flash { animation: evidenceErrorFlash 1.8s ease-out; }
+
+@keyframes stageCompletedPop {
+  0%   { transform: scale(1);    background-color: #D1FAE5; color: #065F46; }
+  30%  { transform: scale(1.15); background-color: #6EE7B7; color: #065F46; }
+  60%  { transform: scale(0.97); }
+  100% { transform: scale(1);    background-color: #D1FAE5; color: #065F46; }
+}
+.stage-just-completed { animation: stageCompletedPop 0.5s cubic-bezier(0.34,1.56,0.64,1) forwards; }
+
 @keyframes evidenceAgentShimmer {
   0%   { background-position: -200% 0; }
   100% { background-position: 200% 0; }
