@@ -1,0 +1,550 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Drawer mockup — focused stage</title>
+<style>
+  :root {
+    --purple: #543FDE;
+    --purple-deep: #3B23D1;
+    --purple-bg: #EDECFB;
+    --purple-border: #C9C5F2;
+    --purple-soft: #1820A0;
+    --ink: #2E2E38;
+    --ink-mid: #65657B;
+    --ink-light: #8F8FA3;
+    --border: #E0E0E0;
+    --border-soft: #F1F1F4;
+    --bg: #FAFAFA;
+    --bg-card: #FFFFFF;
+    --green: #28A464;
+    --green-bg: #E5F5EC;
+    --red: #C20A29;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0;
+    font-family: Inter, Lato, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    color: var(--ink); background: #F4F4F8; font-size: 14px; line-height: 1.5;
+  }
+
+  /* ── browser-chrome framing so the drawer feels like the real app ── */
+  .frame { max-width: 1200px; margin: 24px auto; }
+  .caption { font-size: 12px; color: var(--ink-mid); margin-bottom: 8px; }
+  .caption strong { color: var(--ink); font-weight: 600; }
+  .drawer {
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    /* The drawer is itself the scroll container so the timeline can stick to
+       its top as the focused stage scrolls. `overflow:hidden` here would
+       break position:sticky because the drawer wouldn't actually scroll.
+       Using `height` (not max-height) reserves the space so the drawer is
+       always scrollable when stage content is long enough. */
+    height: calc(100vh - 48px); overflow-y: auto;
+  }
+
+  /* ── drawer header (same as today) ── */
+  .header { padding: 16px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; justify-content: space-between; }
+  .header .title { display: flex; align-items: center; gap: 10px; }
+  .close { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; color: var(--ink-light); cursor: pointer; font-size: 16px; }
+  .h-name { font-size: 18px; font-weight: 600; color: var(--ink); }
+  .h-tags { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+  .h-tag { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; background: var(--purple-bg); color: var(--purple-soft); }
+  .h-id { font-size: 12px; color: var(--ink-light); }
+  .view-btn {
+    background: var(--purple-deep); color: #fff; border: none; padding: 7px 14px; font-size: 13px;
+    border-radius: 4px; cursor: pointer; font-weight: 500;
+  }
+
+  /* ── tabs ── */
+  .tabs { display: flex; gap: 0; padding: 0 24px; border-bottom: 1px solid var(--border); }
+  .tab { padding: 10px 14px; font-size: 13px; color: var(--ink-mid); cursor: pointer; border-bottom: 2px solid transparent; }
+  .tab.active { color: var(--purple); border-bottom-color: var(--purple); font-weight: 500; }
+
+  /* ── timeline (always visible — the new interaction model) ── */
+  /* Sticky so it stays anchored to the drawer top as the focused stage scrolls. */
+  .timeline-block {
+    padding: 14px 24px 14px;
+    position: sticky; top: 0; z-index: 5;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .tl-row { display: flex; align-items: center; justify-content: flex-end; margin-bottom: 10px; }
+  .tl-actions { display: flex; gap: 8px; }
+  .btn {
+    background: #fff; border: 1px solid var(--border); padding: 6px 12px; font-size: 12px; border-radius: 4px;
+    cursor: pointer; color: var(--ink); display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn:hover { border-color: var(--purple-border); }
+  .btn.complete { color: var(--ink-light); cursor: not-allowed; }
+
+  .timeline { display: flex; align-items: flex-start; justify-content: space-between; position: relative; padding: 0 8px; }
+  .timeline::before {
+    content: ''; position: absolute; top: 18px; left: 32px; right: 32px;
+    height: 2px; background: var(--border); z-index: 0;
+  }
+  .tl-step { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; cursor: pointer; flex: 1; min-width: 0; }
+  .tl-dot {
+    width: 36px; height: 36px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 600; border: 2px solid var(--border); background: #fff; color: var(--ink-light);
+    transition: all 0.15s;
+  }
+  .tl-step.done .tl-dot { background: var(--green); border-color: var(--green); color: #fff; }
+  .tl-step.active .tl-dot { background: var(--purple); border-color: var(--purple); color: #fff; box-shadow: 0 0 0 4px var(--purple-bg); }
+  .tl-step.future .tl-dot { background: #fff; border-color: var(--border); color: var(--ink-light); }
+  .tl-step.selected .tl-dot {
+    /* the new selection ring — distinct from "active" stage */
+    box-shadow: 0 0 0 4px var(--purple-bg), 0 0 0 5px var(--purple);
+    transform: translateY(-2px);
+  }
+  .tl-step.selected .tl-label { color: var(--purple-deep); font-weight: 600; }
+  .tl-label {
+    margin-top: 8px; font-size: 12px; color: var(--ink-mid); text-align: center;
+    max-width: 160px; line-height: 1.3;
+  }
+  .tl-step.done .tl-label { color: var(--green); font-weight: 500; }
+  .tl-step.active .tl-label { color: var(--purple-deep); font-weight: 600; }
+  .tl-assignee {
+    margin-top: 3px; font-size: 11px; color: var(--ink-light); text-align: center;
+    max-width: 160px; line-height: 1.25;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-weight: 400;
+  }
+  .tl-assignee.empty { font-style: italic; }
+  .tl-caret {
+    /* little down-pointer under the selected dot to anchor it to the body */
+    margin-top: 6px; width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent;
+    border-top: 7px solid var(--purple); opacity: 0; transition: opacity 0.15s;
+  }
+  .tl-step.selected .tl-caret { opacity: 1; }
+
+  /* ── single-stage focused body ── */
+  .stage-card {
+    margin: 0 24px 24px; border: 1px solid var(--purple-border); border-radius: 8px;
+    background: linear-gradient(180deg, #FCFBFF 0%, #fff 60px);
+  }
+  /* Two-row header so the title, assignee picker, and meta don't fight for
+     the same horizontal real estate. Row 1: title + status + meta. Row 2:
+     assignee picker (where the user expects to act on ownership). */
+  .sc-head { padding: 14px 18px 10px; border-bottom: 1px solid var(--border-soft); }
+  .sc-head-row1 { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .sc-head-row1-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .sc-head-row1-right { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+  .sc-head-row2 {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border-soft);
+  }
+  .sc-name { font-size: 15px; font-weight: 600; color: var(--ink); white-space: nowrap; }
+  .sc-status { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.04em; flex-shrink: 0; }
+  .sc-status.active { background: var(--purple-bg); color: var(--purple-deep); }
+  .sc-status.complete { background: var(--green-bg); color: var(--green); }
+  .sc-status.pending { background: #EDEDF0; color: var(--ink-mid); }
+  .sc-assignee-label { font-size: 11px; color: var(--ink-light); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+  .sc-assignee-select {
+    font-family: inherit; font-size: 13px; color: var(--ink); background: #fff;
+    border: 1px solid var(--border); border-radius: 4px; padding: 5px 26px 5px 10px;
+    cursor: pointer; max-width: 280px; min-width: 200px;
+    appearance: none; -webkit-appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' stroke='%2365657B' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-repeat: no-repeat; background-position: right 10px center;
+  }
+  .sc-assignee-select:hover { border-color: var(--purple-border); }
+  .sc-assignee-select:focus { outline: none; border-color: var(--purple); box-shadow: 0 0 0 2px var(--purple-bg); }
+  .sc-assignee-save {
+    font-size: 11px; color: var(--ink-light); display: inline-flex; align-items: center; gap: 4px;
+  }
+  .sc-assignee-save.saving { color: var(--purple-deep); }
+  .sc-assignee-save.saved { color: var(--green); }
+  .sc-head-right { display: flex; align-items: center; gap: 8px; }
+  .sc-required { font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 10px; }
+  .sc-required.partial { background: #FBEFE0; color: #A35B00; }
+  .sc-required.empty { background: #F9DEE2; color: var(--red); }
+  .sc-required.full { background: var(--green-bg); color: var(--green); }
+  .sc-link { font-size: 12px; color: var(--purple); cursor: pointer; }
+
+  .sc-body { padding: 16px 18px; }
+  .field { padding: 10px 0; border-bottom: 1px solid var(--border-soft); }
+  .field:last-child { border-bottom: none; }
+  .field-label { font-size: 12px; font-weight: 500; color: var(--ink); margin-bottom: 4px; }
+  .field-label .req { color: var(--red); margin-left: 3px; }
+  .field-help { font-size: 11px; color: var(--ink-light); margin-bottom: 6px; }
+  .opts { display: flex; gap: 16px; align-items: center; font-size: 13px; color: var(--ink); }
+  .radio { width: 14px; height: 14px; border: 1.5px solid var(--ink-light); border-radius: 50%; display: inline-block; vertical-align: middle; margin-right: 6px; }
+  .input {
+    width: 100%; border: 1px solid var(--border); border-radius: 4px; padding: 7px 10px; font-size: 13px;
+    font-family: inherit; color: var(--ink); background: #fff;
+  }
+  textarea.input { resize: vertical; min-height: 70px; font-family: inherit; }
+
+  .agent-block {
+    margin: 8px 0 0; padding: 12px 14px; border-radius: 6px;
+    border: 1px solid var(--purple-border);
+    background: linear-gradient(135deg, rgba(84,63,222,0.04) 0%, rgba(232,53,167,0.04) 100%);
+  }
+  .agent-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .agent-title { font-size: 12px; font-weight: 600; color: var(--ink); display: flex; align-items: center; gap: 8px; }
+  .agent-badge { font-size: 9px; font-weight: 600; color: var(--purple); background: #fff; border: 1px solid var(--purple-border); border-radius: 10px; padding: 1px 7px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .agent-meta { font-size: 11px; color: var(--ink-light); }
+  .run-btn {
+    background: var(--purple); color: #fff; border: none; padding: 6px 12px; font-size: 12px;
+    border-radius: 4px; cursor: pointer; font-weight: 500; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .run-btn:hover { background: var(--purple-deep); }
+  .run-btn.running {
+    background: #fff; color: var(--purple-deep); border: 1px solid var(--purple-border); cursor: default;
+  }
+  .run-btn.running:hover { background: #fff; }
+  .spinner {
+    width: 12px; height: 12px; border-radius: 50%;
+    border: 2px solid var(--purple-border); border-top-color: var(--purple);
+    animation: spin 0.7s linear infinite; display: inline-block;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .run-elapsed { font-size: 11px; color: var(--ink-light); margin-left: 8px; }
+  .param-row { display: grid; grid-template-columns: 120px 1fr; gap: 12px; margin-top: 6px; font-size: 12px; align-items: center; }
+  .param-row .k { color: var(--ink-mid); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .param-row .v { background: #fff; border: 1px solid var(--border); border-radius: 4px; padding: 5px 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  .empty-state {
+    padding: 32px; text-align: center; color: var(--ink-mid); font-size: 13px;
+  }
+  .empty-state .em { font-size: 22px; margin-bottom: 8px; opacity: 0.5; }
+
+  .caption-after { text-align: center; font-size: 12px; color: var(--ink-mid); margin: 8px 0 24px; }
+  .caption-after kbd {
+    font-family: inherit; background: #fff; border: 1px solid var(--border); border-bottom-width: 2px;
+    border-radius: 4px; padding: 1px 6px; font-size: 11px;
+  }
+</style>
+</head>
+<body>
+
+<div class="frame">
+  <div class="caption">
+    <strong>Mockup:</strong> drawer with single-stage focus. Default opens to the active stage. Click any timeline circle to focus that stage.
+  </div>
+
+  <div class="drawer">
+
+    <!-- header (same as today) -->
+    <div class="header">
+      <div class="title">
+        <span class="close">✕</span>
+        <div>
+          <div class="h-name">Demov10TFL</div>
+          <div class="h-tags">
+            <span class="h-tag">Active</span>
+            <span class="h-id">AGT-6741_CSR</span>
+          </div>
+        </div>
+      </div>
+      <button class="view-btn">↗ View in Domino</button>
+    </div>
+
+    <!-- tabs -->
+    <div class="tabs">
+      <span class="tab active">Evidence</span>
+      <span class="tab">Attachments (4)</span>
+      <span class="tab">Deliverable Overview</span>
+      <span class="tab">Findings</span>
+      <span class="tab">Approvals (1)</span>
+      <span class="tab">Gates</span>
+    </div>
+
+    <!-- always-visible (and sticky) timeline -->
+    <div class="timeline-block">
+      <div class="tl-row">
+        <div class="tl-actions">
+          <button class="btn">↻ Refresh</button>
+          <button class="btn complete" id="complete-btn">✓ Mark as Complete</button>
+        </div>
+      </div>
+
+      <div class="timeline" id="timeline"></div>
+    </div>
+
+    <!-- single stage card (swaps based on selection) -->
+    <div id="stage-host"></div>
+
+  </div>
+
+  <div class="caption-after">
+    Default focus = the currently <strong>Active</strong> stage. <kbd>←</kbd> / <kbd>→</kbd> would step through stages in the keyboard-friendly version.
+  </div>
+</div>
+
+<!-- ───────── stage data + templates ───────── -->
+<script id="stage-data" type="application/json">
+[
+  {
+    "name": "Study Setup",
+    "status": "complete",
+    "assignee": "Agent TFL (agenttfl)",
+    "required": "3 / 3 required",
+    "requiredClass": "full",
+    "fields": [
+      { "type": "scripted", "title": "Set up SAP + shell scaffold", "params": { "tfl_name": "t_14_1_1", "sap_path": "sample/sap_excerpt.md" }, "agentJob": "c1503c6e" },
+      { "type": "radio", "label": "Were study assets attached as required?", "value": "Yes - documented below", "savedBy": "agenttfl" },
+      { "type": "textarea", "label": "Any setup notes for downstream stages?", "agent": true, "value": "Standard CDISC structure. ADaM source: ADSL v3.1 + ADAE v2.0. No protocol deviations during setup." }
+    ]
+  },
+  {
+    "name": "First-line Programming",
+    "status": "complete",
+    "assignee": "Doug Kelkhoff (doug.kelkhoff@dominodatalab.com)",
+    "required": "2 / 2 required",
+    "requiredClass": "full",
+    "fields": [
+      { "type": "scripted", "title": "Generate TFL (agent)", "params": { "tfl_name": "t_14_1_1", "sap_path": "sample/sap_excerpt_t_14_1_1.md", "shell_path": "sample/shell_t_14_1_1.txt" }, "agentJob": "c1503c6e" },
+      { "type": "agent-output", "label": "Git commit hash for the TFL program", "value": "dev/t_14_1_1 @ 72ab2ccdc53deebcd15905f20f58ea8ec8c5528" },
+      { "type": "radio", "label": "Were any deviations from the SAP or SOP encountered?", "value": "Yes - documented below" },
+      { "type": "textarea", "label": "If yes, describe the deviation and rationale", "agent": true, "value": "The program deviates from the SAP in two material ways driven by ADaM source limitations. First, the SAP specifies treatment grouping by TRTPN (0/54/81), but ADSL only exposes the character TRT01P column, so the program groups by TRT01P string values." }
+    ]
+  },
+  {
+    "name": "QC Review",
+    "status": "complete",
+    "assignee": "Matt Tendler (matt_tendler)",
+    "required": "2 / 2 required",
+    "requiredClass": "full",
+    "fields": [
+      { "type": "radio", "label": "Independent QC run completed?", "value": "Yes - documented below" },
+      { "type": "textarea", "label": "QC review summary", "value": "Re-ran with second programmer in parallel. Counts match SAP-mandated population. Two minor formatting findings raised — see Findings tab." }
+    ]
+  },
+  {
+    "name": "Study Lead Verification",
+    "status": "active",
+    "assignee": "Matt Tendler (matt_tendler)",
+    "required": "0 / 5 required",
+    "requiredClass": "empty",
+    "fields": [
+      { "type": "radio", "label": "Study lead has reviewed and approves of attached outputs", "value": null, "options": ["Yes", "No"] },
+      { "type": "radio", "label": "Study lead has reviewed and approves of attached code", "value": null, "options": ["Yes", "No"] },
+      { "type": "radio", "label": "Study lead has reviewed agent QC findings and suggested next steps", "value": null, "options": ["Yes", "No", "N/A - no findings were raised"] },
+      { "type": "radio", "label": "Study lead decision on agent suggested next steps", "value": null, "options": ["Accept - suggested next steps are approved as documented", "Modify", "Reject"] },
+      { "type": "textarea", "label": "Study lead sign-off comments", "value": "" },
+      { "type": "radio", "label": "Have all attached datasets been verified as final-locked?", "value": null, "options": ["Yes", "No - locks pending"] },
+      { "type": "radio", "label": "Statistical analysis plan version referenced matches the locked SAP", "value": null, "options": ["Yes", "No"] },
+      { "type": "textarea", "label": "Note any open items, caveats, or escalations for QA", "value": "" },
+      { "type": "radio", "label": "All Findings have been resolved or marked WontDo with rationale", "value": null, "options": ["Yes", "No"] },
+      { "type": "textarea", "label": "Final attestation statement (free text)", "value": "" }
+    ]
+  }
+]
+</script>
+
+<script>
+  const stages = JSON.parse(document.getElementById('stage-data').textContent);
+  // Mock project members — in the real app this comes from
+  // /api/projects/{id}/collaborators. Agent users first.
+  const projectMembers = [
+    'Agent TFL (agenttfl)',
+    'Doug Kelkhoff (doug.kelkhoff@dominodatalab.com)',
+    'Matt Tendler (matt_tendler)',
+    'Agnes Lin (agnes_domino)',
+    'Ross Patel (ross_domino)',
+    'Etan Cohen (etan_domino)',
+    'Study Lead (study_lead)',
+  ];
+  const host = document.getElementById('stage-host');
+  const completeBtn = document.getElementById('complete-btn');
+  const timelineEl = document.getElementById('timeline');
+
+  function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' })[c]); }
+
+  // Trim assignee to first name + last-initial-style so the label stays
+  // readable in the narrow timeline column. Falls back to the raw string
+  // if it doesn't match a "Display Name (handle)" shape.
+  function shortAssignee(raw) {
+    if (!raw) return null;
+    const m = raw.match(/^(.+?)\s*\(([^)]+)\)\s*$/);
+    const display = m ? m[1] : raw;
+    if (display.length <= 22) return display;
+    return display.slice(0, 21) + '…';
+  }
+
+  function renderTimeline() {
+    timelineEl.innerHTML = stages.map((s, i) => {
+      const cls = s.status === 'complete' ? 'done' : (s.status === 'active' ? 'active' : 'future');
+      const dotContent = s.status === 'complete' ? '✓' : String(i + 1);
+      const assignee = shortAssignee(s.assignee);
+      return `
+        <div class="tl-step ${cls}" data-stage="${i}">
+          <div class="tl-dot">${dotContent}</div>
+          <div class="tl-caret"></div>
+          <div class="tl-label">${escapeHtml(s.name)}</div>
+          <div class="tl-assignee${assignee ? '' : ' empty'}" title="${escapeHtml(s.assignee || 'Unassigned')}">
+            ${assignee ? 'Assigned to: ' + escapeHtml(assignee) : 'Unassigned'}
+          </div>
+        </div>`;
+    }).join('');
+    timelineEl.querySelectorAll('.tl-step').forEach(el => {
+      el.addEventListener('click', () => selectStage(parseInt(el.dataset.stage, 10)));
+    });
+  }
+
+  function renderField(f) {
+    if (f.type === 'scripted') {
+      const params = Object.entries(f.params).map(([k, v]) => `
+        <div class="param-row"><span class="k">${escapeHtml(k)}</span><span class="v">${escapeHtml(v)}</span></div>`).join('');
+      return `
+        <div class="field">
+          <div class="agent-block">
+            <div class="agent-row">
+              <div class="agent-title">⚙ ${escapeHtml(f.title)}</div>
+              <button class="run-btn" data-action="run-agent">✨ Run Agent</button>
+            </div>
+            ${params}
+            <div class="agent-meta agent-status" style="margin-top:8px">Job ${escapeHtml(f.agentJob)} · <span style="color:var(--green); font-weight:500">SUCCEEDED</span></div>
+          </div>
+        </div>`;
+    }
+    if (f.type === 'agent-output') {
+      return `
+        <div class="field">
+          <div class="field-label">${escapeHtml(f.label)} <span class="req">*</span> <span class="agent-badge" style="margin-left:6px">✨ Agent</span></div>
+          <input class="input" value="${escapeHtml(f.value)}" />
+        </div>`;
+    }
+    if (f.type === 'radio') {
+      const opts = (f.options || ['Yes - documented below', 'No']).map(o => {
+        const checked = o === f.value;
+        return `<label class="opt"><span class="radio" style="${checked ? 'background:var(--purple); border-color:var(--purple); box-shadow: inset 0 0 0 3px #fff;' : ''}"></span>${escapeHtml(o)}</label>`;
+      }).join('');
+      return `
+        <div class="field">
+          <div class="field-label">${escapeHtml(f.label)} <span class="req">*</span></div>
+          <div class="opts">${opts}</div>
+          ${f.savedBy ? `<div class="agent-meta" style="margin-top:6px">Last saved 2 days ago by ${escapeHtml(f.savedBy)}</div>` : ''}
+        </div>`;
+    }
+    if (f.type === 'textarea') {
+      const isAgent = !!f.agent && f.value;
+      return `
+        <div class="field" style="${isAgent ? 'background:linear-gradient(135deg, rgba(84,63,222,0.03), rgba(232,53,167,0.03)); border-radius:6px; padding:10px 12px;' : ''}">
+          <div class="field-label">
+            ${escapeHtml(f.label)}
+            ${isAgent ? '<span class="agent-badge" style="margin-left:6px">✨ Agent</span>' : ''}
+          </div>
+          ${isAgent ? `<div class="field-help" style="color:var(--purple); font-style:italic">Populated by agent · last saved 2 days ago</div>` : ''}
+          <textarea class="input">${escapeHtml(f.value || '')}</textarea>
+        </div>`;
+    }
+    return '';
+  }
+
+  function renderStage(i) {
+    const s = stages[i];
+    const statusClass = s.status === 'active' ? 'active' : (s.status === 'complete' ? 'complete' : 'pending');
+    const statusLabel = s.status.toUpperCase();
+
+    // "Mark as Complete" only enabled on the active stage
+    if (s.status === 'active') {
+      completeBtn.classList.remove('complete');
+      completeBtn.style.color = 'var(--ink)';
+      completeBtn.style.cursor = 'pointer';
+    } else {
+      completeBtn.classList.add('complete');
+      completeBtn.style.color = 'var(--ink-light)';
+      completeBtn.style.cursor = 'not-allowed';
+    }
+
+    const options = projectMembers.map(m => `<option value="${escapeHtml(m)}"${m === s.assignee ? ' selected' : ''}>${escapeHtml(m)}</option>`).join('');
+    host.innerHTML = `
+      <div class="stage-card">
+        <div class="sc-head">
+          <div class="sc-head-row1">
+            <div class="sc-head-row1-left">
+              <div class="sc-name">${escapeHtml(s.name)}</div>
+              <span class="sc-status ${statusClass}">${statusLabel}</span>
+            </div>
+            <div class="sc-head-row1-right">
+              <span class="sc-link">ⓘ Instructions</span>
+              <span class="sc-required ${s.requiredClass}">${escapeHtml(s.required)}</span>
+            </div>
+          </div>
+          <div class="sc-head-row2">
+            <span class="sc-assignee-label">Assigned to</span>
+            <select class="sc-assignee-select" data-stage="${i}" aria-label="Reassign stage">${options}</select>
+            <span class="sc-assignee-save" id="assignee-save"></span>
+          </div>
+        </div>
+        <div class="sc-body">
+          ${s.fields.map(renderField).join('')}
+        </div>
+      </div>`;
+  }
+
+  function selectStage(i) {
+    document.querySelectorAll('.tl-step').forEach((el, idx) => {
+      el.classList.toggle('selected', idx === i);
+    });
+    renderStage(i);
+  }
+
+  renderTimeline();
+
+  // Default focus = the active stage (matches "click deliverable name" behaviour)
+  const defaultIdx = stages.findIndex(s => s.status === 'active');
+  selectStage(defaultIdx >= 0 ? defaultIdx : 0);
+
+  // Reassign from the focused stage's header. Mimics the real save lifecycle
+  // (saving → saved, with a transient indicator). On save we patch the local
+  // stages array AND re-render the timeline so the "Assigned to: …" line
+  // under that stage's dot updates immediately.
+  host.addEventListener('change', e => {
+    const sel = e.target.closest('.sc-assignee-select');
+    if (!sel) return;
+    const idx = parseInt(sel.dataset.stage, 10);
+    const newAssignee = sel.value;
+    stages[idx].assignee = newAssignee;
+    renderTimeline();
+    // Re-apply the selected ring (renderTimeline rebuilt all steps)
+    const step = document.querySelectorAll('.tl-step')[idx];
+    if (step) step.classList.add('selected');
+    const save = document.getElementById('assignee-save');
+    if (save) {
+      save.className = 'sc-assignee-save saving';
+      save.innerHTML = '<span class="spinner"></span> saving';
+      setTimeout(() => {
+        save.className = 'sc-assignee-save saved';
+        save.textContent = '✓ saved';
+        setTimeout(() => { save.className = 'sc-assignee-save'; save.textContent = ''; }, 1500);
+      }, 700);
+    }
+  });
+
+  // Run Agent → flip to running state. Auto-resolves after a few seconds so
+  // the mockup demonstrates the full lifecycle (idle → running → succeeded).
+  host.addEventListener('click', e => {
+    const btn = e.target.closest('button[data-action="run-agent"]');
+    if (!btn || btn.classList.contains('running')) return;
+    const block = btn.closest('.agent-block');
+    const status = block.querySelector('.agent-status');
+    const startedAt = Date.now();
+    btn.classList.add('running');
+    btn.innerHTML = '<span class="spinner"></span> Running<span class="run-elapsed" id="agent-elapsed">0s</span>';
+    if (status) status.innerHTML = 'Job pending · <span style="color:var(--purple-deep); font-weight:500">QUEUED</span>';
+    const tick = setInterval(() => {
+      const el = btn.querySelector('#agent-elapsed');
+      if (el) el.textContent = Math.round((Date.now() - startedAt) / 1000) + 's';
+    }, 1000);
+    setTimeout(() => {
+      clearInterval(tick);
+      btn.classList.remove('running');
+      btn.innerHTML = '✨ Run Agent';
+      if (status) status.innerHTML = 'Job c1503c6e · <span style="color:var(--green); font-weight:500">SUCCEEDED</span>';
+    }, 6000);
+  });
+
+  // Keyboard navigation hint
+  document.addEventListener('keydown', e => {
+    const cur = stages.findIndex((_, i) => document.querySelectorAll('.tl-step')[i].classList.contains('selected'));
+    if (e.key === 'ArrowRight' && cur < stages.length - 1) selectStage(cur + 1);
+    if (e.key === 'ArrowLeft' && cur > 0) selectStage(cur - 1);
+  });
+</script>
+
+</body>
+</html>
