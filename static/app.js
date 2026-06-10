@@ -5384,12 +5384,22 @@ function ScriptedCheckRow(props) {
           : null
       ),
       h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 } },
-        h(Button, {
-          size: 'small', type: 'primary',
-          loading: props.running,
-          disabled: props.running || !props.canRun,
-          onClick: function() { props.onRun(paramValues); },
-        }, '✨ Run Agent'),
+        // The button is wrapped in a span so the tooltip still fires
+        // when the button itself is in the disabled state (Antd swallows
+        // pointer events on disabled buttons in some browsers).
+        h(Tooltip, {
+          title: props.disabledReason || (props.canRun ? 'Run this agent now' : ''),
+          placement: 'left',
+        },
+          h('span', { style: { display: 'inline-block' } },
+            h(Button, {
+              size: 'small', type: 'primary',
+              loading: props.running,
+              disabled: props.running || !props.canRun,
+              onClick: function() { props.onRun(paramValues); },
+            }, '✨ Run Agent')
+          )
+        ),
         jobHref
           ? h('a', { href: jobHref, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 10.5, color: '#543FDE' } }, 'Job ' + String(jobId).slice(-8) + ' ↗')
           : null,
@@ -6115,6 +6125,21 @@ function DetailDrawer(props) {
       var assigneeNode = buildAssigneeControl(bundleStageData, stage.name);
       var canEdit = st === 'active' || st === 'done';
 
+      // Run Agent is gated on the stage being assigned to a user whose
+      // username or display name contains "agent". Anyone else clicking
+      // would kick off a job under the wrong identity, so we hard-disable
+      // the button and surface a tooltip explaining the rule.
+      var assigneeObj = bundleStageData && bundleStageData.assignee;
+      var assigneeIdentity = assigneeObj
+        ? ((assigneeObj.userName || '') + ' ' + (assigneeObj.name || '')).toLowerCase()
+        : '';
+      var agentAssigned = /\bagent/.test(assigneeIdentity);
+      var runDisabledReason = !agentAssigned
+        ? (assigneeObj
+            ? 'Assign a user with "agent" in their name to run automation for this stage.'
+            : 'Assign an agent user to this stage to run automation.')
+        : null;
+
       // Walk each evidenceSet separately so we can render a Save button per set.
       var sectionContent = [];
       (stage.evidenceSet || []).forEach(function(es, esIdx) {
@@ -6188,7 +6213,9 @@ function DetailDrawer(props) {
             flushAgentOutputs();
             fieldEls.push(h(ScriptedCheckRow, {
               key: art.id, artifact: art, evidence: ev, fullBundle: fullBundle,
-              running: !!checkRunning[art.id], canRun: canEdit,
+              running: !!checkRunning[art.id],
+              canRun: canEdit && agentAssigned,
+              disabledReason: canEdit ? runDisabledReason : null,
               onRun: function(params) { handleRunCheck(art.id, es.id, params); },
               onJobFinished: function(info) {
                 antd.notification.success({
