@@ -6212,18 +6212,26 @@ function DetailDrawer(props) {
           },
           onClick: function() { setFocusedStageIdx(i); },
           title: 'Show ' + stage.name },
-          // Connector line. Starts at this column's center+13 and runs to
-          // the next column's center-13 (dot radius 12 + 1px breathing room).
+          // Connector line. Default gap = dot radius 12 + 1px breathing.
+          // When the dot at either end is the focused one, push the
+          // endpoint out past the focused dot's outer ring (radius 17 +
+          // 1px breathing = 18) so the line stops clear of the ring
+          // instead of visually merging into it.
           i < stages.length - 1
-            ? h('div', { style: {
-                position: 'absolute',
-                top: 11, height: 2,
-                left: 'calc(50% + 13px)', right: 'calc(-50% + 13px)',
-                background: st === 'done' ? '#28A464'
-                         : st === 'active' ? '#543FDE'
-                         : '#E0E0E0',
-                zIndex: 0,
-              } })
+            ? (function() {
+                var leftGap = isFocused ? 18 : 13;
+                var rightGap = (i + 1 === effectiveFocusIdx) ? 18 : 13;
+                return h('div', { style: {
+                  position: 'absolute',
+                  top: 11, height: 2,
+                  left: 'calc(50% + ' + leftGap + 'px)',
+                  right: 'calc(-50% + ' + rightGap + 'px)',
+                  background: st === 'done' ? '#28A464'
+                           : st === 'active' ? '#543FDE'
+                           : '#E0E0E0',
+                  zIndex: 0,
+                } });
+              })()
             : null,
           h('div', { style: {
             width: 24, height: 24, borderRadius: '50%', boxSizing: 'border-box',
