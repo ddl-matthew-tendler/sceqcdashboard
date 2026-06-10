@@ -6095,7 +6095,7 @@ function DetailDrawer(props) {
       };
       collectArts(activeStageForCheck).forEach(function(a) {
         if (!a.required) return;
-        if (a.artifactType === 'guidance' || a.artifactType === 'policyScriptedCheck') return;
+        if (a.artifactType !== 'input') return;
         var ev = evidenceMap[a.id] || {};
         var formVal = evidenceForm[a.id];
         var current = formVal !== undefined ? formVal : ev.value;
