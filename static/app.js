@@ -6761,7 +6761,10 @@ function DetailDrawer(props) {
                     size: 'small', type: 'primary', loading: transitioning,
                     disabled: hasMissing,
                     onClick: handleCompleteBundle,
-                  }, '✓ Mark as Complete')
+                    icon: h('svg', { width: 13, height: 13, viewBox: '0 0 13 13', fill: 'none', xmlns: 'http://www.w3.org/2000/svg', style: { verticalAlign: '-1px' } },
+                      h('path', { d: 'M2 6.5L5.5 10L11 3', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' })
+                    ),
+                  }, 'Mark as Complete')
                 )
               )
       )
