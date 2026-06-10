@@ -5968,22 +5968,6 @@ function DetailDrawer(props) {
         var metaLine = metaParts.length > 0
           ? h('div', { style: { fontSize: 11, color: '#8F8FA3', marginTop: 2 } }, metaParts.join(' \u00B7 '))
           : null;
-        // Build a file-viewer URL when the attachment carries enough
-        // identifier metadata (Code/Report attachments have filename +
-        // branch + commit). Without these, we used to fall back to the
-        // bundle's governance page which felt broken to the user.
-        var fileUrl = null;
-        if (att.type === 'Report' && id.filename && (id.commit || id.branch)) {
-          var ownerEnc = encodeURIComponent(bundle.projectOwner || '');
-          var projEnc  = encodeURIComponent(bundle.projectName  || '');
-          if (ownerEnc && projEnc) {
-            var path = id.filename.split('/').map(encodeURIComponent).join('/');
-            try {
-              fileUrl = window.location.origin + '/u/' + ownerEnc + '/' + projEnc + '/dfs/view/' + path
-                + (id.commit ? '?commitId=' + encodeURIComponent(id.commit) : '');
-            } catch (e) { /* keep null */ }
-          }
-        }
         return h('div', { key: i, style: { display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 0', borderBottom: '1px solid #F5F5F8' } },
           h(Tag, { color: typeColors[att.type] || 'default', style: { fontSize: 10, flexShrink: 0, marginTop: 2 } }, typeLabel),
           h('div', { style: { flex: 1, minWidth: 0 } },
@@ -5991,13 +5975,9 @@ function DetailDrawer(props) {
               explorerLink
                 ? h(Tooltip, { title: 'Open in Data Explorer: ' + explorerPath },
                     h('a', { href: explorerLink, onClick: function(e) { openDataExplorer(explorerLink, explorerPath, e); }, style: { fontSize: 13, color: '#0070CC', cursor: 'pointer', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: 4 } }, deIcon, fname))
-                : fileUrl
-                  ? h(Tooltip, { title: 'Open file in Domino' + (id.commit ? ' @ ' + String(id.commit).slice(0, 8) : '') },
-                      h('a', { href: fileUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 13, color: '#543FDE', fontWeight: 500 } }, fname))
-                  : dominoUrl
-                    ? h(Tooltip, { title: 'No direct file link available. Opens the bundle in Domino.' },
-                        h('a', { href: dominoUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 13, color: '#543FDE', fontWeight: 500 } }, fname))
-                    : h('span', { style: { fontSize: 13, fontWeight: 500 } }, fname),
+                : dominoUrl
+                  ? h('a', { href: dominoUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 13, color: '#543FDE', fontWeight: 500 } }, fname)
+                  : h('span', { style: { fontSize: 13, fontWeight: 500 } }, fname),
               versionTag
             ),
             metaLine
