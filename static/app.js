@@ -3023,7 +3023,7 @@ function BulkActionBar(props) {
     var entry = seen[id];
     var m = entry.member;
     var coveredCount = selectedPids.filter(function(pid) { return entry.projectIds[pid]; }).length;
-    var label = (m.firstName || '') + ' ' + (m.lastName || '') + ' (' + m.userName + ')';
+    var label = (((m.firstName || '') + ' ' + (m.lastName || '')).trim()) || m.userName;
     if (selectedPids.length > 0 && coveredCount < selectedPids.length) {
       label += ' -' + coveredCount + '/' + selectedPids.length + ' projects';
     }
@@ -3452,7 +3452,7 @@ function AttachmentsDrawer(props) {
     onClose: onClose,
     width: 720,
     extra: dominoUrl
-      ? h(Button, { type: 'primary', size: 'small', onClick: function() { window.open(dominoUrl, '_blank'); }, style: { fontSize: 11 } }, '\u2197 View in Domino')
+      ? h(Button, { type: 'default', size: 'small', onClick: function() { window.open(dominoUrl, '_blank'); }, style: { fontSize: 11, borderColor: '#543FDE', color: '#543FDE' } }, '\u2197 View in Domino')
       : null,
   }, drawerChildren);
 }
@@ -4326,7 +4326,10 @@ function QCTrackerPage(props) {
       filterSearch: true,
       onFilter: function(v, r) { return r.projectName === v; },
       sorter: function(a, b) { return (a.projectName || '').localeCompare(b.projectName || ''); },
-      render: function(t) { return h('span', { style: { fontSize: 12 } }, t || '\u2013'); } },
+      render: function(t) {
+        var display = t ? t.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); }) : '\u2013';
+        return h('span', { style: { fontSize: 12 }, title: t || '' }, display);
+      } },
     { title: capFirst(P), dataIndex: 'policyName', key: 'policy', width: 150, ellipsis: true,
       filters: policyOptions.map(function(p) { return { text: p, value: p }; }),
       filterSearch: true,
@@ -4344,7 +4347,10 @@ function QCTrackerPage(props) {
       filterSearch: true,
       onFilter: function(v, r) { return r.stage === v; },
       sorter: function(a, b) { return (a.stage || '').localeCompare(b.stage || ''); },
-      render: function(t) { return h('span', { style: { fontSize: 12 } }, t || '\u2013'); } },
+      render: function(t) {
+        var display = t ? t.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); }) : '\u2013';
+        return h('span', { style: { fontSize: 12 }, title: t || '' }, display);
+      } },
     { title: 'Assignee', key: 'assignee', width: 160,
       filters: [{ text: 'Unassigned', value: '__unassigned__' }].concat(
         assigneeOptions.map(function(n) { return { text: n, value: n }; })
@@ -4362,10 +4368,9 @@ function QCTrackerPage(props) {
       render: function(_, record) {
         var pmc = props.projectMembersCache || {};
         var members = pmc[record.projectId] || [];
-        // Format member label: "First Last (username)" or just "(username)" if no name
         function fmtMember(m) {
           var full = ((m.firstName || '') + ' ' + (m.lastName || '')).trim();
-          return full ? full + ' (' + (m.userName || m.id) + ')' : (m.userName || m.fullName || m.id);
+          return full || (m.userName || m.fullName || m.id);
         }
         var memberOpts = members.map(function(m) {
           return { label: fmtMember(m), value: m.id };
@@ -4404,7 +4409,7 @@ function QCTrackerPage(props) {
         if (!assigneeName && currentStageAssignee) {
           var sa = currentStageAssignee;
           var full = ((sa.firstName || '') + ' ' + (sa.lastName || '')).trim();
-          assigneeName = full ? full + ' (' + (sa.name || sa.userName || '') + ')' : (sa.name || sa.userName || null);
+          assigneeName = full || (sa.name || sa.userName || null);
         }
         if (!assigneeName && assigneeId && !window._assigneeWarnedIds) window._assigneeWarnedIds = {};
         if (!assigneeName && assigneeId && !window._assigneeWarnedIds[assigneeId]) {
@@ -4528,7 +4533,7 @@ function QCTrackerPage(props) {
       ],
       onFilter: function(v, r) { return r.state === v; },
       render: function(s) { return h(Tag, { color: stateColor(s), style: { fontSize: 11 } }, s); } },
-    { title: h(Tooltip, { title: 'Attachments (\u26A0 = outdated snapshots)' }, icons && icons.PaperClipOutlined ? h(icons.PaperClipOutlined, { style: { fontSize: 14, color: '#8F8FA3' } }) : 'Att'), key: 'attachments', width: 60, align: 'center',
+    { title: h(Tooltip, { title: 'Attachments (\u26A0 = outdated snapshots)' }, h('span', { style: { fontSize: 11, color: '#8F8FA3', fontWeight: 500 } }, 'Links')), key: 'attachments', width: 60, align: 'center',
       sorter: function(a, b) { return (a._attachments || []).length - (b._attachments || []).length; },
       filters: [
         { text: 'Has Stale Snapshots', value: 'stale' },
@@ -4673,7 +4678,7 @@ function QCTrackerPage(props) {
             var members = pmc[record.projectId] || [];
             function fmtMember(m) {
               var full = ((m.firstName || '') + ' ' + (m.lastName || '')).trim();
-              return full ? full + ' (' + (m.userName || m.id) + ')' : (m.userName || m.fullName || m.id);
+              return full || (m.userName || m.fullName || m.id);
             }
             var memberOpts = members.map(function(m) { return { label: fmtMember(m), value: m.id }; });
             var stageId = stageObj.stageId || (stageObj.stage && stageObj.stage.id);
@@ -4695,7 +4700,7 @@ function QCTrackerPage(props) {
             if (!assigneeName && assigneeRaw) {
               var sa = assigneeRaw;
               var full = ((sa.firstName || '') + ' ' + (sa.lastName || '')).trim();
-              assigneeName = full ? full + ' (' + (sa.name || sa.userName || '') + ')' : (sa.name || sa.userName || null);
+              assigneeName = full || (sa.name || sa.userName || null);
             }
             if (assigneeId && !memberOpts.some(function(o) { return o.value === assigneeId; })) {
               memberOpts.unshift({ label: assigneeName || 'Unknown user (' + (assigneeRaw && (assigneeRaw.name || assigneeRaw.id) || '?') + ')', value: assigneeId });
@@ -4763,13 +4768,13 @@ function QCTrackerPage(props) {
     var el = document.getElementById('qc-chart-status');
     if (!el) return;
     Highcharts.chart('qc-chart-status', {
-      chart: { type: 'pie', height: 180, backgroundColor: 'transparent' },
+      chart: { type: 'pie', height: 280, backgroundColor: 'transparent' },
       title: { text: null },
       plotOptions: {
         pie: {
           innerSize: '55%',
           cursor: 'pointer',
-          dataLabels: { enabled: true, format: '{point.name}: {point.y}', style: { fontSize: '10px' } },
+          dataLabels: { enabled: true, format: '{point.name}: {point.y}', style: { fontSize: '11px' } },
           point: { events: { click: function() {
             var stateName = this.name; // 'Active', 'Complete', or 'Archived'
             // Use stable setters directly (not handleStatClick which may be stale in this closure)
@@ -5199,7 +5204,7 @@ function EvidenceStageSection(props) {
         onClick: function() { setOpen(!open); } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 } },
           h('span', { style: { fontSize: 14, fontWeight: isActive ? 600 : 500, color: titleColor } }, props.stageName),
-          h('span', { style: { fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 10, textTransform: 'uppercase', letterSpacing: '0.04em', background: statusColor.bg, color: statusColor.fg } }, props.statusLabel)
+          h(Tag, { color: props.statusLabel === 'Active' ? 'purple' : props.statusLabel === 'Complete' ? 'success' : 'default', style: { fontSize: 10, margin: 0 } }, props.statusLabel)
         ),
         metaCluster
       ),
@@ -5832,7 +5837,7 @@ function DetailDrawer(props) {
         var assigneeName = assignee ? assignee.name : null;
         var members = projectMembersCache[bundle.projectId] || [];
         var memberOptions = members.map(function(m) {
-          return { label: (m.firstName || '') + ' ' + (m.lastName || '') + ' (' + m.userName + ')', value: m.id };
+          return { label: (((m.firstName || '') + ' ' + (m.lastName || '')).trim()) || m.userName, value: m.id };
         });
         // Resolve assignee: try ID match, then userName match against members
         var resolvedAssigneeId = assignee ? assignee.id : undefined;
@@ -6401,7 +6406,7 @@ function DetailDrawer(props) {
           // Plain-string label so Antd's filter/selected-value rendering
           // works normally. Prefix with the sparkle for agent users so
           // they're visually distinct in the open dropdown too.
-          label: (isAgent ? '✨ ' : '') + displayName + ' (' + m.userName + ')',
+          label: (isAgent ? '✨ ' : '') + displayName,
           title: isAgent ? 'Recommended for automation' : undefined,
         };
       });
@@ -6998,7 +7003,7 @@ function AssignmentRulesPage(props) {
     var pmc = props.projectMembersCache || {};
     var members = selectedProject ? (pmc[selectedProject] || []) : [];
     return members.map(function(m) {
-      return { label: (m.firstName || '') + ' ' + (m.lastName || '') + ' (' + m.userName + ')', value: m.userName };
+      return { label: (((m.firstName || '') + ' ' + (m.lastName || '')).trim()) || m.userName, value: m.userName };
     });
   }, [selectedProject, props.projectMembersCache]);
 
@@ -7580,7 +7585,7 @@ function StageAssignmentsPage(props) {
       (projectMembersCache[pid] || []).forEach(function(m) {
         if (!seen[m.userName]) {
           seen[m.userName] = true;
-          opts.push({ label: (m.firstName || '') + ' ' + (m.lastName || '') + ' (' + m.userName + ')', value: m.userName });
+          opts.push({ label: (((m.firstName || '') + ' ' + (m.lastName || '')).trim()) || m.userName, value: m.userName });
         }
       });
     });

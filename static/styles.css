@@ -173,7 +173,7 @@ body {
 
 .main-content-wrapper > .global-filter-bar {
   flex-shrink: 0;
-  margin: 16px 28px 0 28px;
+  margin: 24px 28px 0 28px;
 }
 
 .main-content {
