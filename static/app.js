@@ -5118,7 +5118,7 @@ function EvidenceStageSection(props) {
   return h('div', { style: { borderBottom: '1px solid #E0E0E0' } },
     h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 4px', cursor: 'pointer', userSelect: 'none' },
       onClick: function() { setOpen(!open); } },
-      h('div', { style: { display: 'flex', alignItems: 'center', gap: 10 } },
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 } },
         h('span', { style: { fontSize: 13, fontWeight: isActive ? 600 : 500, color: titleColor } }, props.stageName),
         h('span', { style: { fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 10, textTransform: 'uppercase', letterSpacing: '0.04em', background: statusColor.bg, color: statusColor.fg } }, props.statusLabel),
         props.assigneeNode
@@ -5128,24 +5128,35 @@ function EvidenceStageSection(props) {
             )
           : (props.assignee
               ? h('span', { style: { fontSize: 11, color: muted ? '#B0B0C0' : '#65657B' } }, '· ' + props.assignee)
-              : null),
-        // Required-field progress. Hidden when there are zero required.
+              : null)
+      ),
+      // Right side of the header: required-field progress, then chevron.
+      // Required count lives over here, separated from the assignee
+      // controls on the left, so it does not visually attach to the
+      // assignee Select.
+      h('span', { style: { display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 } },
         props.requiredTotal > 0
           ? h('span', {
               style: {
-                fontSize: 11,
-                color: muted
-                  ? '#B0B0C0'
-                  : (props.requiredFilled === props.requiredTotal ? '#28A464' : '#C20A29'),
+                fontSize: 10.5,
                 fontWeight: 500,
+                padding: '2px 8px',
+                borderRadius: 10,
+                background: muted
+                  ? '#F3F4F6'
+                  : (props.requiredFilled === props.requiredTotal ? '#D1FAE5' : '#FEE2E2'),
+                color: muted
+                  ? '#9CA3AF'
+                  : (props.requiredFilled === props.requiredTotal ? '#065F46' : '#991B1B'),
+                whiteSpace: 'nowrap',
               },
               title: props.requiredFilled + ' of ' + props.requiredTotal + ' required fields completed',
             },
-              '· ' + props.requiredFilled + ' / ' + props.requiredTotal + ' required'
+              props.requiredFilled + ' / ' + props.requiredTotal + ' required'
             )
-          : null
-      ),
-      h('span', { style: { color: muted ? '#C5C5D0' : '#8F8FA3', fontSize: 11, transition: 'transform 0.2s', display: 'inline-block', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' } }, '▼')
+          : null,
+        h('span', { style: { color: muted ? '#C5C5D0' : '#8F8FA3', fontSize: 11, transition: 'transform 0.2s', display: 'inline-block', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' } }, '▼')
+      )
     ),
     open
       ? h('div', { style: { padding: '4px 4px 16px' } }, props.children)
