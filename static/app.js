@@ -775,22 +775,18 @@ function ColumnVisibilityDropdown(props) {
 
 // ── Stat Card ───────────────────────────────────────────────────
 function StatCard(props) {
-  // While `loading` is true (e.g. bundle enrichment is still streaming
-  // in), render a pulsing skeleton bar for the value and sub instead of
-  // misleading zeros. Click handler is suppressed so users don't filter
-  // on incomplete data.
   var isLoading = !!props.loading;
   var cls = 'stat-card'
-    + (props.onClick && !isLoading ? ' stat-card-clickable' : '')
-    + (props.active && !isLoading ? ' stat-card-active' : '')
-    + (isLoading ? ' stat-card-loading' : '');
-  var valueNode = isLoading
-    ? h('div', { className: 'stat-card-skeleton stat-card-skeleton-value' })
-    : h('div', { className: 'stat-card-value ' + (props.color || '') }, props.value);
+    + (props.onClick ? ' stat-card-clickable' : '')
+    + (props.active ? ' stat-card-active' : '');
+  var valueNode = h('div', { className: 'stat-card-value ' + (props.color || '') }, props.value);
   var subNode = isLoading
-    ? h('div', { className: 'stat-card-skeleton stat-card-skeleton-sub' })
+    ? h('div', { className: 'stat-card-sub stat-card-computing' },
+        h(antd.Spin, { size: 'small', style: { marginRight: 5 } }),
+        'Computing\u2026'
+      )
     : (props.sub ? h('div', { className: 'stat-card-sub' }, props.sub) : null);
-  var card = h('div', { className: cls, onClick: isLoading ? null : (props.onClick || null) },
+  var card = h('div', { className: cls, onClick: props.onClick || null },
     h('div', { className: 'stat-card-label' },
       props.label,
       props.tooltip ? h('span', { style: { marginLeft: 4, cursor: 'help', color: '#B0B0C0', fontSize: 11 } }, '\u24D8') : null
@@ -798,7 +794,7 @@ function StatCard(props) {
     valueNode,
     subNode
   );
-  return props.tooltip && !isLoading ? h(Tooltip, { title: props.tooltip, placement: 'top', overlayStyle: { maxWidth: 280 } }, card) : card;
+  return props.tooltip ? h(Tooltip, { title: props.tooltip, placement: 'top', overlayStyle: { maxWidth: 280 } }, card) : card;
 }
 
 // (ConnectionBanner removed -replaced by Dummy Data toggle in TopNav)
@@ -4869,7 +4865,7 @@ function QCTrackerPage(props) {
         h(StatCard, { label: 'Total ' + capFirst(B) + 's', value: stats.total, color: 'primary' })),
       h('div', { className: 'stat-card-clickable' + (activeStatCard === 'active' ? ' stat-card-active' : ''), onClick: function() { handleStatClick('active'); } },
         h(StatCard, { label: 'Active', value: stats.active, color: 'info' })),
-      h('div', { className: 'stat-card-clickable' + (activeStatCard === 'openFindings' ? ' stat-card-active' : ''), onClick: props.enrichmentLoading ? null : function() { handleStatClick('openFindings'); } },
+      h('div', { className: 'stat-card-clickable' + (activeStatCard === 'openFindings' ? ' stat-card-active' : ''), onClick: function() { handleStatClick('openFindings'); } },
         h(StatCard, { label: 'Open Findings', value: stats.openFindings, color: stats.openFindings > 0 ? 'danger' : '', loading: props.enrichmentLoading })),
       h('div', { className: 'stat-card-clickable' + (activeStatCard === 'unassigned' ? ' stat-card-active' : ''), onClick: function() { handleStatClick('unassigned'); } },
         h(StatCard, { label: 'Unassigned', value: stats.unassigned, color: stats.unassigned > 0 ? 'warning' : '' })),
