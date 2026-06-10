@@ -3360,11 +3360,14 @@ function BulkActionBar(props) {
       okButtonProps: { disabled: eligibleCount === 0 },
       width: 520,
     },
-      h('p', { style: { color: '#65657B', marginBottom: 16, fontSize: 13 } },
-        eligibleCount + ' of ' + bulkTransitionItems.length + ' selected ' + B.toLowerCase() + (bulkTransitionItems.length > 1 ? 's' : '') + ' can advance to the next stage.'
+      h('p', { style: { color: '#65657B', marginBottom: 4, fontSize: 13 } },
+        eligibleCount + ' of ' + bulkTransitionItems.length + ' selected ' + B.toLowerCase() + (bulkTransitionItems.length > 1 ? 's' : '') + ' pass the basic checks for advancing.'
       ),
+      eligibleCount > 0 ? h('p', { style: { color: '#8F8FA3', marginBottom: 16, fontSize: 12 } },
+        'Domino runs final policy validation when you confirm — any ' + B.toLowerCase() + ' missing required questions or fields will be reported back.'
+      ) : null,
       eligibleCount > 0 ? h('div', { style: { marginBottom: ineligibleItems.length > 0 ? 16 : 0 } },
-        h('p', { style: { fontWeight: 600, fontSize: 13, marginBottom: 6, color: '#2E2E38' } }, 'Will advance (' + eligibleCount + '):'),
+        h('p', { style: { fontWeight: 600, fontSize: 13, marginBottom: 6, color: '#2E2E38' } }, 'Ready to attempt (' + eligibleCount + '):'),
         bulkTransitionItems.filter(function(it) { return it.eligible; }).map(function(it, i) {
           return h('div', { key: i, style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, padding: '5px 0', borderBottom: '1px solid #F0F0F0' } },
             h('span', { style: { color: '#2E2E38', fontWeight: 500, flex: 1, marginRight: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, it.name),
