@@ -5109,7 +5109,14 @@ function EvidenceDebugPanel(props) {
 function EvidenceStageSection(props) {
   var _o = useState(props.defaultOpen !== false);
   var open = _o[0]; var setOpen = _o[1];
+  // Guidance panel is closed by default; opens via the small
+  // "ⓘ Instructions" link in the header. Lives at the top of the
+  // expanded section content so it doesn't push the stage's actionable
+  // content down when nobody is reading it.
+  var _g = useState(false);
+  var guidanceOpen = _g[0]; var setGuidanceOpen = _g[1];
   var statusColor = props.statusColor;
+  var hasGuidance = props.guidance && props.guidance.length > 0;
   // Only the ACTIVE stage is bold + dark. Done and pending stages are
   // both muted so the user's attention lands on what they need to work on.
   var isActive = (props.statusLabel || '').toLowerCase() === 'active';
@@ -5130,11 +5137,29 @@ function EvidenceStageSection(props) {
               ? h('span', { style: { fontSize: 11, color: muted ? '#B0B0C0' : '#65657B' } }, '· ' + props.assignee)
               : null)
       ),
-      // Right side of the header: required-field progress, then chevron.
-      // Required count lives over here, separated from the assignee
-      // controls on the left, so it does not visually attach to the
-      // assignee Select.
+      // Right side of the header: instructions link, required progress,
+      // then chevron. The instructions link is the only entry point to
+      // stage guidance, so the boxes don't take vertical space inline.
       h('span', { style: { display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 } },
+        hasGuidance
+          ? h('a', {
+              onClick: function(e) {
+                e.stopPropagation();
+                if (!open) setOpen(true);   // expand the section if collapsed
+                setGuidanceOpen(function(prev) { return !prev; });
+              },
+              style: {
+                fontSize: 11, color: muted ? '#B0B0C0' : '#7A5FE0',
+                cursor: 'pointer', textDecoration: 'none',
+                display: 'inline-flex', alignItems: 'center', gap: 3,
+                fontWeight: 500,
+              },
+              title: 'Stage instructions',
+            },
+              h('span', null, 'ⓘ'),
+              h('span', null, guidanceOpen ? 'Hide instructions' : 'Instructions')
+            )
+          : null,
         props.requiredTotal > 0
           ? h('span', {
               style: {
@@ -5159,7 +5184,38 @@ function EvidenceStageSection(props) {
       )
     ),
     open
-      ? h('div', { style: { padding: '4px 4px 16px' } }, props.children)
+      ? h('div', { style: { padding: '4px 4px 16px' } },
+          // Stage-instructions panel: collected guidance for the stage.
+          // Lives at the top of the section content, rendered with the
+          // existing markdown helper so formatting (bold, code, lists)
+          // carries over. Stays out of the way until requested via the
+          // Instructions link in the header.
+          guidanceOpen && hasGuidance
+            ? h('div', {
+                style: {
+                  background: 'rgba(84,63,222,0.04)',
+                  border: '1px solid #C9C5F2',
+                  borderRadius: 6,
+                  padding: '10px 14px',
+                  marginBottom: 12,
+                  color: '#2E2E38',
+                  fontSize: 12, lineHeight: 1.5,
+                },
+              },
+                h('div', {
+                  style: { fontSize: 10.5, fontWeight: 600, color: '#7A5FE0', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 },
+                },
+                  'Stage instructions'
+                ),
+                props.guidance.map(function(text, i) {
+                  return h('div', { key: i, style: { marginBottom: i < props.guidance.length - 1 ? 10 : 0, paddingBottom: i < props.guidance.length - 1 ? 10 : 0, borderBottom: i < props.guidance.length - 1 ? '1px solid rgba(201,197,242,0.5)' : 'none' } },
+                    renderInlineMd(text)
+                  );
+                })
+              )
+            : null,
+          props.children
+        )
       : null
   );
 }
@@ -5912,6 +5968,22 @@ function DetailDrawer(props) {
         var metaLine = metaParts.length > 0
           ? h('div', { style: { fontSize: 11, color: '#8F8FA3', marginTop: 2 } }, metaParts.join(' \u00B7 '))
           : null;
+        // Build a file-viewer URL when the attachment carries enough
+        // identifier metadata (Code/Report attachments have filename +
+        // branch + commit). Without these, we used to fall back to the
+        // bundle's governance page which felt broken to the user.
+        var fileUrl = null;
+        if (att.type === 'Report' && id.filename && (id.commit || id.branch)) {
+          var ownerEnc = encodeURIComponent(bundle.projectOwner || '');
+          var projEnc  = encodeURIComponent(bundle.projectName  || '');
+          if (ownerEnc && projEnc) {
+            var path = id.filename.split('/').map(encodeURIComponent).join('/');
+            try {
+              fileUrl = window.location.origin + '/u/' + ownerEnc + '/' + projEnc + '/view/' + path
+                + (id.commit ? '?commitId=' + encodeURIComponent(id.commit) : '');
+            } catch (e) { /* keep null */ }
+          }
+        }
         return h('div', { key: i, style: { display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 0', borderBottom: '1px solid #F5F5F8' } },
           h(Tag, { color: typeColors[att.type] || 'default', style: { fontSize: 10, flexShrink: 0, marginTop: 2 } }, typeLabel),
           h('div', { style: { flex: 1, minWidth: 0 } },
@@ -5919,9 +5991,13 @@ function DetailDrawer(props) {
               explorerLink
                 ? h(Tooltip, { title: 'Open in Data Explorer: ' + explorerPath },
                     h('a', { href: explorerLink, onClick: function(e) { openDataExplorer(explorerLink, explorerPath, e); }, style: { fontSize: 13, color: '#0070CC', cursor: 'pointer', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: 4 } }, deIcon, fname))
-                : dominoUrl
-                  ? h('a', { href: dominoUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 13, color: '#543FDE', fontWeight: 500 } }, fname)
-                  : h('span', { style: { fontSize: 13, fontWeight: 500 } }, fname),
+                : fileUrl
+                  ? h(Tooltip, { title: 'Open file in Domino' + (id.commit ? ' @ ' + String(id.commit).slice(0, 8) : '') },
+                      h('a', { href: fileUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 13, color: '#543FDE', fontWeight: 500 } }, fname))
+                  : dominoUrl
+                    ? h(Tooltip, { title: 'No direct file link available. Opens the bundle in Domino.' },
+                        h('a', { href: dominoUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 13, color: '#543FDE', fontWeight: 500 } }, fname))
+                    : h('span', { style: { fontSize: 13, fontWeight: 500 } }, fname),
               versionTag
             ),
             metaLine
@@ -6299,9 +6375,38 @@ function DetailDrawer(props) {
             : 'Assign an agent user to this stage to run automation.')
         : null;
 
-      // Walk each evidenceSet separately so we can render a Save button per set.
+      // Collect all guidance text for this stage so we can surface it
+      // behind a single "ⓘ Stage instructions" link in the header
+      // instead of rendering each banner inline. Walks both evidence
+      // sets and approval evidence.
+      var stageGuidance = [];
+      (stage.evidenceSet || []).forEach(function(es) {
+        (es.artifacts || []).forEach(function(a) {
+          if (a.artifactType === 'guidance' && a.details && a.details.text) {
+            stageGuidance.push(a.details.text);
+          }
+        });
+      });
+      (stage.approvals || []).forEach(function(ap) {
+        ((ap.evidence || {}).artifacts || []).forEach(function(a) {
+          if (a.artifactType === 'guidance' && a.details && a.details.text) {
+            stageGuidance.push(a.details.text);
+          }
+        });
+      });
+
+      // Walk each evidence set separately. Approval blocks
+      // (stage.approvals[].evidence) carry the same shape as evidence
+      // sets but live under a different key, so we merge them in here -
+      // otherwise approval-only stages like Study Lead Verification
+      // would render "No evidence fields configured" even though the
+      // required count knew about them.
+      var allEvidenceSets = (stage.evidenceSet || []).slice();
+      (stage.approvals || []).forEach(function(ap) {
+        if (ap && ap.evidence && ap.evidence.id) allEvidenceSets.push(ap.evidence);
+      });
       var sectionContent = [];
-      (stage.evidenceSet || []).forEach(function(es, esIdx) {
+      allEvidenceSets.forEach(function(es, esIdx) {
         var arts = (es.artifacts || []);  // include guidance (rendered as banners)
         if (!arts.length) return;
         var savableIds = arts.filter(function(a) { return a.artifactType === 'input'; }).map(function(a) { return a.id; });
@@ -6369,8 +6474,10 @@ function DetailDrawer(props) {
         arts.forEach(function(art) {
           var ev = evidenceMap[art.id] || {};
           if (art.artifactType === 'guidance') {
+            // Guidance no longer renders inline. Collected at the stage
+            // level and surfaced through "ⓘ Stage instructions" in the
+            // stage header on demand.
             flushAgentOutputs();
-            fieldEls.push(h(GuidanceBanner, { key: art.id, details: art.details || {} }));
             return;
           }
           if (art.artifactType === 'policyScriptedCheck') {
@@ -6453,6 +6560,7 @@ function DetailDrawer(props) {
         assigneeNode: assigneeNode,
         requiredFilled: stageRequiredFilled,
         requiredTotal: stageRequired,
+        guidance: stageGuidance,
         defaultOpen: st === 'active',
       }, sectionContent);
     });
