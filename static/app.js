@@ -5141,66 +5141,75 @@ function EvidenceStageSection(props) {
   var isActive = (props.statusLabel || '').toLowerCase() === 'active';
   var titleColor = isActive ? '#2E2E38' : '#8F8FA3';
   var muted = !isActive;
+  // Header is two stacked rows so the stage name, meta cluster, and
+  // assignee picker stop fighting for one row. Row 1 stays clickable for
+  // collapse; row 2 (the assignee picker) is isolated so clicking the
+  // select doesn't accidentally toggle the section.
+  var metaCluster = h('span', { style: { display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 } },
+    hasGuidance
+      ? h('a', {
+          onClick: function(e) {
+            e.stopPropagation();
+            if (!open) setOpen(true);   // expand the section if collapsed
+            setGuidanceOpen(function(prev) { return !prev; });
+          },
+          style: {
+            fontSize: 11, color: muted ? '#B0B0C0' : '#7A5FE0',
+            cursor: 'pointer', textDecoration: 'none',
+            display: 'inline-flex', alignItems: 'center', gap: 3,
+            fontWeight: 500,
+          },
+          title: 'Stage instructions',
+        },
+          h('span', null, 'ⓘ'),
+          h('span', null, guidanceOpen ? 'Hide instructions' : 'Instructions')
+        )
+      : null,
+    props.requiredTotal > 0
+      ? h('span', {
+          style: {
+            fontSize: 10.5,
+            fontWeight: 500,
+            padding: '2px 8px',
+            borderRadius: 10,
+            background: muted
+              ? '#F3F4F6'
+              : (props.requiredFilled === props.requiredTotal ? '#D1FAE5' : '#FEE2E2'),
+            color: muted
+              ? '#9CA3AF'
+              : (props.requiredFilled === props.requiredTotal ? '#065F46' : '#991B1B'),
+            whiteSpace: 'nowrap',
+          },
+          title: props.requiredFilled + ' of ' + props.requiredTotal + ' required fields completed',
+        },
+          props.requiredFilled + ' / ' + props.requiredTotal + ' required'
+        )
+      : null,
+    h('span', { style: { color: muted ? '#C5C5D0' : '#8F8FA3', fontSize: 11, transition: 'transform 0.2s', display: 'inline-block', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' } }, '▼')
+  );
+
+  var hasAssignee = !!props.assigneeNode || !!props.assignee;
+
   return h('div', { style: { borderBottom: '1px solid #E0E0E0' } },
-    h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 4px', cursor: 'pointer', userSelect: 'none' },
-      onClick: function() { setOpen(!open); } },
-      h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 } },
-        h('span', { style: { fontSize: 13, fontWeight: isActive ? 600 : 500, color: titleColor } }, props.stageName),
-        h('span', { style: { fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 10, textTransform: 'uppercase', letterSpacing: '0.04em', background: statusColor.bg, color: statusColor.fg } }, props.statusLabel),
-        props.assigneeNode
-          ? h('span', { style: { display: 'inline-flex', alignItems: 'center' }, onClick: function(e) { e.stopPropagation(); } },
-              h('span', { style: { fontSize: 11, color: muted ? '#B0B0C0' : '#65657B', marginRight: 6 } }, '·'),
-              props.assigneeNode
-            )
-          : (props.assignee
-              ? h('span', { style: { fontSize: 11, color: muted ? '#B0B0C0' : '#65657B' } }, '· ' + props.assignee)
-              : null)
+    h('div', { style: { padding: '12px 4px 10px' } },
+      // Row 1: title + status (clickable for collapse) | meta cluster
+      h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', userSelect: 'none', gap: 12 },
+        onClick: function() { setOpen(!open); } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 } },
+          h('span', { style: { fontSize: 14, fontWeight: isActive ? 600 : 500, color: titleColor } }, props.stageName),
+          h('span', { style: { fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 10, textTransform: 'uppercase', letterSpacing: '0.04em', background: statusColor.bg, color: statusColor.fg } }, props.statusLabel)
+        ),
+        metaCluster
       ),
-      // Right side of the header: instructions link, required progress,
-      // then chevron. The instructions link is the only entry point to
-      // stage guidance, so the boxes don't take vertical space inline.
-      h('span', { style: { display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 } },
-        hasGuidance
-          ? h('a', {
-              onClick: function(e) {
-                e.stopPropagation();
-                if (!open) setOpen(true);   // expand the section if collapsed
-                setGuidanceOpen(function(prev) { return !prev; });
-              },
-              style: {
-                fontSize: 11, color: muted ? '#B0B0C0' : '#7A5FE0',
-                cursor: 'pointer', textDecoration: 'none',
-                display: 'inline-flex', alignItems: 'center', gap: 3,
-                fontWeight: 500,
-              },
-              title: 'Stage instructions',
-            },
-              h('span', null, 'ⓘ'),
-              h('span', null, guidanceOpen ? 'Hide instructions' : 'Instructions')
-            )
-          : null,
-        props.requiredTotal > 0
-          ? h('span', {
-              style: {
-                fontSize: 10.5,
-                fontWeight: 500,
-                padding: '2px 8px',
-                borderRadius: 10,
-                background: muted
-                  ? '#F3F4F6'
-                  : (props.requiredFilled === props.requiredTotal ? '#D1FAE5' : '#FEE2E2'),
-                color: muted
-                  ? '#9CA3AF'
-                  : (props.requiredFilled === props.requiredTotal ? '#065F46' : '#991B1B'),
-                whiteSpace: 'nowrap',
-              },
-              title: props.requiredFilled + ' of ' + props.requiredTotal + ' required fields completed',
-            },
-              props.requiredFilled + ' / ' + props.requiredTotal + ' required'
-            )
-          : null,
-        h('span', { style: { color: muted ? '#C5C5D0' : '#8F8FA3', fontSize: 11, transition: 'transform 0.2s', display: 'inline-block', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' } }, '▼')
-      )
+      // Row 2: assignee picker, on its own line with a small label so
+      // ownership feels like a real action target, not inline meta.
+      hasAssignee
+        ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, paddingTop: 8, borderTop: '1px dashed #F1F1F4' },
+            onClick: function(e) { e.stopPropagation(); } },
+            h('span', { style: { fontSize: 10.5, color: '#8F8FA3', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 } }, 'Assigned to'),
+            props.assigneeNode || h('span', { style: { fontSize: 12, color: muted ? '#B0B0C0' : '#2E2E38' } }, props.assignee)
+          )
+        : null
     ),
     open
       ? h('div', { style: { padding: '4px 4px 16px' } },
@@ -5638,6 +5647,13 @@ function DetailDrawer(props) {
   var _fl = useState({});  var flashSet = _fl[0];  var setFlashSet = _fl[1];    // artifactId -> true (briefly)
   // Stage transition state
   var _tr = useState(false); var transitioning = _tr[0]; var setTransitioning = _tr[1];
+  // Focused stage: only one stage's evidence renders at a time. Defaults
+  // to the active stage when the drawer opens; the user can swap by
+  // clicking another circle in the stepper. Null = "fall back to active".
+  // Reset whenever the user opens a different bundle so we don't carry
+  // over an out-of-range index across bundles with different stage counts.
+  var _focus = useState(null); var focusedStageIdx = _focus[0]; var setFocusedStageIdx = _focus[1];
+  useEffect(function() { setFocusedStageIdx(null); }, [bundleId]);
   // Drawer width: drag-to-resize via a handle on the left edge.
   // Width is persisted to localStorage on mouseup (not on every frame).
   var _dw = useState(function() {
@@ -6124,12 +6140,35 @@ function DetailDrawer(props) {
     var hasMissing = missingRequired.length > 0;
     var canTransition = !!nextStage && fullBundle.state !== 'Complete' && !hasMissing;
 
-    // Stepper. Future-stage dots are clickable and trigger the same
-    // "Advance to..." confirm dialog as the header button. Done/active
-    // dots are non-interactive.
-    var stepper = h('div', { style: { display: 'flex', alignItems: 'flex-start', padding: '4px 0 16px', borderBottom: '1px solid #E0E0E0', marginBottom: 12, overflowX: 'auto' } },
+    // Pick the focused stage. Priority: explicit user click > initialStage
+    // prop (e.g. timeline-dot deep-link from the table) > the active stage.
+    // Clamp to a valid index in case the bundle's stage count changes.
+    var initialStageIdx = initialStage
+      ? stages.findIndex(function(s) { return s.name === initialStage; })
+      : -1;
+    var effectiveFocusIdx = focusedStageIdx != null && focusedStageIdx >= 0 && focusedStageIdx < stages.length
+      ? focusedStageIdx
+      : (initialStageIdx >= 0 ? initialStageIdx : (currentIdx >= 0 ? currentIdx : 0));
+
+    // Trim a "Display Name (handle)" assignee string down to something
+    // that fits under a 25%-wide stepper column. Falls back to the raw
+    // value when no parens shape is present.
+    function shortAssignee(raw) {
+      if (!raw) return null;
+      var m = String(raw).match(/^(.+?)\s*\(([^)]+)\)\s*$/);
+      var display = m ? m[1] : raw;
+      if (display.length <= 22) return display;
+      return display.slice(0, 21) + '…';
+    }
+
+    // Stepper. Every dot is click-to-focus. The previous behaviour of
+    // click-to-advance-pending-stage moved to the "Advance to next stage"
+    // button in the topBar (above) — clicking a dot for a different reason
+    // each time was hard to predict.
+    var stepper = h('div', { style: { display: 'flex', alignItems: 'flex-start', padding: '4px 0 14px', borderBottom: '1px solid #E0E0E0', marginBottom: 12, overflowX: 'auto' } },
       stages.map(function(stage, i) {
         var st = stageStates[i];
+        var isFocused = i === effectiveFocusIdx;
         // Color language matches the Progress column in the bundles
         // table:  green = done, purple = active, gray = pending.
         var dotBg     = st === 'done' ? '#28A464' : '#FFFFFF';
@@ -6139,29 +6178,26 @@ function DetailDrawer(props) {
         var dotColor  = st === 'done' ? '#FFFFFF'
                       : st === 'active' ? '#543FDE'
                       : '#8F8FA3';
-        var dotShadow = st === 'active' ? '0 0 0 3px rgba(84,63,222,0.15)' : 'none';
-        var labelColor = st === 'done' ? '#28A464'
-                       : st === 'active' ? '#543FDE'
-                       : '#8F8FA3';
-        var isClickable = st === 'pending' && fullBundle.state !== 'Complete' && !hasMissing;
-        var blockedClickable = st === 'pending' && fullBundle.state !== 'Complete' && hasMissing;
-        var tooltipText = isClickable
-          ? 'Advance to ' + stage.name
-          : (blockedClickable
-              ? 'Complete ' + missingRequired.length + ' required field' + (missingRequired.length === 1 ? '' : 's') + ' before advancing'
-              : undefined);
+        // Selected dot gets an extra purple ring around it (distinct from
+        // "active" which is what the bundle is currently working on).
+        var dotShadow = isFocused
+          ? '0 0 0 3px #EDECFB, 0 0 0 5px #543FDE'
+          : (st === 'active' ? '0 0 0 3px rgba(84,63,222,0.15)' : 'none');
+        var labelColor = isFocused
+          ? '#311EAE'
+          : (st === 'done' ? '#28A464'
+              : st === 'active' ? '#543FDE'
+              : '#8F8FA3');
+        var assigneeText = shortAssignee(stageAssignees[stage.name]);
         return h('div', { key: i,
           style: {
-            // flex: '1 1 0' + minWidth: 0 guarantees equal column widths,
-            // which keeps the absolutely positioned connector lines aligned.
             flex: '1 1 0', minWidth: 0,
             display: 'flex', flexDirection: 'column', alignItems: 'center',
             position: 'relative', padding: '0 4px',
-            cursor: isClickable ? 'pointer' : (blockedClickable ? 'not-allowed' : 'default'),
-            opacity: blockedClickable ? 0.55 : 1,
+            cursor: 'pointer',
           },
-          onClick: isClickable ? function() { handleTransitionStage(stage.name); } : undefined,
-          title: tooltipText },
+          onClick: function() { setFocusedStageIdx(i); },
+          title: 'Show ' + stage.name },
           // Connector line. Starts at this column's center+13 and runs to
           // the next column's center-13 (dot radius 12 + 1px breathing room).
           i < stages.length - 1
@@ -6169,9 +6205,6 @@ function DetailDrawer(props) {
                 position: 'absolute',
                 top: 11, height: 2,
                 left: 'calc(50% + 13px)', right: 'calc(-50% + 13px)',
-                // Line between done -> next is green; active -> next is
-                // purple (the work is happening on this end); pending
-                // connectors are gray.
                 background: st === 'done' ? '#28A464'
                          : st === 'active' ? '#543FDE'
                          : '#E0E0E0',
@@ -6185,13 +6218,13 @@ function DetailDrawer(props) {
             fontSize: 11, fontWeight: 700, lineHeight: 1,
             boxShadow: dotShadow, position: 'relative', zIndex: 1, flexShrink: 0,
             transition: 'transform 0.15s, box-shadow 0.15s',
-          },
-          onMouseEnter: isClickable ? function(e) { e.currentTarget.style.transform = 'scale(1.15)'; e.currentTarget.style.boxShadow = '0 0 0 3px rgba(84,63,222,0.2)'; e.currentTarget.style.borderColor = '#543FDE'; } : undefined,
-          onMouseLeave: isClickable ? function(e) { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = ''; e.currentTarget.style.borderColor = dotBorder; } : undefined,
-          },
+          } },
             st === 'done' ? '✓' : String(i + 1)
           ),
-          h('div', { style: { marginTop: 6, fontSize: 10.5, color: labelColor, fontWeight: st === 'pending' ? 400 : 500, textAlign: 'center', lineHeight: 1.2 } }, stage.name)
+          h('div', { style: { marginTop: 8, fontSize: 11, color: labelColor, fontWeight: isFocused ? 600 : (st === 'pending' ? 400 : 500), textAlign: 'center', lineHeight: 1.25 } }, stage.name),
+          h('div', { style: { marginTop: 3, fontSize: 10.5, color: '#8F8FA3', textAlign: 'center', lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', fontStyle: assigneeText ? 'normal' : 'italic' }, title: stageAssignees[stage.name] || 'Unassigned' },
+            assigneeText ? 'Assigned to: ' + assigneeText : 'Unassigned'
+          )
         );
       })
     );
@@ -6649,12 +6682,10 @@ function DetailDrawer(props) {
         requiredFilled: stageRequiredFilled,
         requiredTotal: stageRequired,
         guidance: stageGuidance,
-        // If the user clicked a specific stage dot in the table, open
-        // that one and collapse the rest. Otherwise default to the
-        // currently active stage. Keying the section by currentStageName
-        // (above) plus initialStage means revisiting after a transition
-        // refreshes which one is open.
-        defaultOpen: initialStage ? stage.name === initialStage : st === 'active',
+        // Always open: we now render only the focused stage, so there's
+        // no reason to start it collapsed. The chevron remains as an
+        // escape hatch if the user wants to temporarily hide the form.
+        defaultOpen: true,
       }, sectionContent);
     });
 
@@ -6738,7 +6769,22 @@ function DetailDrawer(props) {
       lastError: debugState.lastError,
     });
 
-    return h('div', null, refreshBtn, stepper, sections, debugPanel);
+    // Render only the focused stage. Auto-save still works because the
+    // mapping artifactToEvSetRef is populated when its EvidenceStageSection
+    // renders; unfocused stages just don't render until the user picks them.
+    var focusedSection = sections[effectiveFocusIdx] || null;
+    // Stick the topBar + stepper to the top of the Ant Drawer body so the
+    // stage selector stays visible while the user scrolls the focused
+    // stage's form. Background + negative top margin cancel the body's
+    // built-in padding so the sticky element actually reaches the edge.
+    var stickyHeader = h('div', {
+      style: {
+        position: 'sticky', top: -24, zIndex: 5, background: '#FFFFFF',
+        paddingTop: 24, marginTop: -24, marginLeft: -24, marginRight: -24,
+        paddingLeft: 24, paddingRight: 24,
+      }
+    }, refreshBtn, stepper);
+    return h('div', null, stickyHeader, focusedSection, debugPanel);
   }
 
   // ── Render active view ──────────────────────────────────────
