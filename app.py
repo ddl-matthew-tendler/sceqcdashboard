@@ -4,6 +4,7 @@ import json
 import logging
 import time
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
@@ -336,6 +337,51 @@ def get_bundle_findings(bundle_id: str, limit: int = 100, offset: int = 0):
 @app.get("/api/bundles/{bundle_id}/gates")
 def get_bundle_gates(bundle_id: str):
     return gov_get(f"/bundles/{bundle_id}/gates")
+
+
+@app.post("/api/bundles/enrich")
+def enrich_bundles(body: dict):
+    """Bulk-fetch approvals + findings for many bundles in one request.
+
+    The browser used to call /approvals and /findings once per bundle (2N
+    round trips through the Domino proxy). This fans those calls out
+    server-side with a thread pool and returns a
+    {bundleId: {approvals: [...], findings: {...}}} map, collapsing a batch
+    of N bundles into a single browser request. A failure on one bundle's
+    call yields an empty result for that piece rather than failing the batch.
+    """
+    bundle_ids = body.get("bundleIds") or []
+    findings_limit = int(body.get("findingsLimit") or 200)
+    if not isinstance(bundle_ids, list) or not bundle_ids:
+        return {}
+
+    def fetch_approvals(bid):
+        try:
+            return bid, "approvals", gov_get(f"/bundles/{bid}/approvals")
+        except Exception as e:
+            logger.warning(f"enrich: approvals failed for {bid}: {e}")
+            return bid, "approvals", []
+
+    def fetch_findings(bid):
+        try:
+            return bid, "findings", gov_get(
+                f"/bundles/{bid}/findings",
+                params={"limit": findings_limit, "offset": 0},
+            )
+        except Exception as e:
+            logger.warning(f"enrich: findings failed for {bid}: {e}")
+            return bid, "findings", {"data": []}
+
+    result = {bid: {"approvals": [], "findings": {"data": []}} for bid in bundle_ids}
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        tasks = []
+        for bid in bundle_ids:
+            tasks.append(ex.submit(fetch_approvals, bid))
+            tasks.append(ex.submit(fetch_findings, bid))
+        for fut in as_completed(tasks):
+            bid, kind, data = fut.result()
+            result[bid][kind] = data
+    return result
 
 
 @app.get("/api/bundles/{bundle_id}/detail")

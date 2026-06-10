@@ -13896,13 +13896,16 @@ function App() {
     return nextPage();
   }
 
-  // Fire the per-bundle enrichment (approvals/findings/gates) in chunks so
-  // we don't blast the backend with N*3 concurrent requests. Bundles are
-  // mutated in place; React state is updated ONCE at the end so dashboard
-  // visualizations don't jitter while data streams in (an earlier version
-  // re-committed per batch and the charts re-laid-out ~12 times in a row).
+  // Fire bundle enrichment (approvals + findings) in chunks. Each chunk is
+  // ONE request to /api/bundles/enrich, which fans out to the governance API
+  // server-side with a thread pool — so a batch of N bundles costs 1 browser
+  // round trip instead of 2N. Bundles are mutated in place; React state is
+  // updated ONCE at the end so dashboard visualizations don't jitter while
+  // data streams in. Gates are NOT fetched here — they're used only in the
+  // stage popover and drawer Gates tab (both interactive), so they lazy-load
+  // on demand via ensureBundleGates().
   function enrichBundlesInBackground(bundleList, batchSize, onDone) {
-    batchSize = batchSize || 8;
+    batchSize = batchSize || 30;
     var i = 0;
     function runNextBatch() {
       if (i >= bundleList.length) {
@@ -13911,20 +13914,28 @@ function App() {
       }
       var batch = bundleList.slice(i, i + batchSize);
       i += batchSize;
-      Promise.all(batch.map(function(bundle) {
-        // Gates are intentionally NOT fetched here. They're used only in
-        // the stage popover and drawer Gates tab (both interactive), never
-        // on a dashboard — so we lazy-load them on demand via
-        // ensureBundleGates() and save a per-bundle request at boot.
-        return Promise.all([
-          apiGet('api/bundles/' + bundle.id + '/approvals').catch(function() { return []; }),
-          apiGet('api/bundles/' + bundle.id + '/findings?limit=200').catch(function() { return { data: [] }; }),
-        ]).then(function(r) {
-          bundle._approvals = Array.isArray(r[0]) ? r[0] : [];
-          bundle._findings = r[1].data || (Array.isArray(r[1]) ? r[1] : []);
-          bundle._enriched = true;
-        });
-      })).then(runNextBatch);
+      var ids = batch.map(function(b) { return b.id; });
+      apiPost('api/bundles/enrich', { bundleIds: ids, findingsLimit: 200 })
+        .then(function(map) {
+          batch.forEach(function(bundle) {
+            var entry = (map && map[bundle.id]) || {};
+            var ap = entry.approvals;
+            var fi = entry.findings;
+            bundle._approvals = Array.isArray(ap) ? ap : [];
+            bundle._findings = (fi && fi.data) || (Array.isArray(fi) ? fi : []);
+            bundle._enriched = true;
+          });
+        })
+        .catch(function() {
+          // Batch failed — mark enriched with empties so the page doesn't
+          // hang waiting on numbers that will never arrive.
+          batch.forEach(function(bundle) {
+            bundle._approvals = bundle._approvals || [];
+            bundle._findings = bundle._findings || [];
+            bundle._enriched = true;
+          });
+        })
+        .then(runNextBatch);
     }
     runNextBatch();
   }
@@ -14122,7 +14133,7 @@ function App() {
         // Keep loading spinner up until findings/approvals/gates are all
         // fetched — page renders once with correct numbers.
         setBundles(enrichedBundles);
-        enrichBundlesInBackground(enrichedBundles, 8, function() {
+        enrichBundlesInBackground(enrichedBundles, 30, function() {
           setLoading(false);
           checkRemoteStaleness(allAttach, enrichedBundles);
         });
