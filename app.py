@@ -893,6 +893,50 @@ def list_projects(limit: int = 50, offset: int = 0):
     return v4_get("/projects", params=params)
 
 
+# ── Project git info ──────────────────────────────────────────────
+
+@app.get("/api/projects/{project_id}/git-info")
+def get_project_git_info(project_id: str):
+    """
+    Returns parsed git provider info for a project's primary repo so
+    the frontend can build deep links to source files (e.g. GitHub blob
+    URLs).  Shape: {provider, owner, repo, uri, defaultRef}.
+    """
+    try:
+        repos = v4_get(f"/projects/{project_id}/gitRepositories")
+    except HTTPException as e:
+        return {"provider": None, "error": str(e.detail)[:200]}
+
+    repo_list = repos if isinstance(repos, list) else []
+    if not repo_list:
+        return {"provider": None}
+
+    repo = repo_list[0]
+    provider = (repo.get("serviceProvider") or "").lower()
+    uri = repo.get("uri") or ""
+
+    owner, repo_name = None, None
+    # Parse owner/repo for GitHub URIs:
+    #   git@github.com:owner/repo.git
+    #   https://github.com/owner/repo.git
+    #   https://github.com/owner/repo
+    import re
+    m = re.search(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$", uri)
+    if m:
+        owner, repo_name = m.group(1), m.group(2)
+
+    ref_obj = repo.get("ref") or {}
+    default_ref = ref_obj.get("value") if isinstance(ref_obj, dict) else None
+
+    return {
+        "provider": provider or None,
+        "owner": owner,
+        "repo": repo_name,
+        "uri": uri,
+        "defaultRef": default_ref,
+    }
+
+
 # ── Project Collaborators ─────────────────────────────────────────
 
 @app.get("/api/projects/{project_id}/collaborators")
