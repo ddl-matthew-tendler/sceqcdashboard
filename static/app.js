@@ -3254,24 +3254,43 @@ function BulkActionBar(props) {
         setBulkTransitionOpen(false);
         var succeeded = results.filter(function(r) { return r.success; });
         var failed = results.filter(function(r) { return !r.success; });
+        var isPolicyMismatch = failed.some(function(f) {
+          return f.reason && f.reason.indexOf('does not contain all questions required by policy') !== -1;
+        });
+        var policyHint = isPolicyMismatch ? h('div', { style: { marginTop: 12, padding: '8px 12px', background: '#FFF7E6', border: '1px solid #FFD591', borderRadius: 4 } },
+          h('p', { style: { fontSize: 12, fontWeight: 600, color: '#7C4A03', marginBottom: 2 } }, 'Policy structure mismatch'),
+          h('p', { style: { fontSize: 12, color: '#7C4A03', margin: 0 } }, 'The bundle\'s QC plan is missing fields the policy now requires for this stage. Open each affected bundle in Domino, then re-sync or re-apply the policy to add the missing questions.')
+        ) : null;
+
         if (failed.length === 0) {
           antd.message.success('Advanced ' + succeeded.length + ' ' + B.toLowerCase() + (succeeded.length > 1 ? 's' : '') + ' to next stage');
         } else if (succeeded.length > 0) {
-          antd.notification.warning({
-            message: succeeded.length + ' of ' + results.length + ' advanced',
-            description: h('div', null,
-              h('p', { style: { fontWeight: 500, marginBottom: 4 } }, 'Failed (' + failed.length + '):'),
-              failed.map(function(f, i) { return h('p', { key: i, style: { fontSize: 12, marginLeft: 8 } }, '• ' + f.name + ' – ' + f.reason); })
+          Modal.warning({
+            title: succeeded.length + ' of ' + results.length + ' advanced — ' + failed.length + ' failed',
+            width: 520,
+            content: h('div', null,
+              failed.map(function(f, i) {
+                return h('div', { key: i, style: { marginBottom: 8, paddingBottom: 8, borderBottom: i < failed.length - 1 ? '1px solid #F0F0F0' : 'none' } },
+                  h('p', { style: { fontWeight: 600, fontSize: 13, marginBottom: 2, color: '#2E2E38' } }, f.name),
+                  h('p', { style: { fontSize: 12, color: '#65657B', margin: 0 } }, f.reason)
+                );
+              }),
+              policyHint
             ),
-            duration: 12,
           });
         } else {
-          antd.notification.error({
-            message: 'All ' + failed.length + ' transitions failed',
-            description: h('div', null,
-              failed.map(function(f, i) { return h('p', { key: i, style: { fontSize: 12 } }, '• ' + f.name + ' – ' + f.reason); })
+          Modal.error({
+            title: 'All ' + failed.length + ' transition' + (failed.length > 1 ? 's' : '') + ' failed',
+            width: 520,
+            content: h('div', null,
+              failed.map(function(f, i) {
+                return h('div', { key: i, style: { marginBottom: 8, paddingBottom: 8, borderBottom: i < failed.length - 1 ? '1px solid #F0F0F0' : 'none' } },
+                  h('p', { style: { fontWeight: 600, fontSize: 13, marginBottom: 2, color: '#2E2E38' } }, f.name),
+                  h('p', { style: { fontSize: 12, color: '#65657B', margin: 0 } }, f.reason)
+                );
+              }),
+              policyHint
             ),
-            duration: 12,
           });
         }
         if (onRefresh) onRefresh();
