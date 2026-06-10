@@ -6403,24 +6403,34 @@ function DetailDrawer(props) {
         });
         flushAgentOutputs();
 
+        // Save state footer. With auto-save in place, the Save button is
+        // gone; we just surface the current state passively so the user
+        // can see that their edits are being persisted.
+        //   - "Saving..." while the POST is in flight
+        //   - dirty pending: "Unsaved... auto-saving"
+        //   - just saved: "✓ Saved Xs ago"
         var savedTs = savedAt[es.id];
-        var savedAgo = savedTs
-          ? h('span', { style: { fontSize: 11, color: '#28A464', display: 'inline-flex', alignItems: 'center', gap: 4 } },
+        var isSaving = !!evidenceSaving[es.id];
+        var saveFooter = null;
+        if (canEdit) {
+          if (isSaving) {
+            saveFooter = h('span', { style: { fontSize: 11, color: '#65657B', display: 'inline-flex', alignItems: 'center', gap: 6 } },
+              h(Spin, { size: 'small' }),
+              h('span', null, 'Saving...'));
+          } else if (dirtyCount > 0) {
+            saveFooter = h('span', { style: { fontSize: 11, color: '#65657B', fontStyle: 'italic' } },
+              dirtyCount + ' unsaved change' + (dirtyCount === 1 ? '' : 's') + '. Auto-saving...');
+          } else if (savedTs) {
+            saveFooter = h('span', { style: { fontSize: 11, color: '#28A464', display: 'inline-flex', alignItems: 'center', gap: 4 } },
               h('span', null, '✓'),
-              h('span', null, 'Saved ' + dayjs(savedTs).fromNow()))
-          : null;
+              h('span', null, 'Saved ' + dayjs(savedTs).fromNow()));
+          }
+        }
 
         sectionContent.push(h('div', { key: es.id || esIdx, style: { marginBottom: 8 } },
           fieldEls,
-          canEdit
-            ? h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, gap: 8 } },
-                h('div', null, savedAgo),
-                h(Button, {
-                  size: 'small', type: 'primary',
-                  loading: !!evidenceSaving[es.id], disabled: dirtyCount === 0,
-                  onClick: function() { handleSaveEvidenceSet(es.id, savableIds); },
-                }, dirtyCount > 0 ? 'Save (' + dirtyCount + ')' : (savedTs ? 'Saved' : 'Save'))
-              )
+          saveFooter
+            ? h('div', { style: { display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 8, minHeight: 18 } }, saveFooter)
             : null
         ));
       });
