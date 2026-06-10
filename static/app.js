@@ -6179,7 +6179,12 @@ function DetailDrawer(props) {
     // click-to-advance-pending-stage moved to the "Advance to next stage"
     // button in the topBar (above) — clicking a dot for a different reason
     // each time was hard to predict.
-    var stepper = h('div', { style: { display: 'flex', alignItems: 'flex-start', padding: '4px 0 14px', borderBottom: '1px solid #E0E0E0', marginBottom: 12, overflowX: 'auto' } },
+    // overflow:visible lets the focused dot's outer ring (extends 5px
+    // above the dot) render past the container edge instead of being
+    // clipped. overflowX:auto used to be set for narrow drawers but CSS
+    // forces overflow-y to clip when overflow-x clips — losing the ring.
+    // Top padding of 10px gives the ring breathing room from the topBar.
+    var stepper = h('div', { style: { display: 'flex', alignItems: 'flex-start', padding: '10px 0 14px', borderBottom: '1px solid #E0E0E0', marginBottom: 12, overflow: 'visible' } },
       stages.map(function(stage, i) {
         var st = stageStates[i];
         var isFocused = i === effectiveFocusIdx;
