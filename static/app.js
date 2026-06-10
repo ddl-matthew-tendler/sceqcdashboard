@@ -5065,6 +5065,15 @@ function isAgentPopulated(art) {
   return /^\s*(populated|auto-populated|generated|agent-)/i.test(help);
 }
 
+// Heuristic: a value was written by an agent user. Matches the same
+// /\bagent/ rule used elsewhere for agent member detection so that fields
+// whose helpText doesn't advertise agent-population still get badged when
+// the actual author is an agent user.
+function isAgentAuthored(submittedBy) {
+  if (!submittedBy) return false;
+  return /\bagent/i.test(String(submittedBy));
+}
+
 function EvidenceDebugPanel(props) {
   var _o = useState(false); var open = _o[0]; var setOpen = _o[1];
   function copy(label, obj) {
@@ -5287,7 +5296,7 @@ function EvidenceField(props) {
     });
   }
 
-  var agentic = isAgentPopulated(art);
+  var agentic = isAgentPopulated(art) || isAgentAuthored(props.submittedBy);
   var hasValue = currentValue != null && currentValue !== '' && !(Array.isArray(currentValue) && !currentValue.length);
   var wrapStyle = agentic && hasValue
     ? {
