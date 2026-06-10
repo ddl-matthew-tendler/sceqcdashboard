@@ -5048,6 +5048,17 @@ function QCTrackerPage(props) {
   // All columns combined (per-stage pairs appended; hidden by default via shownStageCols)
   var allColumns = columns.concat(perStageCols);
 
+  // Signature of just the data these two charts render. Used as the effect
+  // dependency instead of the whole bundles array so a setBundles that only
+  // touches unrelated fields (e.g. attachment staleness badges) does NOT
+  // destroy-and-reanimate the charts. They re-render only when their own
+  // numbers actually change.
+  var stageDistSig = useMemo(function() {
+    var m = {};
+    bundles.forEach(function(b) { var s = b.stage || 'Unknown'; m[s] = (m[s] || 0) + 1; });
+    return Object.keys(m).sort().map(function(k) { return k + ':' + m[k]; }).join('|');
+  }, [bundles]);
+
   // Charts -Status Distribution donut + Deliverables by Stage bar
   useEffect(function() {
     if (bundles.length === 0) return;
@@ -5092,7 +5103,7 @@ function QCTrackerPage(props) {
       }],
       credits: { enabled: false },
     });
-  }, [bundles, stats]);
+  }, [stats.active, stats.complete, stats.archived]);
 
   useEffect(function() {
     if (bundles.length === 0) return;
@@ -5116,7 +5127,7 @@ function QCTrackerPage(props) {
       series: [{ name: capFirst(B) + 's', data: stageCounts, showInLegend: false }],
       credits: { enabled: false },
     });
-  }, [bundles]);
+  }, [stageDistSig]);
 
   return h('div', null,
     h('div', { className: 'page-header', style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' } },
@@ -5807,16 +5818,18 @@ function ScriptedCheckRow(props) {
         // when the button itself is in the disabled state (Antd swallows
         // pointer events on disabled buttons in some browsers).
         h(Tooltip, {
-          title: props.disabledReason || (props.canRun ? 'Run this agent now' : ''),
+          title: jobIsRunning
+            ? 'Agent is running. Wait for it to finish before running again.'
+            : (props.disabledReason || (props.canRun ? 'Run this agent now' : '')),
           placement: 'left',
         },
           h('span', { style: { display: 'inline-block' } },
             h(Button, {
               size: 'small', type: 'primary',
-              loading: props.running,
-              disabled: props.running || !props.canRun,
+              loading: props.running || jobIsRunning,
+              disabled: props.running || jobIsRunning || !props.canRun,
               onClick: function() { props.onRun(paramValues); },
-            }, '✨ Run Agent')
+            }, jobIsRunning ? '✨ Agent running' : '✨ Run Agent')
           )
         ),
         jobHref
@@ -11257,6 +11270,10 @@ function App() {
   var _s1 = useState('tracker'); var activePage = _s1[0]; var setActivePage = _s1[1];
   var _s2 = useState([]); var bundles = _s2[0]; var setBundles = _s2[1];
   var _s3 = useState(true); var loading = _s3[0]; var setLoading = _s3[1];
+  // {done,total} while initial enrichment streams; null otherwise. Drives the
+  // progress hint under the loading skeleton so a long first load (hundreds of
+  // bundles) reads as "working" rather than "hung".
+  var _ep = useState(null); var enrichProgress = _ep[0]; var setEnrichProgress = _ep[1];
   // True while per-bundle enrichment (approvals/findings/gates) is still
   // streaming in. Stat cards that read enriched data check this flag and
   // render a skeleton instead of showing misleading zeros (the table
@@ -11722,7 +11739,7 @@ function App() {
   // data streams in. Gates are NOT fetched here — they're used only in the
   // stage popover and drawer Gates tab (both interactive), so they lazy-load
   // on demand via ensureBundleGates().
-  function enrichBundlesInBackground(bundleList, batchSize, onDone) {
+  function enrichBundlesInBackground(bundleList, batchSize, onDone, onProgress) {
     batchSize = batchSize || 30;
     var i = 0;
     function runNextBatch() {
@@ -11752,6 +11769,11 @@ function App() {
             bundle._findings = bundle._findings || [];
             bundle._enriched = true;
           });
+        })
+        .then(function() {
+          if (typeof onProgress === 'function') {
+            onProgress(Math.min(i, bundleList.length), bundleList.length);
+          }
         })
         .then(runNextBatch);
     }
@@ -11947,13 +11969,18 @@ function App() {
         });
         computeSnapshotStaleness(allAttach);
 
-        // Render the table NOW — bundles + projects + attachments are enough
-        // Keep loading spinner up until findings/approvals/gates are all
-        // fetched — page renders once with correct numbers.
-        setBundles(enrichedBundles);
+        // Hold the skeleton up until every bundle's findings/approvals are
+        // fetched, THEN set state once. The user would rather wait a few
+        // seconds longer than watch the table paint with empty numbers and
+        // the charts re-animate when enrichment lands. (Refreshes keep the
+        // existing dashboard visible because bundles.length stays > 0.)
         enrichBundlesInBackground(enrichedBundles, 30, function() {
+          setEnrichProgress(null);
+          setBundles(enrichedBundles);
           setLoading(false);
           checkRemoteStaleness(allAttach, enrichedBundles);
+        }, function(done, total) {
+          setEnrichProgress({ done: done, total: total });
         });
       })
       .catch(function(err) {
@@ -12425,6 +12452,11 @@ function App() {
           loading && bundles.length === 0
             ? h('div', { className: 'page-container' },
                 h(antd.Skeleton, { active: true, title: { width: '30%' }, paragraph: { rows: 0 }, style: { marginBottom: 16 } }),
+                enrichProgress && enrichProgress.total
+                  ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, margin: '0 0 16px', fontSize: 12, color: '#65657B' } },
+                      h(Spin, { size: 'small' }),
+                      h('span', null, 'Loading deliverables… ' + enrichProgress.done + ' of ' + enrichProgress.total))
+                  : null,
                 h('div', { className: 'stats-row', style: { marginBottom: 24 } },
                   h('div', { className: 'stat-card' }, h(antd.Skeleton, { active: true, title: { width: '60%' }, paragraph: { rows: 1, width: ['40%'] } })),
                   h('div', { className: 'stat-card' }, h(antd.Skeleton, { active: true, title: { width: '60%' }, paragraph: { rows: 1, width: ['40%'] } })),
