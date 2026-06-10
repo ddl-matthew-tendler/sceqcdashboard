@@ -5537,6 +5537,22 @@ function DetailDrawer(props) {
   var _evD = useState({});     var evidenceDirty = _evD[0];   var setEvidenceDirty = _evD[1];  // artifactId -> true
   var _evS = useState({});     var evidenceSaving = _evS[0];  var setEvidenceSaving = _evS[1]; // evidenceSetId -> true
   var _evR = useState({});     var checkRunning = _evR[0];    var setCheckRunning = _evR[1];   // artifactId -> true
+  // Auto-save plumbing. The save handler is captured into this ref each
+  // render so the debounced timer always calls the freshest closure (with
+  // the latest evidenceForm + evidenceDirty values), instead of a stale
+  // snapshot from the render that scheduled it.
+  var autoSaveTimers = useRef({});      // evidenceSetId -> setTimeout handle
+  var autoSaveHandlerRef = useRef(null);
+  var artifactToEvSetRef = useRef({});  // artifactId -> evidenceSetId, populated during render
+  function scheduleAutoSave(evSetId) {
+    if (!evSetId) return;
+    if (autoSaveTimers.current[evSetId]) clearTimeout(autoSaveTimers.current[evSetId]);
+    autoSaveTimers.current[evSetId] = setTimeout(function() {
+      delete autoSaveTimers.current[evSetId];
+      var fn = autoSaveHandlerRef.current;
+      if (typeof fn === 'function') fn(evSetId);
+    }, 1200);
+  }
   // Debug payloads (last request/response for each operation)
   var _dbg = useState({ lastSaveReq: null, lastSaveResp: null, lastRunReq: null, lastRunResp: null, lastError: null });
   var debugState = _dbg[0]; var setDebugState = _dbg[1];
@@ -5645,7 +5661,11 @@ function DetailDrawer(props) {
   }
 
   useEffect(function() {
-    if (activeView !== 'evidence') return;
+    // Load the consolidated bundle/policy/evidence payload whenever the
+    // user lands on Evidence, Attachments, or Overview. /detail returns
+    // the fresh attachments list too, so Attachments stops showing
+    // stale empty state right after the agent attaches new files.
+    if (activeView !== 'evidence' && activeView !== 'attachments' && activeView !== 'overview') return;
     loadEvidence(false);
   }, [activeView, bundleId]);
 
@@ -5660,7 +5680,14 @@ function DetailDrawer(props) {
   var findingsCount = bundle._findings ? bundle._findings.length : 0;
   var approvalsCount = bundle._approvals ? bundle._approvals.length : 0;
   var gatesCount = bundle._gates ? bundle._gates.length : 0;
-  var attachCount = bundle._attachments ? bundle._attachments.length : 0;
+  // Prefer attachments from the freshly fetched /detail bundle when
+  // available - the app-level _attachments cache is populated at page
+  // load and goes stale once the agent attaches new files mid-session.
+  var freshAttachments = evidenceData && evidenceData.bundle && evidenceData.bundle.attachments;
+  var effectiveAttachments = (freshAttachments && freshAttachments.length >= ((bundle._attachments || []).length))
+    ? freshAttachments
+    : (bundle._attachments || []);
+  var attachCount = effectiveAttachments.length;
   var staleCount = countStaleAttachments(bundle);
 
   // Stage Timeline tab was consolidated into Evidence (assignee select
@@ -5843,7 +5870,7 @@ function DetailDrawer(props) {
     if (attachCount === 0) return h(Empty, { description: 'No attachments linked.' });
     return h('div', null,
       staleCount > 0 ? h(Alert, { type: 'warning', showIcon: true, style: { marginBottom: 12, fontSize: 12 }, message: staleCount + ' snapshot' + (staleCount > 1 ? 's' : '') + ' may be outdated' }) : null,
-      bundle._attachments.map(function(att, i) {
+      effectiveAttachments.map(function(att, i) {
         var id = att.identifier || {};
         var fname = id.filename || id.name || 'Unnamed';
         var typeLabels = { DatasetSnapshotFile: 'Dataset Snapshot', NetAppVolumeSnapshotFile: 'NetApp Volume', FlowArtifact: 'Flow Artifact', ModelVersion: 'Model Version', Report: 'Code' };
@@ -6034,16 +6061,22 @@ function DetailDrawer(props) {
     function handleFieldChange(artId, value) {
       setEvidenceForm(function(prev) { var n = Object.assign({}, prev); n[artId] = value; return n; });
       setEvidenceDirty(function(prev) { var n = Object.assign({}, prev); n[artId] = true; return n; });
+      // Auto-save: schedule a debounced save for whatever evidence set
+      // this artifact belongs to. Repeat edits to the same set reset
+      // the timer so we batch a flurry of keystrokes into one POST.
+      var evSetId = artifactToEvSetRef.current[artId];
+      if (evSetId) scheduleAutoSave(evSetId);
     }
 
-    function handleSaveEvidenceSet(evSetId, artifactIds) {
+    function handleSaveEvidenceSet(evSetId, artifactIds, opts) {
+      opts = opts || {};
       var content = {};
       var savedIds = [];
       artifactIds.forEach(function(aid) {
         if (evidenceDirty[aid]) { content[aid] = evidenceForm[aid]; savedIds.push(aid); }
       });
       if (!Object.keys(content).length) {
-        antd.message.info('No changes to save');
+        if (!opts.fromAutoSave) antd.message.info('No changes to save');
         return;
       }
       var req = { evidenceId: evSetId, content: content };
@@ -6052,11 +6085,16 @@ function DetailDrawer(props) {
       apiPost('api/bundles/' + bundle.id + '/evidence', req)
         .then(function(resp) {
           mergeDebug({ lastSaveResp: resp });
-          antd.notification.success({
-            message: '✓ Saved to Domino',
-            description: savedIds.length + ' field' + (savedIds.length === 1 ? '' : 's') + ' updated',
-            placement: 'topRight', duration: 3,
-          });
+          // Loud toast only on explicit Save click. Auto-save uses the
+          // quieter inline "Saved Xs ago" footer so the user isn't
+          // bombarded with notifications while typing.
+          if (!opts.fromAutoSave) {
+            antd.notification.success({
+              message: '✓ Saved to Domino',
+              description: savedIds.length + ' field' + (savedIds.length === 1 ? '' : 's') + ' updated',
+              placement: 'topRight', duration: 3,
+            });
+          }
           // Record save time + flash fields
           setSavedAt(function(prev) { var n = Object.assign({}, prev); n[evSetId] = Date.now(); return n; });
           setFlashSet(function(prev) {
@@ -6194,6 +6232,20 @@ function DetailDrawer(props) {
       });
     }
 
+    // Wire up the auto-save handler ref. handleSaveEvidenceSet is
+    // captured per-render so it closes over the latest evidenceForm /
+    // evidenceDirty state. The auto-save timer reads this ref so it
+    // never fires against a stale snapshot. We need the artifactIds for
+    // each evidence set, which we collect in the sections walk below;
+    // for the auto-save path we just need the evidenceSetId and let
+    // the handler infer dirty fields from current state.
+    var savableIdsByEvSet = {};
+
+    autoSaveHandlerRef.current = function(evSetId) {
+      var ids = savableIdsByEvSet[evSetId] || [];
+      handleSaveEvidenceSet(evSetId, ids, { fromAutoSave: true });
+    };
+
     // Per-stage sections
     var sections = stages.map(function(stage, idx) {
       var st = stageStates[idx];
@@ -6253,6 +6305,11 @@ function DetailDrawer(props) {
         var arts = (es.artifacts || []);  // include guidance (rendered as banners)
         if (!arts.length) return;
         var savableIds = arts.filter(function(a) { return a.artifactType === 'input'; }).map(function(a) { return a.id; });
+        // Record artifact -> evidence-set mapping so the auto-save
+        // scheduler called from handleFieldChange knows which set to POST.
+        savableIds.forEach(function(aid) { artifactToEvSetRef.current[aid] = es.id; });
+        // Stash for the auto-save handler captured above this loop.
+        savableIdsByEvSet[es.id] = savableIds;
         var dirtyCount = savableIds.filter(function(aid) { return evidenceDirty[aid]; }).length;
 
         // Walk artifacts sequentially. Inputs that immediately follow a
