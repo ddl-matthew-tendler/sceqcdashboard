@@ -5106,25 +5106,27 @@ function EvidenceStageSection(props) {
   var _o = useState(props.defaultOpen !== false);
   var open = _o[0]; var setOpen = _o[1];
   var statusColor = props.statusColor;
-  // Pending stages are visually muted so the active stage stands out.
-  var isPending = (props.statusLabel || '').toLowerCase() === 'pending';
-  var titleColor = isPending ? '#8F8FA3' : '#2E2E38';
+  // Only the ACTIVE stage is bold + dark. Done and pending stages are
+  // both muted so the user's attention lands on what they need to work on.
+  var isActive = (props.statusLabel || '').toLowerCase() === 'active';
+  var titleColor = isActive ? '#2E2E38' : '#8F8FA3';
+  var muted = !isActive;
   return h('div', { style: { borderBottom: '1px solid #E0E0E0' } },
     h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 4px', cursor: 'pointer', userSelect: 'none' },
       onClick: function() { setOpen(!open); } },
       h('div', { style: { display: 'flex', alignItems: 'center', gap: 10 } },
-        h('span', { style: { fontSize: 13, fontWeight: isPending ? 500 : 600, color: titleColor } }, props.stageName),
+        h('span', { style: { fontSize: 13, fontWeight: isActive ? 600 : 500, color: titleColor } }, props.stageName),
         h('span', { style: { fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 10, textTransform: 'uppercase', letterSpacing: '0.04em', background: statusColor.bg, color: statusColor.fg } }, props.statusLabel),
         props.assigneeNode
           ? h('span', { style: { display: 'inline-flex', alignItems: 'center' }, onClick: function(e) { e.stopPropagation(); } },
-              h('span', { style: { fontSize: 11, color: isPending ? '#B0B0C0' : '#65657B', marginRight: 6 } }, '·'),
+              h('span', { style: { fontSize: 11, color: muted ? '#B0B0C0' : '#65657B', marginRight: 6 } }, '·'),
               props.assigneeNode
             )
           : (props.assignee
-              ? h('span', { style: { fontSize: 11, color: isPending ? '#B0B0C0' : '#65657B' } }, '· ' + props.assignee)
+              ? h('span', { style: { fontSize: 11, color: muted ? '#B0B0C0' : '#65657B' } }, '· ' + props.assignee)
               : null)
       ),
-      h('span', { style: { color: isPending ? '#C5C5D0' : '#8F8FA3', fontSize: 11, transition: 'transform 0.2s', display: 'inline-block', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' } }, '▼')
+      h('span', { style: { color: muted ? '#C5C5D0' : '#8F8FA3', fontSize: 11, transition: 'transform 0.2s', display: 'inline-block', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' } }, '▼')
     ),
     open
       ? h('div', { style: { padding: '4px 4px 16px' } }, props.children)
