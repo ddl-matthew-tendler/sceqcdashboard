@@ -6159,6 +6159,8 @@ function DetailDrawer(props) {
       if (!raw) return null;
       var m = String(raw).match(/^(.+?)\s*\(([^)]+)\)\s*$/);
       var display = m ? m[1] : raw;
+      // Convert snake_case handles to Title Case ("study_lead" → "Study Lead")
+      display = display.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
       if (display.length <= 22) return display;
       return display.slice(0, 21) + '…';
     }
@@ -6172,24 +6174,20 @@ function DetailDrawer(props) {
     // clipped. overflowX:auto used to be set for narrow drawers but CSS
     // forces overflow-y to clip when overflow-x clips — losing the ring.
     // Top padding of 10px gives the ring breathing room from the topBar.
-    var stepper = h('div', { style: { display: 'flex', alignItems: 'flex-start', padding: '10px 0 14px', borderBottom: '1px solid #E0E0E0', marginBottom: 12, overflow: 'visible' } },
+    var stepper = h('div', { style: { padding: '4px 0 14px', borderBottom: '1px solid #E0E0E0', marginBottom: 12 } },
+      h('div', { style: { display: 'flex', alignItems: 'flex-start', maxWidth: 600, margin: '0 auto', padding: '6px 0 0', overflow: 'visible' } },
       stages.map(function(stage, i) {
         var st = stageStates[i];
         var isFocused = i === effectiveFocusIdx;
         // Color language matches the Progress column in the bundles
         // table:  green = done, purple = active, gray = pending.
-        var dotBg     = st === 'done' ? '#28A464' : '#FFFFFF';
+        var dotBg     = st === 'done' ? '#28A464' : st === 'active' ? '#543FDE' : '#FFFFFF';
         var dotBorder = st === 'done' ? '#28A464'
-                      : st === 'pending' ? '#E0E0E0'
-                      : '#543FDE';
-        var dotColor  = st === 'done' ? '#FFFFFF'
                       : st === 'active' ? '#543FDE'
-                      : '#8F8FA3';
-        // Selected dot gets an extra purple ring around it (distinct from
-        // "active" which is what the bundle is currently working on).
-        var dotShadow = isFocused
-          ? '0 0 0 3px #EDECFB, 0 0 0 5px #543FDE'
-          : (st === 'active' ? '0 0 0 3px rgba(84,63,222,0.15)' : 'none');
+                      : '#E0E0E0';
+        var dotColor  = (st === 'done' || st === 'active') ? '#FFFFFF' : '#8F8FA3';
+        // Selected dot gets a single purple ring (selection indicator).
+        var dotShadow = isFocused ? '0 0 0 4px #EDECFB, 0 0 0 6px #543FDE' : 'none';
         var labelColor = isFocused
           ? '#311EAE'
           : (st === 'done' ? '#28A464'
@@ -6237,11 +6235,12 @@ function DetailDrawer(props) {
             st === 'done' ? '✓' : String(i + 1)
           ),
           h('div', { style: { marginTop: 8, fontSize: 11, color: labelColor, fontWeight: isFocused ? 600 : (st === 'pending' ? 400 : 500), textAlign: 'center', lineHeight: 1.25 } }, stage.name),
-          h('div', { style: { marginTop: 3, fontSize: 10.5, color: '#8F8FA3', textAlign: 'center', lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', fontStyle: assigneeText ? 'normal' : 'italic' }, title: stageAssignees[stage.name] || 'Unassigned' },
+          h('div', { style: { marginTop: 3, fontSize: 10.5, color: '#64748B', textAlign: 'center', lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', fontStyle: assigneeText ? 'normal' : 'italic' }, title: stageAssignees[stage.name] || 'Unassigned' },
             assigneeText ? 'Assigned to: ' + assigneeText : 'Unassigned'
           )
         );
       })
+      )
     );
 
     // Handlers
