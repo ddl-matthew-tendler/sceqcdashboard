@@ -5135,7 +5135,7 @@ function EvidenceStageSection(props) {
   var titleColor = isActive ? '#2E2E38' : '#8F8FA3';
   var muted = !isActive;
   return h('div', { style: { borderBottom: '1px solid #E0E0E0' } },
-    h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 4px', cursor: 'pointer', userSelect: 'none' },
+    h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 8px', cursor: 'pointer', userSelect: 'none' },
       onClick: function() { setOpen(!open); } },
       h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 } },
         h('span', { style: { fontSize: 13, fontWeight: isActive ? 600 : 500, color: titleColor } }, props.stageName),
@@ -5198,7 +5198,7 @@ function EvidenceStageSection(props) {
       )
     ),
     open
-      ? h('div', { style: { padding: '4px 4px 16px' } },
+      ? h('div', { style: { padding: '4px 8px 16px' } },
           // Stage-instructions panel: collected guidance for the stage.
           // Lives at the top of the section content, rendered with the
           // existing markdown helper so formatting (bold, code, lists)
@@ -5318,7 +5318,7 @@ function EvidenceField(props) {
         background: 'linear-gradient(135deg, rgba(84,63,222,0.04) 0%, rgba(232,53,167,0.04) 100%)',
         border: '1px solid #C9C5F2',
       }
-    : { padding: '10px 4px', borderBottom: '1px solid #F5F5F8' };
+    : { padding: '10px 8px', borderBottom: '1px solid #F5F5F8' };
   return h('div', { style: wrapStyle, className: props.flash ? 'evidence-field-flash' : '', 'data-artifact-id': art.id },
     h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 } },
       h('span', { style: { fontSize: 12, fontWeight: 500, color: '#2E2E38', lineHeight: 1.4 } },
@@ -6574,7 +6574,7 @@ function DetailDrawer(props) {
           var ev = evidenceMap[art.id] || {};
           var current = evidenceForm[art.id] != null ? evidenceForm[art.id] : ev.value;
           if (!canEdit) {
-            return h('div', { key: art.id, style: { padding: '10px 4px', borderBottom: '1px solid #F5F5F8' } },
+            return h('div', { key: art.id, style: { padding: '10px 8px', borderBottom: '1px solid #F5F5F8' } },
               h('div', { style: { fontSize: 12, fontWeight: 500, color: '#65657B', marginBottom: 4 } },
                 (art.details || {}).label || (art.details || {}).name,
                 art.required ? h('span', { style: { color: '#C20A29', marginLeft: 3 }, title: 'Required' }, '*') : null
