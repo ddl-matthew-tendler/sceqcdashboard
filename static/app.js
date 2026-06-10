@@ -2973,6 +2973,50 @@ function StatusFlags(props) {
 
 
 
+// Inspect a bundle's /detail payload and report whether the CURRENT stage
+// has any required-but-empty fields blocking a transition. Mirrors the
+// drawer's missingRequired check so the bulk pre-flight gives the same
+// verdict the drawer would. Note: this catches empty required fields; it
+// cannot detect a structural policy mismatch (bundle missing a question
+// the current policy version requires) — Domino validates that server-side.
+function computeStageReadiness(detail) {
+  var policy = (detail && detail.policy) || {};
+  var fullBundle = (detail && detail.bundle) || {};
+  var evidenceMap = (detail && detail.evidenceMap) || {};
+  var stages = policy.stages || [];
+  var currentStageName = fullBundle.stage || '';
+  function valueLooksFilled(v) {
+    if (v === null || v === undefined || v === '') return false;
+    if (Array.isArray(v) && v.length === 0) return false;
+    return true;
+  }
+  var currentIdx = stages.findIndex(function(s) { return s.name === currentStageName; });
+  var activeStage = stages[currentIdx];
+  var missingRequired = [];
+  if (activeStage) {
+    var collectArts = function(stage) {
+      var out = [];
+      (stage.evidenceSet || []).forEach(function(es) { (es.artifacts || []).forEach(function(a) { out.push(a); }); });
+      (stage.approvals || []).forEach(function(ap) { ((ap.evidence || {}).artifacts || []).forEach(function(a) { out.push(a); }); });
+      return out;
+    };
+    collectArts(activeStage).forEach(function(a) {
+      if (!a.required) return;
+      if (a.artifactType === 'guidance' || a.artifactType === 'policyScriptedCheck') return;
+      var ev = evidenceMap[a.id] || {};
+      if (!valueLooksFilled(ev.value)) {
+        missingRequired.push((a.details || {}).label || (a.details || {}).name || a.id);
+      }
+    });
+  }
+  return {
+    currentStageName: currentStageName,
+    hasPolicyStages: stages.length > 0,
+    missingRequired: missingRequired,
+    hasMissing: missingRequired.length > 0,
+  };
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  COMPONENT: Bulk Action Bar
 // ═══════════════════════════════════════════════════════════════
@@ -3009,6 +3053,14 @@ function BulkActionBar(props) {
   var _bti = useState([]);
   var bulkTransitionItems = _bti[0];
   var setBulkTransitionItems = _bti[1];
+
+  var _btc = useState(false);
+  var bulkTransitionChecking = _btc[0];
+  var setBulkTransitionChecking = _btc[1];
+
+  var _btp = useState({ done: 0, total: 0 });
+  var bulkTransitionProgress = _btp[0];
+  var setBulkTransitionProgress = _btp[1];
 
   if (count === 0) return null;
 
@@ -3238,8 +3290,61 @@ function BulkActionBar(props) {
   }
 
   function handleBulkAdvanceClick() {
-    setBulkTransitionItems(computeAdvanceItems());
+    var items = computeAdvanceItems();
+    setBulkTransitionItems(items);
     setBulkTransitionOpen(true);
+
+    // Second pass: for bundles that pass the basic checks, fetch each
+    // one's evidence and verify the current stage has no required-but-
+    // empty fields. This is the same check the drawer runs, so the
+    // pre-flight verdict matches what a single-bundle advance would show.
+    var toVerify = items.filter(function(it) { return it.eligible; });
+    if (toVerify.length === 0) return;
+
+    setBulkTransitionChecking(true);
+    setBulkTransitionProgress({ done: 0, total: toVerify.length });
+
+    var doneCount = 0;
+    var POOL = 5;
+    var queue = toVerify.slice();
+    var verifiedById = {};
+
+    function verifyOne(item) {
+      return apiGet('api/bundles/' + item.bundleId + '/detail')
+        .then(function(detail) {
+          var readiness = computeStageReadiness(detail);
+          if (readiness.hasMissing) {
+            var n = readiness.missingRequired.length;
+            verifiedById[item.bundleId] = {
+              bundleId: item.bundleId, name: item.name, eligible: false,
+              reason: n + ' required field' + (n > 1 ? 's' : '') + ' incomplete in ' + (readiness.currentStageName || 'current stage'),
+            };
+          }
+          // else: stays eligible (no override)
+        })
+        .catch(function() {
+          // Could not verify — leave eligible and let Domino validate on confirm.
+        })
+        .then(function() {
+          doneCount++;
+          setBulkTransitionProgress({ done: doneCount, total: toVerify.length });
+        });
+    }
+
+    function worker() {
+      if (queue.length === 0) return Promise.resolve();
+      return verifyOne(queue.shift()).then(worker);
+    }
+
+    var workers = [];
+    for (var w = 0; w < Math.min(POOL, queue.length); w++) workers.push(worker());
+    Promise.all(workers).then(function() {
+      // Merge overrides back into the item list, preserving order.
+      setBulkTransitionItems(items.map(function(it) {
+        return verifiedById[it.bundleId] || it;
+      }));
+      setBulkTransitionChecking(false);
+    });
   }
 
   function handleBulkAdvanceConfirm() {
@@ -3355,35 +3460,49 @@ function BulkActionBar(props) {
       open: bulkTransitionOpen,
       onCancel: function() { if (!bulkTransitionLoading) setBulkTransitionOpen(false); },
       onOk: handleBulkAdvanceConfirm,
-      okText: eligibleCount > 0 ? 'Advance ' + eligibleCount + ' ' + B.toLowerCase() + (eligibleCount > 1 ? 's' : '') : 'Nothing to advance',
+      okText: bulkTransitionChecking ? 'Checking…' : (eligibleCount > 0 ? 'Advance ' + eligibleCount + ' ' + B.toLowerCase() + (eligibleCount > 1 ? 's' : '') : 'Nothing to advance'),
       confirmLoading: bulkTransitionLoading,
-      okButtonProps: { disabled: eligibleCount === 0 },
+      okButtonProps: { disabled: bulkTransitionChecking || eligibleCount === 0 },
+      cancelButtonProps: { disabled: bulkTransitionLoading },
+      maskClosable: !bulkTransitionLoading,
       width: 520,
     },
-      h('p', { style: { color: '#65657B', marginBottom: 4, fontSize: 13 } },
-        eligibleCount + ' of ' + bulkTransitionItems.length + ' selected ' + B.toLowerCase() + (bulkTransitionItems.length > 1 ? 's' : '') + ' pass the basic checks for advancing.'
-      ),
-      eligibleCount > 0 ? h('p', { style: { color: '#8F8FA3', marginBottom: 16, fontSize: 12 } },
-        'Domino runs final policy validation when you confirm — any ' + B.toLowerCase() + ' missing required questions or fields will be reported back.'
-      ) : null,
-      eligibleCount > 0 ? h('div', { style: { marginBottom: ineligibleItems.length > 0 ? 16 : 0 } },
-        h('p', { style: { fontWeight: 600, fontSize: 13, marginBottom: 6, color: '#2E2E38' } }, 'Ready to attempt (' + eligibleCount + '):'),
-        bulkTransitionItems.filter(function(it) { return it.eligible; }).map(function(it, i) {
-          return h('div', { key: i, style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, padding: '5px 0', borderBottom: '1px solid #F0F0F0' } },
-            h('span', { style: { color: '#2E2E38', fontWeight: 500, flex: 1, marginRight: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, it.name),
-            h('span', { style: { color: '#65657B', whiteSpace: 'nowrap', flexShrink: 0 } }, it.currentStage + ' → ' + it.nextStage)
-          );
-        })
-      ) : null,
-      ineligibleItems.length > 0 ? h('div', null,
-        h('p', { style: { fontWeight: 600, fontSize: 13, marginBottom: 6, color: '#8F8FA3' } }, 'Cannot advance (' + ineligibleItems.length + '):'),
-        ineligibleItems.map(function(it, i) {
-          return h('div', { key: i, style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, padding: '5px 0', borderBottom: '1px solid #F0F0F0' } },
-            h('span', { style: { color: '#8F8FA3', flex: 1, marginRight: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, it.name),
-            h('span', { style: { color: '#8F8FA3', fontStyle: 'italic', flexShrink: 0 } }, it.reason)
-          );
-        })
-      ) : null
+      bulkTransitionChecking
+        ? h('div', { style: { padding: '24px 0', textAlign: 'center' } },
+            h(Spin, null),
+            h('p', { style: { color: '#2E2E38', fontSize: 13, fontWeight: 500, marginTop: 16, marginBottom: 4 } },
+              'Checking required fields…'
+            ),
+            h('p', { style: { color: '#8F8FA3', fontSize: 12, margin: 0 } },
+              bulkTransitionProgress.done + ' of ' + bulkTransitionProgress.total + ' ' + B.toLowerCase() + (bulkTransitionProgress.total > 1 ? 's' : '') + ' verified'
+            )
+          )
+        : h('div', null,
+            h('p', { style: { color: '#65657B', marginBottom: 4, fontSize: 13 } },
+              eligibleCount + ' of ' + bulkTransitionItems.length + ' selected ' + B.toLowerCase() + (bulkTransitionItems.length > 1 ? 's' : '') + ' can advance to the next stage.'
+            ),
+            eligibleCount > 0 ? h('p', { style: { color: '#8F8FA3', marginBottom: 16, fontSize: 12 } },
+              'Verified each ' + B.toLowerCase() + '’s required fields. Domino runs final policy validation on confirm.'
+            ) : null,
+            eligibleCount > 0 ? h('div', { style: { marginBottom: ineligibleItems.length > 0 ? 16 : 0 } },
+              h('p', { style: { fontWeight: 600, fontSize: 13, marginBottom: 6, color: '#2E2E38' } }, 'Will advance (' + eligibleCount + '):'),
+              bulkTransitionItems.filter(function(it) { return it.eligible; }).map(function(it, i) {
+                return h('div', { key: i, style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, padding: '5px 0', borderBottom: '1px solid #F0F0F0' } },
+                  h('span', { style: { color: '#2E2E38', fontWeight: 500, flex: 1, marginRight: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, it.name),
+                  h('span', { style: { color: '#65657B', whiteSpace: 'nowrap', flexShrink: 0 } }, it.currentStage + ' → ' + it.nextStage)
+                );
+              })
+            ) : null,
+            ineligibleItems.length > 0 ? h('div', null,
+              h('p', { style: { fontWeight: 600, fontSize: 13, marginBottom: 6, color: '#8F8FA3' } }, 'Cannot advance (' + ineligibleItems.length + '):'),
+              ineligibleItems.map(function(it, i) {
+                return h('div', { key: i, style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, padding: '5px 0', borderBottom: '1px solid #F0F0F0' } },
+                  h('span', { style: { color: '#8F8FA3', flex: 1, marginRight: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, it.name),
+                  h('span', { style: { color: '#8F8FA3', fontStyle: 'italic', flexShrink: 0, marginLeft: 8, textAlign: 'right' } }, it.reason)
+                );
+              })
+            ) : null
+          )
     )
   );
 }
