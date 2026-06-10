@@ -4659,7 +4659,7 @@ function QCTrackerPage(props) {
       ],
       onFilter: function(v, r) { return r.state === v; },
       render: function(s) { return h(Tag, { color: stateColor(s), style: { fontSize: 11 } }, s); } },
-    { title: h(Tooltip, { title: 'Attachments (\u26A0 = outdated snapshots)' }, h('span', { style: { fontSize: 11, color: '#8F8FA3', fontWeight: 500 } }, 'Links')), key: 'attachments', width: 60, align: 'center',
+    { title: h(Tooltip, { title: 'Attachments (\u26A0 = outdated snapshots)' }, h('span', null, 'Links')), key: 'attachments', width: 60, align: 'center',
       sorter: function(a, b) { return (a._attachments || []).length - (b._attachments || []).length; },
       filters: [
         { text: 'Has Stale Snapshots', value: 'stale' },
