@@ -4894,16 +4894,28 @@ function QCTrackerPage(props) {
     var el = document.getElementById('qc-chart-status');
     if (!el) return;
     Highcharts.chart('qc-chart-status', {
-      chart: { type: 'pie', height: 280, backgroundColor: 'transparent' },
+      chart: { type: 'pie', height: 200, backgroundColor: 'transparent', margin: [0, 0, 0, 0], spacing: [4, 4, 4, 4] },
       title: { text: null },
+      legend: {
+        enabled: true,
+        layout: 'vertical',
+        align: 'right',
+        verticalAlign: 'middle',
+        itemStyle: { fontSize: '12px', fontWeight: '500', color: '#2E2E38' },
+        itemHoverStyle: { color: '#543FDE' },
+        labelFormatter: function() { return this.name + ': <b>' + this.y + '</b>'; },
+        symbolRadius: 4,
+      },
       plotOptions: {
         pie: {
-          innerSize: '55%',
+          innerSize: '60%',
+          center: ['35%', '50%'],
+          size: '90%',
           cursor: 'pointer',
-          dataLabels: { enabled: true, format: '{point.name}: {point.y}', style: { fontSize: '11px' } },
+          dataLabels: { enabled: false },
+          showInLegend: true,
           point: { events: { click: function() {
-            var stateName = this.name; // 'Active', 'Complete', or 'Archived'
-            // Use stable setters directly (not handleStatClick which may be stale in this closure)
+            var stateName = this.name;
             setSearchText(''); setFilterPolicies([]); setFilterState(null); setFilterAssignee(null); setFilterFlags([]); setFilterStage(null);
             setActiveStatCard(stateName === 'Active' ? 'active' : stateName === 'Complete' ? 'complete' : null);
             setFilterState(stateName);
@@ -5002,7 +5014,7 @@ function QCTrackerPage(props) {
         h('div', { className: 'panel-header' }, h('span', { className: 'panel-title' }, capFirst(B) + ' Status Distribution')),
         h('div', { className: 'panel-body', style: { padding: '4px 8px' } },
           bundles.length > 0
-            ? h('div', { id: 'qc-chart-status', style: { height: 180 } })
+            ? h('div', { id: 'qc-chart-status', style: { height: 200 } })
             : h(EmptyState, { text: 'No data' })
         )
       ),
