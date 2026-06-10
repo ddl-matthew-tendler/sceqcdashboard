@@ -2868,11 +2868,13 @@ function StagePipeline(props) {
           onClose: function() {},
         });
 
-        // Clicking a dot opens the drawer on the Evidence tab. Hover still
-        // shows the popover for at-a-glance details.
+        // Clicking a dot opens the drawer on the Evidence tab AND
+        // expands the clicked stage (collapsing the rest). The initial
+        // view argument can be a plain string (legacy callers like the
+        // bundle name link) or an object carrying a stage name.
         var openEvidence = function(e) {
           e.stopPropagation();
-          if (onSelectBundle) onSelectBundle(bundle, 'evidence');
+          if (onSelectBundle) onSelectBundle(bundle, { view: 'evidence', stage: name });
         };
 
         return h('div', { key: j, className: 'stage-pip-item' },
@@ -5574,6 +5576,7 @@ function DetailDrawer(props) {
   var deUrl = props.dataExplorerUrl || null;
   var projectMembersCache = props.projectMembersCache || {};
   var initialView = props.initialView || null;
+  var initialStage = props.initialStage || null;  // explicit stage to expand
   var debugMode = props.debugMode || false;
 
   var _view = useState('evidence');
@@ -6607,7 +6610,7 @@ function DetailDrawer(props) {
         // picks up its new defaultOpen (only the new active stage opens).
         // Normal refreshes do not change currentStageName, so user toggle
         // state is preserved between saves.
-        key: currentStageName + ':' + idx,
+        key: currentStageName + '|' + (initialStage || '') + ':' + idx,
         stageName: stage.name,
         statusLabel: statusLabel,
         statusColor: statusColor,
@@ -6616,7 +6619,12 @@ function DetailDrawer(props) {
         requiredFilled: stageRequiredFilled,
         requiredTotal: stageRequired,
         guidance: stageGuidance,
-        defaultOpen: st === 'active',
+        // If the user clicked a specific stage dot in the table, open
+        // that one and collapse the rest. Otherwise default to the
+        // currently active stage. Keying the section by currentStageName
+        // (above) plus initialStage means revisiting after a transition
+        // refreshes which one is open.
+        defaultOpen: initialStage ? stage.name === initialStage : st === 'active',
       }, sectionContent);
     });
 
@@ -13746,10 +13754,20 @@ function App() {
   }, []);
 
   var _s6b = useState(null); var drawerInitialView = _s6b[0]; var setDrawerInitialView = _s6b[1];
+  var _s6c = useState(null); var drawerInitialStage = _s6c[0]; var setDrawerInitialStage = _s6c[1];
 
   function handleSelectBundle(bundle, initialView) {
     setSelectedBundle(bundle);
-    setDrawerInitialView(initialView || null);
+    // initialView can be a plain string ('evidence', 'attachments', etc)
+    // or an object {view, stage} when the caller wants to deep-link
+    // into a specific stage section of the Evidence tab.
+    if (initialView && typeof initialView === 'object') {
+      setDrawerInitialView(initialView.view || null);
+      setDrawerInitialStage(initialView.stage || null);
+    } else {
+      setDrawerInitialView(initialView || null);
+      setDrawerInitialStage(null);
+    }
     setDrawerOpen(true);
   }
 
@@ -14110,11 +14128,12 @@ function App() {
       h(DetailDrawer, {
         bundle: selectedBundle,
         visible: drawerOpen,
-        onClose: function() { setDrawerOpen(false); setDrawerInitialView(null); },
+        onClose: function() { setDrawerOpen(false); setDrawerInitialView(null); setDrawerInitialStage(null); },
         terms: terms,
         dataExplorerUrl: dataExplorerUrl,
         projectMembersCache: projectMembersCache,
         initialView: drawerInitialView,
+        initialStage: drawerInitialStage,
         debugMode: debugMode,
       })
     )
