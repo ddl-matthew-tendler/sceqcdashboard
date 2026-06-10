@@ -2998,6 +2998,18 @@ function BulkActionBar(props) {
   var bulkLoading = _bl[0];
   var setBulkLoading = _bl[1];
 
+  var _bto = useState(false);
+  var bulkTransitionOpen = _bto[0];
+  var setBulkTransitionOpen = _bto[1];
+
+  var _btl = useState(false);
+  var bulkTransitionLoading = _btl[0];
+  var setBulkTransitionLoading = _btl[1];
+
+  var _bti = useState([]);
+  var bulkTransitionItems = _bti[0];
+  var setBulkTransitionItems = _bti[1];
+
   if (count === 0) return null;
 
   // Collect unique project IDs from selected bundles
@@ -3208,34 +3220,148 @@ function BulkActionBar(props) {
     });
   }
 
-  return h('div', { className: 'bulk-action-bar' },
-    h('span', { className: 'bulk-action-count' }, count + ' ' + B.toLowerCase() + (count > 1 ? 's' : '') + ' selected'),
-    h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
-      h(Select, {
-        size: 'small',
-        value: bulkStage,
-        style: { minWidth: 150 },
-        options: stageOptions,
-        onChange: setBulkStage,
-      }),
-      h(Select, {
-        size: 'small',
-        placeholder: 'Assign to...',
-        value: bulkAssignee || undefined,
-        style: { minWidth: 180 },
-        showSearch: true,
-        allowClear: true,
-        options: memberOptions,
-        onChange: setBulkAssignee,
-        optionFilterProp: 'label',
-      }),
-      h(Button, {
-        size: 'small', type: 'primary',
-        disabled: !bulkAssignee || bulkLoading,
-        loading: bulkLoading,
-        onClick: handleBulkAssign,
-      }, 'Assign'),
-      h(Button, { size: 'small', type: 'link', onClick: onClear, style: { color: '#fff' } }, 'Clear')
+  function computeAdvanceItems() {
+    return selectedKeys.map(function(bundleId) {
+      var bundle = bundles.find(function(b) { return b.id === bundleId; });
+      if (!bundle) return null;
+      var name = bundle.name || bundle.id || bundleId;
+      var state = (bundle.state || '').toLowerCase();
+      if (state === 'complete') return { bundleId: bundleId, name: name, eligible: false, reason: 'Already complete' };
+      if (state === 'archived') return { bundleId: bundleId, name: name, eligible: false, reason: 'Archived' };
+      if (state !== 'active') return { bundleId: bundleId, name: name, eligible: false, reason: 'Not active' };
+      var stageNames = (bundle.stages || []).map(function(s) { return (s.stage && s.stage.name) || s.name || ''; });
+      var currentIdx = bundle.stage ? stageNames.indexOf(bundle.stage) : -1;
+      if (currentIdx < 0) return { bundleId: bundleId, name: name, eligible: false, reason: 'Current stage not found' };
+      if (currentIdx >= stageNames.length - 1) return { bundleId: bundleId, name: name, eligible: false, reason: 'Already at final stage' };
+      return { bundleId: bundleId, name: name, eligible: true, currentStage: bundle.stage, nextStage: stageNames[currentIdx + 1] };
+    }).filter(Boolean);
+  }
+
+  function handleBulkAdvanceClick() {
+    setBulkTransitionItems(computeAdvanceItems());
+    setBulkTransitionOpen(true);
+  }
+
+  function handleBulkAdvanceConfirm() {
+    var eligible = bulkTransitionItems.filter(function(it) { return it.eligible; });
+    if (!eligible.length) return;
+    setBulkTransitionLoading(true);
+    var results = [];
+    var idx = 0;
+    function next() {
+      if (idx >= eligible.length) {
+        setBulkTransitionLoading(false);
+        setBulkTransitionOpen(false);
+        var succeeded = results.filter(function(r) { return r.success; });
+        var failed = results.filter(function(r) { return !r.success; });
+        if (failed.length === 0) {
+          antd.message.success('Advanced ' + succeeded.length + ' ' + B.toLowerCase() + (succeeded.length > 1 ? 's' : '') + ' to next stage');
+        } else if (succeeded.length > 0) {
+          antd.notification.warning({
+            message: succeeded.length + ' of ' + results.length + ' advanced',
+            description: h('div', null,
+              h('p', { style: { fontWeight: 500, marginBottom: 4 } }, 'Failed (' + failed.length + '):'),
+              failed.map(function(f, i) { return h('p', { key: i, style: { fontSize: 12, marginLeft: 8 } }, '• ' + f.name + ' – ' + f.reason); })
+            ),
+            duration: 12,
+          });
+        } else {
+          antd.notification.error({
+            message: 'All ' + failed.length + ' transitions failed',
+            description: h('div', null,
+              failed.map(function(f, i) { return h('p', { key: i, style: { fontSize: 12 } }, '• ' + f.name + ' – ' + f.reason); })
+            ),
+            duration: 12,
+          });
+        }
+        if (onRefresh) onRefresh();
+        return;
+      }
+      var it = eligible[idx++];
+      apiPost('api/bundles/' + it.bundleId + '/transition', { stage: it.nextStage })
+        .then(function() {
+          results.push({ success: true, name: it.name });
+          next();
+        })
+        .catch(function(err) {
+          results.push({ success: false, name: it.name, reason: parseServerError(err.message || String(err)) });
+          next();
+        });
+    }
+    next();
+  }
+
+  var eligibleCount = bulkTransitionItems.filter(function(it) { return it.eligible; }).length;
+  var ineligibleItems = bulkTransitionItems.filter(function(it) { return !it.eligible; });
+
+  return h(React.Fragment, null,
+    h('div', { className: 'bulk-action-bar' },
+      h('span', { className: 'bulk-action-count' }, count + ' ' + B.toLowerCase() + (count > 1 ? 's' : '') + ' selected'),
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+        h(Select, {
+          size: 'small',
+          value: bulkStage,
+          style: { minWidth: 150 },
+          options: stageOptions,
+          onChange: setBulkStage,
+        }),
+        h(Select, {
+          size: 'small',
+          placeholder: 'Assign to...',
+          value: bulkAssignee || undefined,
+          style: { minWidth: 180 },
+          showSearch: true,
+          allowClear: true,
+          options: memberOptions,
+          onChange: setBulkAssignee,
+          optionFilterProp: 'label',
+        }),
+        h(Button, {
+          size: 'small', type: 'primary',
+          disabled: !bulkAssignee || bulkLoading,
+          loading: bulkLoading,
+          onClick: handleBulkAssign,
+        }, 'Assign'),
+        h('div', { style: { width: 1, height: 16, background: 'rgba(255,255,255,0.3)', flexShrink: 0 } }),
+        h(Button, {
+          size: 'small',
+          style: { background: 'rgba(255,255,255,0.15)', borderColor: 'rgba(255,255,255,0.4)', color: '#fff' },
+          onClick: handleBulkAdvanceClick,
+        }, 'Advance Stage'),
+        h(Button, { size: 'small', type: 'link', onClick: onClear, style: { color: '#fff' } }, 'Clear')
+      )
+    ),
+    h(Modal, {
+      title: 'Advance to Next Stage',
+      open: bulkTransitionOpen,
+      onCancel: function() { if (!bulkTransitionLoading) setBulkTransitionOpen(false); },
+      onOk: handleBulkAdvanceConfirm,
+      okText: eligibleCount > 0 ? 'Advance ' + eligibleCount + ' ' + B.toLowerCase() + (eligibleCount > 1 ? 's' : '') : 'Nothing to advance',
+      confirmLoading: bulkTransitionLoading,
+      okButtonProps: { disabled: eligibleCount === 0 },
+      width: 520,
+    },
+      h('p', { style: { color: '#65657B', marginBottom: 16, fontSize: 13 } },
+        eligibleCount + ' of ' + bulkTransitionItems.length + ' selected ' + B.toLowerCase() + (bulkTransitionItems.length > 1 ? 's' : '') + ' can advance to the next stage.'
+      ),
+      eligibleCount > 0 ? h('div', { style: { marginBottom: ineligibleItems.length > 0 ? 16 : 0 } },
+        h('p', { style: { fontWeight: 600, fontSize: 13, marginBottom: 6, color: '#2E2E38' } }, 'Will advance (' + eligibleCount + '):'),
+        bulkTransitionItems.filter(function(it) { return it.eligible; }).map(function(it, i) {
+          return h('div', { key: i, style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, padding: '5px 0', borderBottom: '1px solid #F0F0F0' } },
+            h('span', { style: { color: '#2E2E38', fontWeight: 500, flex: 1, marginRight: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, it.name),
+            h('span', { style: { color: '#65657B', whiteSpace: 'nowrap', flexShrink: 0 } }, it.currentStage + ' → ' + it.nextStage)
+          );
+        })
+      ) : null,
+      ineligibleItems.length > 0 ? h('div', null,
+        h('p', { style: { fontWeight: 600, fontSize: 13, marginBottom: 6, color: '#8F8FA3' } }, 'Cannot advance (' + ineligibleItems.length + '):'),
+        ineligibleItems.map(function(it, i) {
+          return h('div', { key: i, style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, padding: '5px 0', borderBottom: '1px solid #F0F0F0' } },
+            h('span', { style: { color: '#8F8FA3', flex: 1, marginRight: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, it.name),
+            h('span', { style: { color: '#8F8FA3', fontStyle: 'italic', flexShrink: 0 } }, it.reason)
+          );
+        })
+      ) : null
     )
   );
 }
