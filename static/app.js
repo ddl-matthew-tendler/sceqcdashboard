@@ -775,16 +775,30 @@ function ColumnVisibilityDropdown(props) {
 
 // ── Stat Card ───────────────────────────────────────────────────
 function StatCard(props) {
-  var cls = 'stat-card' + (props.onClick ? ' stat-card-clickable' : '') + (props.active ? ' stat-card-active' : '');
-  var card = h('div', { className: cls, onClick: props.onClick || null },
+  // While `loading` is true (e.g. bundle enrichment is still streaming
+  // in), render a pulsing skeleton bar for the value and sub instead of
+  // misleading zeros. Click handler is suppressed so users don't filter
+  // on incomplete data.
+  var isLoading = !!props.loading;
+  var cls = 'stat-card'
+    + (props.onClick && !isLoading ? ' stat-card-clickable' : '')
+    + (props.active && !isLoading ? ' stat-card-active' : '')
+    + (isLoading ? ' stat-card-loading' : '');
+  var valueNode = isLoading
+    ? h('div', { className: 'stat-card-skeleton stat-card-skeleton-value' })
+    : h('div', { className: 'stat-card-value ' + (props.color || '') }, props.value);
+  var subNode = isLoading
+    ? h('div', { className: 'stat-card-skeleton stat-card-skeleton-sub' })
+    : (props.sub ? h('div', { className: 'stat-card-sub' }, props.sub) : null);
+  var card = h('div', { className: cls, onClick: isLoading ? null : (props.onClick || null) },
     h('div', { className: 'stat-card-label' },
       props.label,
       props.tooltip ? h('span', { style: { marginLeft: 4, cursor: 'help', color: '#B0B0C0', fontSize: 11 } }, '\u24D8') : null
     ),
-    h('div', { className: 'stat-card-value ' + (props.color || '') }, props.value),
-    props.sub ? h('div', { className: 'stat-card-sub' }, props.sub) : null
+    valueNode,
+    subNode
   );
-  return props.tooltip ? h(Tooltip, { title: props.tooltip, placement: 'top', overlayStyle: { maxWidth: 280 } }, card) : card;
+  return props.tooltip && !isLoading ? h(Tooltip, { title: props.tooltip, placement: 'top', overlayStyle: { maxWidth: 280 } }, card) : card;
 }
 
 // (ConnectionBanner removed -replaced by Dummy Data toggle in TopNav)
@@ -966,7 +980,7 @@ function DashboardPage(props) {
       h(StatCard, { label: 'Total ' + B + 's', value: stats.total, color: 'primary', active: !tableFilter, onClick: function() { setTableFilter(null); } }),
       h(StatCard, { label: 'Active', value: stats.active, color: 'info', sub: 'Currently in progress', active: tableFilter && tableFilter.value === 'Active', onClick: function() { setTableFilter(tableFilter && tableFilter.value === 'Active' ? null : { type: 'state', value: 'Active' }); } }),
       h(StatCard, { label: 'Complete', value: stats.complete, color: 'success', active: tableFilter && tableFilter.value === 'Complete', onClick: function() { setTableFilter(tableFilter && tableFilter.value === 'Complete' ? null : { type: 'state', value: 'Complete' }); } }),
-      h(StatCard, { label: 'Open Findings', value: stats.openFindings, color: stats.openFindings > 0 ? 'warning' : '', sub: stats.totalFindings + ' total findings', active: tableFilter && tableFilter.type === 'openFindings', onClick: function() { setTableFilter(tableFilter && tableFilter.type === 'openFindings' ? null : { type: 'openFindings' }); } }),
+      h(StatCard, { label: 'Open Findings', value: stats.openFindings, color: stats.openFindings > 0 ? 'warning' : '', sub: stats.totalFindings + ' total findings', active: tableFilter && tableFilter.type === 'openFindings', onClick: function() { setTableFilter(tableFilter && tableFilter.type === 'openFindings' ? null : { type: 'openFindings' }); }, loading: props.enrichmentLoading }),
       h(StatCard, { label: 'Avg Progress', value: stats.avgProgress + '%', sub: 'Across active ' + B.toLowerCase() + 's' })
     ),
 
@@ -1270,10 +1284,10 @@ function ApprovalsPage(props) {
     ),
 
     h('div', { className: 'stats-row' },
-      h(StatCard, { label: 'Pending Submission', value: approvalStats.pending, color: 'warning', active: approvalFilter === 'pending', onClick: function() { setApprovalFilter(approvalFilter === 'pending' ? null : 'pending'); } }),
-      h(StatCard, { label: 'Pending Review', value: approvalStats.review, color: 'info', active: approvalFilter === 'review', onClick: function() { setApprovalFilter(approvalFilter === 'review' ? null : 'review'); } }),
-      h(StatCard, { label: 'Conditionally Approved', value: approvalStats.conditional, color: 'warning', active: approvalFilter === 'conditional', onClick: function() { setApprovalFilter(approvalFilter === 'conditional' ? null : 'conditional'); } }),
-      h(StatCard, { label: 'Approved', value: approvalStats.approved, color: 'success', active: approvalFilter === 'approved', onClick: function() { setApprovalFilter(approvalFilter === 'approved' ? null : 'approved'); } })
+      h(StatCard, { label: 'Pending Submission', value: approvalStats.pending, color: 'warning', active: approvalFilter === 'pending', onClick: function() { setApprovalFilter(approvalFilter === 'pending' ? null : 'pending'); }, loading: props.enrichmentLoading }),
+      h(StatCard, { label: 'Pending Review', value: approvalStats.review, color: 'info', active: approvalFilter === 'review', onClick: function() { setApprovalFilter(approvalFilter === 'review' ? null : 'review'); }, loading: props.enrichmentLoading }),
+      h(StatCard, { label: 'Conditionally Approved', value: approvalStats.conditional, color: 'warning', active: approvalFilter === 'conditional', onClick: function() { setApprovalFilter(approvalFilter === 'conditional' ? null : 'conditional'); }, loading: props.enrichmentLoading }),
+      h(StatCard, { label: 'Approved', value: approvalStats.approved, color: 'success', active: approvalFilter === 'approved', onClick: function() { setApprovalFilter(approvalFilter === 'approved' ? null : 'approved'); }, loading: props.enrichmentLoading })
     ),
 
     h('div', { className: 'panel' },
@@ -1641,11 +1655,11 @@ function FindingsPage(props) {
     ),
 
     h('div', { className: 'stats-row' },
-      h(StatCard, { label: 'Total Findings', value: findingStats.total, color: 'primary', active: !findingFilter, onClick: function() { setFindingFilter(null); } }),
-      h(StatCard, { label: 'Open', value: findingStats.open, color: findingStats.open > 0 ? 'warning' : 'success', active: findingFilter && findingFilter.type === 'open', onClick: function() { setFindingFilter(findingFilter && findingFilter.type === 'open' ? null : { type: 'open' }); } }),
-      h(StatCard, { label: 'Critical (S0)', value: findingStats.bySev.S0, color: findingStats.bySev.S0 > 0 ? 'danger' : '', active: findingFilter && findingFilter.type === 'critical', onClick: function() { setFindingFilter(findingFilter && findingFilter.type === 'critical' ? null : { type: 'critical' }); } }),
-      h(StatCard, { label: 'Resolved', value: findingStats.byStatus.Done, color: 'success', active: findingFilter && findingFilter.type === 'resolved', onClick: function() { setFindingFilter(findingFilter && findingFilter.type === 'resolved' ? null : { type: 'resolved' }); } }),
-      h(StatCard, { label: 'Avg Time Open', value: findingStats.avgDaysOpen + 'd', color: findingStats.avgDaysOpen > 14 ? 'danger' : findingStats.avgDaysOpen > 7 ? 'warning' : 'success', tooltip: 'Average number of days that currently open findings have been open. Lower is better.', sub: findingStats.open + ' open findings' })
+      h(StatCard, { label: 'Total Findings', value: findingStats.total, color: 'primary', active: !findingFilter, onClick: function() { setFindingFilter(null); }, loading: props.enrichmentLoading }),
+      h(StatCard, { label: 'Open', value: findingStats.open, color: findingStats.open > 0 ? 'warning' : 'success', active: findingFilter && findingFilter.type === 'open', onClick: function() { setFindingFilter(findingFilter && findingFilter.type === 'open' ? null : { type: 'open' }); }, loading: props.enrichmentLoading }),
+      h(StatCard, { label: 'Critical (S0)', value: findingStats.bySev.S0, color: findingStats.bySev.S0 > 0 ? 'danger' : '', active: findingFilter && findingFilter.type === 'critical', onClick: function() { setFindingFilter(findingFilter && findingFilter.type === 'critical' ? null : { type: 'critical' }); }, loading: props.enrichmentLoading }),
+      h(StatCard, { label: 'Resolved', value: findingStats.byStatus.Done, color: 'success', active: findingFilter && findingFilter.type === 'resolved', onClick: function() { setFindingFilter(findingFilter && findingFilter.type === 'resolved' ? null : { type: 'resolved' }); }, loading: props.enrichmentLoading }),
+      h(StatCard, { label: 'Avg Time Open', value: findingStats.avgDaysOpen + 'd', color: findingStats.avgDaysOpen > 14 ? 'danger' : findingStats.avgDaysOpen > 7 ? 'warning' : 'success', tooltip: 'Average number of days that currently open findings have been open. Lower is better.', sub: findingStats.open + ' open findings', loading: props.enrichmentLoading })
     ),
 
     h('div', { className: 'two-col' },
@@ -4855,8 +4869,8 @@ function QCTrackerPage(props) {
         h(StatCard, { label: 'Total ' + capFirst(B) + 's', value: stats.total, color: 'primary' })),
       h('div', { className: 'stat-card-clickable' + (activeStatCard === 'active' ? ' stat-card-active' : ''), onClick: function() { handleStatClick('active'); } },
         h(StatCard, { label: 'Active', value: stats.active, color: 'info' })),
-      h('div', { className: 'stat-card-clickable' + (activeStatCard === 'openFindings' ? ' stat-card-active' : ''), onClick: function() { handleStatClick('openFindings'); } },
-        h(StatCard, { label: 'Open Findings', value: stats.openFindings, color: stats.openFindings > 0 ? 'danger' : '' })),
+      h('div', { className: 'stat-card-clickable' + (activeStatCard === 'openFindings' ? ' stat-card-active' : ''), onClick: props.enrichmentLoading ? null : function() { handleStatClick('openFindings'); } },
+        h(StatCard, { label: 'Open Findings', value: stats.openFindings, color: stats.openFindings > 0 ? 'danger' : '', loading: props.enrichmentLoading })),
       h('div', { className: 'stat-card-clickable' + (activeStatCard === 'unassigned' ? ' stat-card-active' : ''), onClick: function() { handleStatClick('unassigned'); } },
         h(StatCard, { label: 'Unassigned', value: stats.unassigned, color: stats.unassigned > 0 ? 'warning' : '' })),
       h('div', { className: 'stat-card-clickable' + (activeStatCard === 'complete' ? ' stat-card-active' : ''), onClick: function() { handleStatClick('complete'); } },
@@ -13110,6 +13124,11 @@ function App() {
   var _s1 = useState('tracker'); var activePage = _s1[0]; var setActivePage = _s1[1];
   var _s2 = useState([]); var bundles = _s2[0]; var setBundles = _s2[1];
   var _s3 = useState(true); var loading = _s3[0]; var setLoading = _s3[1];
+  // True while per-bundle enrichment (approvals/findings/gates) is still
+  // streaming in. Stat cards that read enriched data check this flag and
+  // render a skeleton instead of showing misleading zeros (the table
+  // doesn't depend on enrichment so it renders immediately).
+  var _enrL = useState(false); var enrichmentLoading = _enrL[0]; var setEnrichmentLoading = _enrL[1];
   var _s4 = useState(false); var connected = _s4[0]; var setConnected = _s4[1];
   var _s5 = useState(null); var selectedBundle = _s5[0]; var setSelectedBundle = _s5[1];
   var _s6 = useState(false); var drawerOpen = _s6[0]; var setDrawerOpen = _s6[1];
@@ -13563,15 +13582,19 @@ function App() {
   }
 
   // Fire the per-bundle enrichment (approvals/findings/gates) in chunks so
-  // we don't blast the backend with N*3 concurrent requests, and so the
-  // dashboard counts can update progressively as each batch lands. Mutates
-  // the bundle objects in place and triggers a setBundles re-render after
-  // each chunk by handing a fresh array reference to React.
+  // we don't blast the backend with N*3 concurrent requests. Bundles are
+  // mutated in place; React state is updated ONCE at the end so dashboard
+  // visualizations don't jitter while data streams in (an earlier version
+  // re-committed per batch and the charts re-laid-out ~12 times in a row).
   function enrichBundlesInBackground(bundleList, batchSize, onDone) {
     batchSize = batchSize || 8;
     var i = 0;
     function runNextBatch() {
       if (i >= bundleList.length) {
+        // Single commit at the end — table already rendered with the
+        // bundle list from setBundles(enrichedBundles) above; this commit
+        // lights up the dashboard counts/charts atomically.
+        setBundles(function(prev) { return prev.slice(); });
         if (typeof onDone === 'function') onDone();
         return;
       }
@@ -13588,12 +13611,7 @@ function App() {
           bundle._gates = Array.isArray(r[2]) ? r[2] : [];
           bundle._enriched = true;
         });
-      })).then(function() {
-        // Hand React a fresh array reference so memoized children re-render
-        // and pick up the new _findings/_approvals/_gates on the mutated bundles.
-        setBundles(function(prev) { return prev.slice(); });
-        runNextBatch();
-      });
+      })).then(runNextBatch);
     }
     runNextBatch();
   }
@@ -13794,9 +13812,12 @@ function App() {
         setLoading(false);
 
         // Background enrichment: chunk into batches of 8 to avoid firing
-        // hundreds of concurrent requests, and call setBundles after each
-        // batch so dashboard counts update progressively as data arrives.
+        // hundreds of concurrent requests. Dashboard widgets render
+        // skeletons while this flag is true; one setBundles at the end
+        // lights up the real counts atomically.
+        setEnrichmentLoading(true);
         enrichBundlesInBackground(enrichedBundles, 8, function() {
+          setEnrichmentLoading(false);
           // After all batches complete, fire the remote-staleness check
           // (depends on the full attachment list, already computed above).
           checkRemoteStaleness(allAttach, enrichedBundles);
@@ -13992,15 +14013,15 @@ function App() {
     // All other pages get scopedBundles
     switch (activePage) {
       case 'tracker':
-        return h(QCTrackerPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, selectedBundle: selectedBundle, terms: terms, projectMembersCache: projectMembersCache, dataExplorerUrl: dataExplorerUrl, connected: connected, policies: livePolicies, projects: liveProjects, debugMode: debugMode, hiddenCols: appHiddenCols, setHiddenCols: setAppHiddenCols, shownStageCols: appShownStageCols, setShownStageCols: setAppShownStageCols, currentUser: currentUser, scopeCurrentUser: scopeCurrentUser, scopeProjects: scopeProjects, onRefresh: function() { if (connected) fetchLiveData(); } });
+        return h(QCTrackerPage, { bundles: scopedBundles, loading: loading, enrichmentLoading: enrichmentLoading, onSelectBundle: handleSelectBundle, selectedBundle: selectedBundle, terms: terms, projectMembersCache: projectMembersCache, dataExplorerUrl: dataExplorerUrl, connected: connected, policies: livePolicies, projects: liveProjects, debugMode: debugMode, hiddenCols: appHiddenCols, setHiddenCols: setAppHiddenCols, shownStageCols: appShownStageCols, setShownStageCols: setAppShownStageCols, currentUser: currentUser, scopeCurrentUser: scopeCurrentUser, scopeProjects: scopeProjects, onRefresh: function() { if (connected) fetchLiveData(); } });
       case 'rules':
         return h(AssignmentRulesPage, { bundles: bundles, setBundles: setBundles, assignmentRules: assignmentRules, setAssignmentRules: setAssignmentRules, terms: terms, projectMembersCache: projectMembersCache, livePolicies: livePolicies, onNavigate: setActivePage });
       case 'milestones':
         return h(MilestonesPage, { bundles: scopedBundles, loading: loading, terms: terms });
       case 'approvals':
-        return h(ApprovalsPage, { bundles: scopedBundles, loading: loading, terms: terms });
+        return h(ApprovalsPage, { bundles: scopedBundles, loading: loading, enrichmentLoading: enrichmentLoading, terms: terms });
       case 'findings':
-        return h(FindingsPage, { bundles: scopedBundles, loading: loading, terms: terms });
+        return h(FindingsPage, { bundles: scopedBundles, loading: loading, enrichmentLoading: enrichmentLoading, terms: terms });
       case 'metrics':
         return h(MetricsPage, { bundles: scopedBundles, terms: terms, livePolicies: livePolicies, reportConfig: reportConfig, onSelectBundle: handleSelectBundle });
       case 'stages':
@@ -14016,7 +14037,7 @@ function App() {
       case 'config':
         return h(ConfigurationPage, { bundles: bundles, livePolicies: livePolicies, terms: terms, reportConfig: reportConfig, onSaveRoleMapping: saveRoleMapping, onSavePathPatterns: savePathPatterns, onNavigate: setActivePage });
       default:
-        return h(DashboardPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms });
+        return h(DashboardPage, { bundles: scopedBundles, loading: loading, enrichmentLoading: enrichmentLoading, onSelectBundle: handleSelectBundle, terms: terms });
     }
   }
 
