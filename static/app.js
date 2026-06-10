@@ -6119,7 +6119,14 @@ function DetailDrawer(props) {
     var sections = stages.map(function(stage, idx) {
       var st = stageStates[idx];
       var statusLabel = st === 'done' ? 'Complete' : st === 'active' ? 'Active' : 'Pending';
-      var statusColor = st === 'done' ? { bg: '#D1FAE5', fg: '#065F46' } : st === 'active' ? { bg: '#DBEAFE', fg: '#1E40AF' } : { bg: '#F3F4F6', fg: '#6B7280' };
+      // ACTIVE pill matches Domino purple so the colour is consistent
+      // with the active stepper dot (was blue, which read as a different
+      // state at a glance).
+      var statusColor = st === 'done'
+        ? { bg: '#D1FAE5', fg: '#065F46' }
+        : st === 'active'
+          ? { bg: '#EDECFB', fg: '#311EAE' }
+          : { bg: '#F3F4F6', fg: '#6B7280' };
       var assignee = stageAssignees[stage.name];
       var bundleStageData = (fullBundle.stages || []).find(function(s) { return s.stage && s.stage.name === stage.name; });
       var assigneeNode = buildAssigneeControl(bundleStageData, stage.name);
