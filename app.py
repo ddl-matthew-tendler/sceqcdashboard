@@ -581,11 +581,21 @@ def run_scripted_check(bundle_id: str, artifact_id: str, body: dict):
 
 @app.post("/api/bundles/{bundle_id}/transition")
 def transition_bundle_stage(bundle_id: str, body: dict):
-    """Advance the bundle to a different stage. Body: {stage: "name"}."""
+    """Advance the bundle to a different stage or change its overall state.
+
+    Body: {stage: "name"} to move stages, OR {state: "Complete"} (or
+    "Active" / "Archived") to change the bundle's overall lifecycle
+    state. The UI uses the state variant to close out a bundle once the
+    final stage's required evidence is filled.
+    """
     stage = body.get("stage")
-    if not stage:
-        raise HTTPException(status_code=400, detail="stage is required")
-    return gov_patch(f"/bundles/{bundle_id}", json_body={"stage": stage})
+    state = body.get("state")
+    if not stage and not state:
+        raise HTTPException(status_code=400, detail="stage or state is required")
+    payload = {}
+    if stage: payload["stage"] = stage
+    if state: payload["state"] = state
+    return gov_patch(f"/bundles/{bundle_id}", json_body=payload)
 
 
 @app.get("/api/jobs/{job_id}/logs")

@@ -6247,6 +6247,31 @@ function DetailDrawer(props) {
       });
     }
 
+    // Final-stage action: mark the bundle Complete. PATCHes the bundle
+    // state rather than the stage, since there is no next stage to
+    // transition to. Confirmation mirrors the transition flow so a
+    // misclick on the last stage is still recoverable.
+    function handleCompleteBundle() {
+      Modal.confirm({
+        title: 'Mark bundle as Complete?',
+        content: h('div', { style: { fontSize: 12, color: '#65657B' } },
+          'This closes out the bundle in Domino. No further evidence edits are expected, but it can be reopened later if needed.'),
+        okText: 'Mark Complete', cancelText: 'Cancel',
+        onOk: function() {
+          setTransitioning(true);
+          return apiPost('api/bundles/' + bundle.id + '/transition', { state: 'Complete' })
+            .then(function() {
+              antd.notification.success({ message: '✓ Bundle complete', description: 'Marked Complete in Domino.', placement: 'topRight', duration: 4 });
+              loadEvidence(true);
+            })
+            .catch(function(err) {
+              antd.notification.error({ message: 'Could not mark complete', description: parseServerError(err.message || String(err)), duration: 8 });
+            })
+            .then(function() { setTransitioning(false); });
+        },
+      });
+    }
+
     function handleRunCheck(artId, evSetId, params) {
       var req = { evidenceId: evSetId, parameters: params };
       mergeDebug({ lastRunReq: { artifactId: artId, body: req }, lastRunResp: null, lastError: null });
@@ -6608,30 +6633,53 @@ function DetailDrawer(props) {
       ),
       h('div', { style: { display: 'flex', gap: 6 } },
         h(Button, { size: 'small', onClick: function() { loadEvidence(true); } }, '⟳ Refresh'),
-        nextStage && fullBundle.state !== 'Complete'
-          ? h(Tooltip, {
-              title: hasMissing
-                ? h('div', null,
-                    h('div', { style: { fontWeight: 600, marginBottom: 4 } }, 'Required fields not yet completed:'),
-                    h('ul', { style: { margin: 0, paddingLeft: 16 } },
-                      missingRequired.slice(0, 8).map(function(m, i) { return h('li', { key: i }, m); }),
-                      missingRequired.length > 8 ? h('li', null, 'and ' + (missingRequired.length - 8) + ' more') : null
+        // Two cases for the primary action:
+        //   - There is a next stage  -> "Advance to next stage"
+        //   - Final stage, bundle still Active -> "Mark as Complete"
+        //   - Bundle already Complete -> nothing
+        fullBundle.state === 'Complete'
+          ? null
+          : nextStage
+            ? h(Tooltip, {
+                title: hasMissing
+                  ? h('div', null,
+                      h('div', { style: { fontWeight: 600, marginBottom: 4 } }, 'Required fields not yet completed:'),
+                      h('ul', { style: { margin: 0, paddingLeft: 16 } },
+                        missingRequired.slice(0, 8).map(function(m, i) { return h('li', { key: i }, m); }),
+                        missingRequired.length > 8 ? h('li', null, 'and ' + (missingRequired.length - 8) + ' more') : null
+                      )
                     )
-                  )
-                : 'Advance the bundle to ' + nextStage.name,
-              placement: 'bottomRight', overlayStyle: { maxWidth: 320 },
-            },
-              // Wrap the disabled button so the tooltip still fires on hover
-              // (disabled buttons swallow pointer events in some browsers).
-              h('span', { style: { display: 'inline-block' } },
-                h(Button, {
-                  size: 'small', type: 'primary', loading: transitioning,
-                  disabled: hasMissing,
-                  onClick: function() { handleTransitionStage(nextStage.name); },
-                }, 'Advance to next stage')
+                  : 'Advance the bundle to ' + nextStage.name,
+                placement: 'bottomRight', overlayStyle: { maxWidth: 320 },
+              },
+                h('span', { style: { display: 'inline-block' } },
+                  h(Button, {
+                    size: 'small', type: 'primary', loading: transitioning,
+                    disabled: hasMissing,
+                    onClick: function() { handleTransitionStage(nextStage.name); },
+                  }, 'Advance to next stage')
+                )
               )
-            )
-          : null
+            : h(Tooltip, {
+                title: hasMissing
+                  ? h('div', null,
+                      h('div', { style: { fontWeight: 600, marginBottom: 4 } }, 'Required fields not yet completed:'),
+                      h('ul', { style: { margin: 0, paddingLeft: 16 } },
+                        missingRequired.slice(0, 8).map(function(m, i) { return h('li', { key: i }, m); }),
+                        missingRequired.length > 8 ? h('li', null, 'and ' + (missingRequired.length - 8) + ' more') : null
+                      )
+                    )
+                  : 'Close out the bundle. Marks it Complete in Domino.',
+                placement: 'bottomRight', overlayStyle: { maxWidth: 320 },
+              },
+                h('span', { style: { display: 'inline-block' } },
+                  h(Button, {
+                    size: 'small', type: 'primary', loading: transitioning,
+                    disabled: hasMissing,
+                    onClick: handleCompleteBundle,
+                  }, '✓ Mark as Complete')
+                )
+              )
       )
     );
     // (Per-scripted-check Run Agent buttons live on each row. The earlier
