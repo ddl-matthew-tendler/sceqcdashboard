@@ -302,6 +302,14 @@ function apiPatch(path, body) {
   });
 }
 
+function apiPut(path, body) {
+  return apiFetch(path, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
 // ── Utility ─────────────────────────────────────────────────────
 function stateColor(state) {
   if (!state) return 'default';
@@ -13217,20 +13225,43 @@ function App() {
   var _sidebarCollapsed = useState(function() { try { return localStorage.getItem('sce_sidebar_collapsed') === 'true'; } catch(e) { return false; } });
   var sidebarCollapsed = _sidebarCollapsed[0]; var setSidebarCollapsed = _sidebarCollapsed[1];
 
-  // Load assignment rules from localStorage on mount
+  // Load assignment rules: prefer the server-side file (shared across
+  // browsers/users), fall back to localStorage so the page is still useful
+  // offline or before the first PUT lands. localStorage is kept as a
+  // mirror, not the source of truth.
+  var _rulesLoaded = useState(false);
+  var rulesLoaded = _rulesLoaded[0]; var setRulesLoaded = _rulesLoaded[1];
   useEffect(function() {
+    // Optimistic load from cache so the UI isn't blank during the fetch.
     try {
-      var saved = localStorage.getItem('sce_assignment_rules');
-      if (saved) setAssignmentRules(JSON.parse(saved));
-    } catch(e) { console.warn('Failed to load assignment rules from localStorage:', e); }
+      var cached = localStorage.getItem('sce_assignment_rules');
+      if (cached) setAssignmentRules(JSON.parse(cached));
+    } catch(e) { /* ignore */ }
+    apiGet('api/assignment-rules')
+      .then(function(resp) {
+        var serverRules = (resp && resp.rules) || [];
+        setAssignmentRules(serverRules);
+      })
+      .catch(function(e) { console.warn('Server rules unavailable, using localStorage cache:', e); })
+      .then(function() { setRulesLoaded(true); });
   }, []);
 
-  // Persist assignment rules to localStorage on change
+  // Persist rules: write to server-side file (durable, audit-able) AND
+  // mirror to localStorage as a cache. We skip the initial render (before
+  // the server load resolves) so we don't accidentally overwrite shared
+  // rules with an empty array from a fresh tab.
+  var saveTimerRef = useRef(null);
   useEffect(function() {
-    try {
-      localStorage.setItem('sce_assignment_rules', JSON.stringify(assignmentRules));
-    } catch(e) { console.warn('Failed to save assignment rules to localStorage:', e); }
-  }, [assignmentRules]);
+    if (!rulesLoaded) return;
+    try { localStorage.setItem('sce_assignment_rules', JSON.stringify(assignmentRules)); } catch(e) { /* ignore */ }
+    // Debounce server writes — rapid edits (e.g., reordering) shouldn't
+    // produce a write per keystroke.
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(function() {
+      apiPut('api/assignment-rules', { rules: assignmentRules })
+        .catch(function(e) { console.warn('Failed to save rules to server (kept in localStorage):', e); });
+    }, 600);
+  }, [assignmentRules, rulesLoaded]);
 
   // Load automation rules + history from localStorage on mount
   useEffect(function() {
@@ -13457,6 +13488,70 @@ function App() {
   // Fetch live data from Domino
   // fallbackToDummy: if true, silently switch to dummy data on failure (used on initial mount)
   //                  if false, show an error instead (used when user explicitly toggles dummy off)
+  // Page through /api/bundles until we exhaust results (or hit a safety cap).
+  // The governance endpoint has historically been capped at 200/page with no
+  // total field, so silent truncation looked normal. The loop terminates when
+  // a partial page comes back (< page size) or we hit the hard cap, which
+  // surfaces in the console so we know to revisit if a real tenant ever needs
+  // more than this.
+  function fetchAllBundles(pageSize, hardCap) {
+    pageSize = pageSize || 200;
+    hardCap = hardCap || 2000;
+    var all = [];
+    var offset = 0;
+    function nextPage() {
+      return apiGet('api/bundles?limit=' + pageSize + '&offset=' + offset).then(function(resp) {
+        var page = (resp && resp.data) || [];
+        all = all.concat(page);
+        offset += page.length;
+        if (page.length < pageSize || all.length >= hardCap) {
+          if (all.length >= hardCap && page.length === pageSize) {
+            console.warn('[bundles] hit safety cap of ' + hardCap + '; more may exist upstream.');
+          }
+          return { data: all };
+        }
+        return nextPage();
+      });
+    }
+    return nextPage();
+  }
+
+  // Fire the per-bundle enrichment (approvals/findings/gates) in chunks so
+  // we don't blast the backend with N*3 concurrent requests, and so the
+  // dashboard counts can update progressively as each batch lands. Mutates
+  // the bundle objects in place and triggers a setBundles re-render after
+  // each chunk by handing a fresh array reference to React.
+  function enrichBundlesInBackground(bundleList, batchSize, onDone) {
+    batchSize = batchSize || 8;
+    var i = 0;
+    function runNextBatch() {
+      if (i >= bundleList.length) {
+        if (typeof onDone === 'function') onDone();
+        return;
+      }
+      var batch = bundleList.slice(i, i + batchSize);
+      i += batchSize;
+      Promise.all(batch.map(function(bundle) {
+        return Promise.all([
+          apiGet('api/bundles/' + bundle.id + '/approvals').catch(function() { return []; }),
+          apiGet('api/bundles/' + bundle.id + '/findings?limit=200').catch(function() { return { data: [] }; }),
+          apiGet('api/bundles/' + bundle.id + '/gates').catch(function() { return []; }),
+        ]).then(function(r) {
+          bundle._approvals = Array.isArray(r[0]) ? r[0] : [];
+          bundle._findings = r[1].data || (Array.isArray(r[1]) ? r[1] : []);
+          bundle._gates = Array.isArray(r[2]) ? r[2] : [];
+          bundle._enriched = true;
+        });
+      })).then(function() {
+        // Hand React a fresh array reference so memoized children re-render
+        // and pick up the new _findings/_approvals/_gates on the mutated bundles.
+        setBundles(function(prev) { return prev.slice(); });
+        runNextBatch();
+      });
+    }
+    runNextBatch();
+  }
+
   function fetchLiveData(fallbackToDummy) {
     setLoading(true);
     setError(null);
@@ -13464,7 +13559,7 @@ function App() {
     // 1. Fetch current user, bundles, projects, policies in parallel
     Promise.all([
       apiGet('api/users/self').catch(function(e) { console.error('users/self failed:', e); return null; }),
-      apiGet('api/bundles?limit=200'),
+      fetchAllBundles(200, 2000),
       apiGet('api/projects?limit=200').catch(function() { return []; }),
       apiGet('api/policies?limit=200').catch(function() { return { data: [] }; }),
       apiGet('api/attachment-overviews?limit=200').catch(function() { return { data: [] }; }),
@@ -13547,33 +13642,21 @@ function App() {
             });
         });
 
-        // Fire collaborator fetches AND per-bundle enrichment simultaneously
-        // (previously sequential: collabs first, then enrichment)
-        // All per-bundle calls (approvals, findings, gates) + collaborator calls
-        // fire in a single Promise.all batch for maximum parallelism.
-        var enrichPromises = bundleList.map(function(bundle) {
-          return Promise.all([
-            apiGet('api/bundles/' + bundle.id + '/approvals').catch(function() { return []; }),
-            apiGet('api/bundles/' + bundle.id + '/findings?limit=200').catch(function() { return { data: [] }; }),
-            apiGet('api/bundles/' + bundle.id + '/gates').catch(function() { return []; }),
-          ]).then(function(enrichResults) {
-            bundle._approvals = Array.isArray(enrichResults[0]) ? enrichResults[0] : [];
-            bundle._findings = enrichResults[1].data || (Array.isArray(enrichResults[1]) ? enrichResults[1] : []);
-            bundle._gates = Array.isArray(enrichResults[2]) ? enrichResults[2] : [];
-            bundle._attachments = attachMap[bundle.id] || [];
-            return bundle;
-          });
-        });
+        // Attachments are already in attachMap from the top-level fetch; wire
+        // them onto bundles synchronously so the table doesn't show 0 attachments.
+        bundleList.forEach(function(b) { b._attachments = attachMap[b.id] || []; });
 
-        // Single Promise.all: collaborator fetches + all enrichment calls fire together
-        return Promise.all([
-          Promise.all(collabPromises),
-          Promise.all(enrichPromises),
-        ]);
+        // Stash bundleList + attachMap on the chain so the next .then() can
+        // (1) render the table immediately and (2) fire enrichment in the
+        // background. Per-bundle approvals/findings/gates used to block here
+        // (3 calls × N bundles → N+1 storm) before anything rendered.
+        return Promise.all(collabPromises).then(function(collabResults) {
+          return { bundleList: bundleList, collabResults: collabResults };
+        });
       })
       .then(function(results) {
-        var collabResults = results[0];
-        var enrichedBundles = results[1];
+        var collabResults = results.collabResults;
+        var enrichedBundles = results.bundleList;
 
         // Store project members cache
         var membersCache = {};
@@ -13649,18 +13732,29 @@ function App() {
         return enrichedBundles;
       })
       .then(function(enrichedBundles) {
-        // Compute snapshot staleness across all attachments
+        // Compute attachment staleness immediately — _attachments were
+        // populated synchronously in the previous step, so this doesn't
+        // need to wait for the per-bundle enrichment storm.
         var allAttach = [];
         enrichedBundles.forEach(function(b) {
           (b._attachments || []).forEach(function(a) { a._bundleId = b.id; allAttach.push(a); });
         });
         computeSnapshotStaleness(allAttach);
 
-        // Fire optional live staleness check (non-blocking)
-        checkRemoteStaleness(allAttach, enrichedBundles);
-
+        // Render the table NOW — bundles + projects + attachments are enough
+        // for the deliverable list. Findings/approvals/gates load in the
+        // background and stream in as each batch lands.
         setBundles(enrichedBundles);
         setLoading(false);
+
+        // Background enrichment: chunk into batches of 8 to avoid firing
+        // hundreds of concurrent requests, and call setBundles after each
+        // batch so dashboard counts update progressively as data arrives.
+        enrichBundlesInBackground(enrichedBundles, 8, function() {
+          // After all batches complete, fire the remote-staleness check
+          // (depends on the full attachment list, already computed above).
+          checkRemoteStaleness(allAttach, enrichedBundles);
+        });
       })
       .catch(function(err) {
         console.error('Failed to fetch live data:', err);

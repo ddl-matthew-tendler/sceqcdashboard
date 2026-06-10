@@ -86,3 +86,6 @@ test_*.js
 # Domino Frontend (ignore contents but keep the folder structure)
 example_domino_frontend_code/*
 !example_domino_frontend_code/.gitkeep
+
+# Runtime data — assignment rules persist to this file in dev (Domino runtime uses /domino/datasets/...)
+assignment_rules.json

@@ -777,6 +777,65 @@ def list_attachment_overviews(limit: int = 200, offset: int = 0):
     return gov_get("/attachment-overviews", params=params)
 
 
+# ── Assignment Rules Persistence ────────────────────────────────
+# Rules are written to a JSON file on disk so they sync across browsers,
+# survive cache clears, and gain a real audit trail (file mtime + Domino
+# Dataset versioning when the storage path is a Dataset mount). In Domino,
+# /domino/datasets/local/<project> is a writable, versioned filesystem;
+# outside Domino we fall back to a project-local file for dev.
+
+def _assignment_rules_path() -> str:
+    """Return the absolute path where assignment rules should live."""
+    override = os.environ.get("ASSIGNMENT_RULES_PATH")
+    if override:
+        return override
+    project = os.environ.get("DOMINO_PROJECT_NAME")
+    if project and os.path.isdir("/domino/datasets/local"):
+        d = f"/domino/datasets/local/{project}"
+        try:
+            os.makedirs(d, exist_ok=True)
+        except OSError:
+            pass
+        return os.path.join(d, "assignment_rules.json")
+    return os.path.join(os.path.dirname(__file__), "assignment_rules.json")
+
+
+@app.get("/api/assignment-rules")
+def get_assignment_rules():
+    path = _assignment_rules_path()
+    if not os.path.exists(path):
+        return {"rules": [], "source": path, "savedAt": None}
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+        rules = data.get("rules", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+        saved_at = data.get("savedAt") if isinstance(data, dict) else None
+        return {"rules": rules, "source": path, "savedAt": saved_at}
+    except (OSError, json.JSONDecodeError) as e:
+        logger.warning(f"Failed to read assignment rules from {path}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to read rules: {e}")
+
+
+@app.put("/api/assignment-rules")
+def put_assignment_rules(body: dict):
+    rules = body.get("rules")
+    if not isinstance(rules, list):
+        raise HTTPException(status_code=400, detail="Body must include a 'rules' array")
+    path = _assignment_rules_path()
+    payload = {
+        "rules": rules,
+        "savedAt": datetime.utcnow().isoformat() + "Z",
+        "savedBy": os.environ.get("DOMINO_STARTING_USERNAME") or os.environ.get("USER") or "unknown",
+    }
+    try:
+        with open(path, "w") as f:
+            json.dump(payload, f, indent=2)
+        return {"ok": True, "source": path, "savedAt": payload["savedAt"], "count": len(rules)}
+    except OSError as e:
+        logger.warning(f"Failed to write assignment rules to {path}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to write rules: {e}")
+
+
 # ── Dataset & Volume Snapshot Versions (Staleness Check) ─────────
 
 @app.get("/api/datasets/{dataset_id}/snapshots")
