@@ -6113,11 +6113,19 @@ function DetailDrawer(props) {
     var stepper = h('div', { style: { display: 'flex', alignItems: 'flex-start', padding: '4px 0 16px', borderBottom: '1px solid #E0E0E0', marginBottom: 12, overflowX: 'auto' } },
       stages.map(function(stage, i) {
         var st = stageStates[i];
-        var dotBg = st === 'done' ? '#543FDE' : '#FFFFFF';
-        var dotBorder = st === 'pending' ? '#E0E0E0' : '#543FDE';
-        var dotColor = st === 'done' ? '#FFFFFF' : st === 'active' ? '#543FDE' : '#8F8FA3';
+        // Color language matches the Progress column in the bundles
+        // table:  green = done, purple = active, gray = pending.
+        var dotBg     = st === 'done' ? '#28A464' : '#FFFFFF';
+        var dotBorder = st === 'done' ? '#28A464'
+                      : st === 'pending' ? '#E0E0E0'
+                      : '#543FDE';
+        var dotColor  = st === 'done' ? '#FFFFFF'
+                      : st === 'active' ? '#543FDE'
+                      : '#8F8FA3';
         var dotShadow = st === 'active' ? '0 0 0 3px rgba(84,63,222,0.15)' : 'none';
-        var labelColor = st === 'pending' ? '#8F8FA3' : '#543FDE';
+        var labelColor = st === 'done' ? '#28A464'
+                       : st === 'active' ? '#543FDE'
+                       : '#8F8FA3';
         var isClickable = st === 'pending' && fullBundle.state !== 'Complete' && !hasMissing;
         var blockedClickable = st === 'pending' && fullBundle.state !== 'Complete' && hasMissing;
         var tooltipText = isClickable
@@ -6144,7 +6152,12 @@ function DetailDrawer(props) {
                 position: 'absolute',
                 top: 11, height: 2,
                 left: 'calc(50% + 13px)', right: 'calc(-50% + 13px)',
-                background: (st === 'done' || st === 'active') ? '#543FDE' : '#E0E0E0',
+                // Line between done -> next is green; active -> next is
+                // purple (the work is happening on this end); pending
+                // connectors are gray.
+                background: st === 'done' ? '#28A464'
+                         : st === 'active' ? '#543FDE'
+                         : '#E0E0E0',
                 zIndex: 0,
               } })
             : null,
