@@ -306,7 +306,11 @@ function apiPatch(path, body) {
 function stateColor(state) {
   if (!state) return 'default';
   const s = state.toLowerCase();
-  if (s === 'active') return 'processing';
+  // 'purple' (Antd preset) aligns the bundle-state Tag with the
+  // Domino purple used by the stepper's active dot and the stage's
+  // ACTIVE pill, so all three "active" indicators read as one state
+  // rather than three different ones.
+  if (s === 'active') return 'purple';
   if (s === 'complete') return 'success';
   if (s === 'archived') return 'default';
   return 'default';
