@@ -246,23 +246,6 @@ body {
 .stat-card-value.info    { color: #0070CC; }
 .stat-card-value.primary { color: #543FDE; }
 
-/* Skeleton placeholders for stat cards while data is still loading
-   (e.g. bundle enrichment streaming in). Cursor-default + reduced opacity
-   on the card itself signal "not interactive yet" so users don't filter
-   on incomplete numbers. */
-.stat-card-loading { cursor: default; opacity: 0.85; }
-.stat-card-skeleton {
-  background: linear-gradient(90deg, #EDEDF0 0%, #F8F8FB 50%, #EDEDF0 100%);
-  background-size: 200% 100%;
-  animation: stat-card-shimmer 1.4s ease-in-out infinite;
-  border-radius: 4px;
-}
-.stat-card-skeleton-value { height: 28px; width: 60%; margin-top: 2px; }
-.stat-card-skeleton-sub   { height: 12px; width: 80%; margin-top: 8px; }
-@keyframes stat-card-shimmer {
-  0%   { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
 
 /* ── Section panels ──────────────────────────────────── */
 .panel {

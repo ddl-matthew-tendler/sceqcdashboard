@@ -775,24 +775,16 @@ function ColumnVisibilityDropdown(props) {
 
 // ── Stat Card ───────────────────────────────────────────────────
 function StatCard(props) {
-  var isLoading = !!props.loading;
   var cls = 'stat-card'
     + (props.onClick ? ' stat-card-clickable' : '')
     + (props.active ? ' stat-card-active' : '');
-  var valueNode = h('div', { className: 'stat-card-value ' + (props.color || '') }, props.value);
-  var subNode = isLoading
-    ? h('div', { className: 'stat-card-sub stat-card-computing' },
-        h(antd.Spin, { size: 'small', style: { marginRight: 5 } }),
-        'Computing\u2026'
-      )
-    : (props.sub ? h('div', { className: 'stat-card-sub' }, props.sub) : null);
   var card = h('div', { className: cls, onClick: props.onClick || null },
     h('div', { className: 'stat-card-label' },
       props.label,
       props.tooltip ? h('span', { style: { marginLeft: 4, cursor: 'help', color: '#B0B0C0', fontSize: 11 } }, '\u24D8') : null
     ),
-    valueNode,
-    subNode
+    h('div', { className: 'stat-card-value ' + (props.color || '') }, props.value),
+    props.sub ? h('div', { className: 'stat-card-sub' }, props.sub) : null
   );
   return props.tooltip ? h(Tooltip, { title: props.tooltip, placement: 'top', overlayStyle: { maxWidth: 280 } }, card) : card;
 }
@@ -976,7 +968,7 @@ function DashboardPage(props) {
       h(StatCard, { label: 'Total ' + B + 's', value: stats.total, color: 'primary', active: !tableFilter, onClick: function() { setTableFilter(null); } }),
       h(StatCard, { label: 'Active', value: stats.active, color: 'info', sub: 'Currently in progress', active: tableFilter && tableFilter.value === 'Active', onClick: function() { setTableFilter(tableFilter && tableFilter.value === 'Active' ? null : { type: 'state', value: 'Active' }); } }),
       h(StatCard, { label: 'Complete', value: stats.complete, color: 'success', active: tableFilter && tableFilter.value === 'Complete', onClick: function() { setTableFilter(tableFilter && tableFilter.value === 'Complete' ? null : { type: 'state', value: 'Complete' }); } }),
-      h(StatCard, { label: 'Open Findings', value: stats.openFindings, color: stats.openFindings > 0 ? 'warning' : '', sub: stats.totalFindings + ' total findings', active: tableFilter && tableFilter.type === 'openFindings', onClick: function() { setTableFilter(tableFilter && tableFilter.type === 'openFindings' ? null : { type: 'openFindings' }); }, loading: props.enrichmentLoading }),
+      h(StatCard, { label: 'Open Findings', value: stats.openFindings, color: stats.openFindings > 0 ? 'warning' : '', sub: stats.totalFindings + ' total findings', active: tableFilter && tableFilter.type === 'openFindings', onClick: function() { setTableFilter(tableFilter && tableFilter.type === 'openFindings' ? null : { type: 'openFindings' }); } }),
       h(StatCard, { label: 'Avg Progress', value: stats.avgProgress + '%', sub: 'Across active ' + B.toLowerCase() + 's' })
     ),
 
@@ -1280,10 +1272,10 @@ function ApprovalsPage(props) {
     ),
 
     h('div', { className: 'stats-row' },
-      h(StatCard, { label: 'Pending Submission', value: approvalStats.pending, color: 'warning', active: approvalFilter === 'pending', onClick: function() { setApprovalFilter(approvalFilter === 'pending' ? null : 'pending'); }, loading: props.enrichmentLoading }),
-      h(StatCard, { label: 'Pending Review', value: approvalStats.review, color: 'info', active: approvalFilter === 'review', onClick: function() { setApprovalFilter(approvalFilter === 'review' ? null : 'review'); }, loading: props.enrichmentLoading }),
-      h(StatCard, { label: 'Conditionally Approved', value: approvalStats.conditional, color: 'warning', active: approvalFilter === 'conditional', onClick: function() { setApprovalFilter(approvalFilter === 'conditional' ? null : 'conditional'); }, loading: props.enrichmentLoading }),
-      h(StatCard, { label: 'Approved', value: approvalStats.approved, color: 'success', active: approvalFilter === 'approved', onClick: function() { setApprovalFilter(approvalFilter === 'approved' ? null : 'approved'); }, loading: props.enrichmentLoading })
+      h(StatCard, { label: 'Pending Submission', value: approvalStats.pending, color: 'warning', active: approvalFilter === 'pending', onClick: function() { setApprovalFilter(approvalFilter === 'pending' ? null : 'pending'); } }),
+      h(StatCard, { label: 'Pending Review', value: approvalStats.review, color: 'info', active: approvalFilter === 'review', onClick: function() { setApprovalFilter(approvalFilter === 'review' ? null : 'review'); } }),
+      h(StatCard, { label: 'Conditionally Approved', value: approvalStats.conditional, color: 'warning', active: approvalFilter === 'conditional', onClick: function() { setApprovalFilter(approvalFilter === 'conditional' ? null : 'conditional'); } }),
+      h(StatCard, { label: 'Approved', value: approvalStats.approved, color: 'success', active: approvalFilter === 'approved', onClick: function() { setApprovalFilter(approvalFilter === 'approved' ? null : 'approved'); } })
     ),
 
     h('div', { className: 'panel' },
@@ -1651,11 +1643,11 @@ function FindingsPage(props) {
     ),
 
     h('div', { className: 'stats-row' },
-      h(StatCard, { label: 'Total Findings', value: findingStats.total, color: 'primary', active: !findingFilter, onClick: function() { setFindingFilter(null); }, loading: props.enrichmentLoading }),
-      h(StatCard, { label: 'Open', value: findingStats.open, color: findingStats.open > 0 ? 'warning' : 'success', active: findingFilter && findingFilter.type === 'open', onClick: function() { setFindingFilter(findingFilter && findingFilter.type === 'open' ? null : { type: 'open' }); }, loading: props.enrichmentLoading }),
-      h(StatCard, { label: 'Critical (S0)', value: findingStats.bySev.S0, color: findingStats.bySev.S0 > 0 ? 'danger' : '', active: findingFilter && findingFilter.type === 'critical', onClick: function() { setFindingFilter(findingFilter && findingFilter.type === 'critical' ? null : { type: 'critical' }); }, loading: props.enrichmentLoading }),
-      h(StatCard, { label: 'Resolved', value: findingStats.byStatus.Done, color: 'success', active: findingFilter && findingFilter.type === 'resolved', onClick: function() { setFindingFilter(findingFilter && findingFilter.type === 'resolved' ? null : { type: 'resolved' }); }, loading: props.enrichmentLoading }),
-      h(StatCard, { label: 'Avg Time Open', value: findingStats.avgDaysOpen + 'd', color: findingStats.avgDaysOpen > 14 ? 'danger' : findingStats.avgDaysOpen > 7 ? 'warning' : 'success', tooltip: 'Average number of days that currently open findings have been open. Lower is better.', sub: findingStats.open + ' open findings', loading: props.enrichmentLoading })
+      h(StatCard, { label: 'Total Findings', value: findingStats.total, color: 'primary', active: !findingFilter, onClick: function() { setFindingFilter(null); } }),
+      h(StatCard, { label: 'Open', value: findingStats.open, color: findingStats.open > 0 ? 'warning' : 'success', active: findingFilter && findingFilter.type === 'open', onClick: function() { setFindingFilter(findingFilter && findingFilter.type === 'open' ? null : { type: 'open' }); } }),
+      h(StatCard, { label: 'Critical (S0)', value: findingStats.bySev.S0, color: findingStats.bySev.S0 > 0 ? 'danger' : '', active: findingFilter && findingFilter.type === 'critical', onClick: function() { setFindingFilter(findingFilter && findingFilter.type === 'critical' ? null : { type: 'critical' }); } }),
+      h(StatCard, { label: 'Resolved', value: findingStats.byStatus.Done, color: 'success', active: findingFilter && findingFilter.type === 'resolved', onClick: function() { setFindingFilter(findingFilter && findingFilter.type === 'resolved' ? null : { type: 'resolved' }); } }),
+      h(StatCard, { label: 'Avg Time Open', value: findingStats.avgDaysOpen + 'd', color: findingStats.avgDaysOpen > 14 ? 'danger' : findingStats.avgDaysOpen > 7 ? 'warning' : 'success', tooltip: 'Average number of days that currently open findings have been open. Lower is better.', sub: findingStats.open + ' open findings' })
     ),
 
     h('div', { className: 'two-col' },
@@ -4866,7 +4858,7 @@ function QCTrackerPage(props) {
       h('div', { className: 'stat-card-clickable' + (activeStatCard === 'active' ? ' stat-card-active' : ''), onClick: function() { handleStatClick('active'); } },
         h(StatCard, { label: 'Active', value: stats.active, color: 'info' })),
       h('div', { className: 'stat-card-clickable' + (activeStatCard === 'openFindings' ? ' stat-card-active' : ''), onClick: function() { handleStatClick('openFindings'); } },
-        h(StatCard, { label: 'Open Findings', value: stats.openFindings, color: stats.openFindings > 0 ? 'danger' : '', loading: props.enrichmentLoading })),
+        h(StatCard, { label: 'Open Findings', value: stats.openFindings, color: stats.openFindings > 0 ? 'danger' : '' })),
       h('div', { className: 'stat-card-clickable' + (activeStatCard === 'unassigned' ? ' stat-card-active' : ''), onClick: function() { handleStatClick('unassigned'); } },
         h(StatCard, { label: 'Unassigned', value: stats.unassigned, color: stats.unassigned > 0 ? 'warning' : '' })),
       h('div', { className: 'stat-card-clickable' + (activeStatCard === 'complete' ? ' stat-card-active' : ''), onClick: function() { handleStatClick('complete'); } },
@@ -13137,7 +13129,7 @@ function App() {
   // streaming in. Stat cards that read enriched data check this flag and
   // render a skeleton instead of showing misleading zeros (the table
   // doesn't depend on enrichment so it renders immediately).
-  var _enrL = useState(false); var enrichmentLoading = _enrL[0]; var setEnrichmentLoading = _enrL[1];
+  
   var _s4 = useState(false); var connected = _s4[0]; var setConnected = _s4[1];
   var _s5 = useState(null); var selectedBundle = _s5[0]; var setSelectedBundle = _s5[1];
   var _s6 = useState(false); var drawerOpen = _s6[0]; var setDrawerOpen = _s6[1];
@@ -13600,10 +13592,6 @@ function App() {
     var i = 0;
     function runNextBatch() {
       if (i >= bundleList.length) {
-        // Single commit at the end — table already rendered with the
-        // bundle list from setBundles(enrichedBundles) above; this commit
-        // lights up the dashboard counts/charts atomically.
-        setBundles(function(prev) { return prev.slice(); });
         if (typeof onDone === 'function') onDone();
         return;
       }
@@ -13815,20 +13803,11 @@ function App() {
         computeSnapshotStaleness(allAttach);
 
         // Render the table NOW — bundles + projects + attachments are enough
-        // for the deliverable list. Findings/approvals/gates load in the
-        // background and stream in as each batch lands.
+        // Keep loading spinner up until findings/approvals/gates are all
+        // fetched — page renders once with correct numbers.
         setBundles(enrichedBundles);
-        setLoading(false);
-
-        // Background enrichment: chunk into batches of 8 to avoid firing
-        // hundreds of concurrent requests. Dashboard widgets render
-        // skeletons while this flag is true; one setBundles at the end
-        // lights up the real counts atomically.
-        setEnrichmentLoading(true);
         enrichBundlesInBackground(enrichedBundles, 8, function() {
-          setEnrichmentLoading(false);
-          // After all batches complete, fire the remote-staleness check
-          // (depends on the full attachment list, already computed above).
+          setLoading(false);
           checkRemoteStaleness(allAttach, enrichedBundles);
         });
       })
@@ -14022,15 +14001,15 @@ function App() {
     // All other pages get scopedBundles
     switch (activePage) {
       case 'tracker':
-        return h(QCTrackerPage, { bundles: scopedBundles, loading: loading, enrichmentLoading: enrichmentLoading, onSelectBundle: handleSelectBundle, selectedBundle: selectedBundle, terms: terms, projectMembersCache: projectMembersCache, dataExplorerUrl: dataExplorerUrl, connected: connected, policies: livePolicies, projects: liveProjects, debugMode: debugMode, hiddenCols: appHiddenCols, setHiddenCols: setAppHiddenCols, shownStageCols: appShownStageCols, setShownStageCols: setAppShownStageCols, currentUser: currentUser, scopeCurrentUser: scopeCurrentUser, scopeProjects: scopeProjects, onRefresh: function() { if (connected) fetchLiveData(); } });
+        return h(QCTrackerPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, selectedBundle: selectedBundle, terms: terms, projectMembersCache: projectMembersCache, dataExplorerUrl: dataExplorerUrl, connected: connected, policies: livePolicies, projects: liveProjects, debugMode: debugMode, hiddenCols: appHiddenCols, setHiddenCols: setAppHiddenCols, shownStageCols: appShownStageCols, setShownStageCols: setAppShownStageCols, currentUser: currentUser, scopeCurrentUser: scopeCurrentUser, scopeProjects: scopeProjects, onRefresh: function() { if (connected) fetchLiveData(); } });
       case 'rules':
         return h(AssignmentRulesPage, { bundles: bundles, setBundles: setBundles, assignmentRules: assignmentRules, setAssignmentRules: setAssignmentRules, terms: terms, projectMembersCache: projectMembersCache, livePolicies: livePolicies, onNavigate: setActivePage });
       case 'milestones':
         return h(MilestonesPage, { bundles: scopedBundles, loading: loading, terms: terms });
       case 'approvals':
-        return h(ApprovalsPage, { bundles: scopedBundles, loading: loading, enrichmentLoading: enrichmentLoading, terms: terms });
+        return h(ApprovalsPage, { bundles: scopedBundles, loading: loading, terms: terms });
       case 'findings':
-        return h(FindingsPage, { bundles: scopedBundles, loading: loading, enrichmentLoading: enrichmentLoading, terms: terms });
+        return h(FindingsPage, { bundles: scopedBundles, loading: loading, terms: terms });
       case 'metrics':
         return h(MetricsPage, { bundles: scopedBundles, terms: terms, livePolicies: livePolicies, reportConfig: reportConfig, onSelectBundle: handleSelectBundle });
       case 'stages':
@@ -14046,7 +14025,7 @@ function App() {
       case 'config':
         return h(ConfigurationPage, { bundles: bundles, livePolicies: livePolicies, terms: terms, reportConfig: reportConfig, onSaveRoleMapping: saveRoleMapping, onSavePathPatterns: savePathPatterns, onNavigate: setActivePage });
       default:
-        return h(DashboardPage, { bundles: scopedBundles, loading: loading, enrichmentLoading: enrichmentLoading, onSelectBundle: handleSelectBundle, terms: terms });
+        return h(DashboardPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, terms: terms });
     }
   }
 
