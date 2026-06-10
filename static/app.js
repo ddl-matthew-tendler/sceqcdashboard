@@ -5985,20 +5985,35 @@ function DetailDrawer(props) {
         var metaLine = metaParts.length > 0
           ? h('div', { style: { fontSize: 11, color: '#8F8FA3', marginTop: 2 } }, metaParts.join(' \u00B7 '))
           : null;
-        // GitHub blob URL for Code-category (Report type) attachments
-        // when we have git provider info for this project. Branch comes
-        // from the attachment identifier; format matches
-        //   https://github.com/{owner}/{repo}/blob/{branch}/{filename}
+        // Deep-link Code (Report-type) attachments back to source on
+        // their hosted git provider. Pinned to the commit hash when the
+        // attachment carries one (immutable for audit); falls back to
+        // branch if commit is missing. Uses the host detected by the
+        // backend so GitHub Enterprise / self-hosted GitLab work.
         var githubUrl = null;
         var gi = gitInfoCache[bundle.projectId];
-        if (att.type === 'Report' && gi && gi.provider === 'github' && gi.owner && gi.repo && id.filename) {
-          var refForBlob = id.branch || gi.defaultRef || 'main';
-          // GitHub paths in /blob/ URLs do NOT URL-encode the slashes
-          // between directories - each segment gets encoded individually.
-          var ghPath = id.filename.split('/').map(encodeURIComponent).join('/');
-          var ghBranch = refForBlob.split('/').map(encodeURIComponent).join('/');
-          githubUrl = 'https://github.com/' + encodeURIComponent(gi.owner) + '/' + encodeURIComponent(gi.repo)
-                    + '/blob/' + ghBranch + '/' + ghPath;
+        if (att.type === 'Report' && gi && gi.provider && gi.owner && gi.repo && gi.host && id.filename) {
+          var refForBlob = id.commit || id.branch || gi.defaultRef || 'main';
+          var path = id.filename.split('/').map(encodeURIComponent).join('/');
+          var refEnc = refForBlob.split('/').map(encodeURIComponent).join('/');
+          var ownerEnc = encodeURIComponent(gi.owner);
+          var repoEnc = encodeURIComponent(gi.repo);
+          var hostBase = 'https://' + gi.host;
+          if (gi.provider === 'github') {
+            // https://{host}/{owner}/{repo}/blob/{ref}/{path}
+            githubUrl = hostBase + '/' + ownerEnc + '/' + repoEnc + '/blob/' + refEnc + '/' + path;
+          } else if (gi.provider === 'gitlab') {
+            // https://{host}/{owner}/{repo}/-/blob/{ref}/{path}
+            githubUrl = hostBase + '/' + ownerEnc + '/' + repoEnc + '/-/blob/' + refEnc + '/' + path;
+          } else if (gi.provider === 'bitbucket') {
+            // https://bitbucket.org/{owner}/{repo}/src/{ref}/{path}
+            githubUrl = hostBase + '/' + ownerEnc + '/' + repoEnc + '/src/' + refEnc + '/' + path;
+          } else if (gi.provider === 'azuredevops') {
+            // https://dev.azure.com/{org}/{project}/_git/{repo}?path=/{path}&version=GC{commit}
+            // Domino Azure repos vary; fall back to Domino if we can't
+            // reliably build it.
+            githubUrl = null;
+          }
         }
         return h('div', { key: i, style: { display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 0', borderBottom: '1px solid #F5F5F8' } },
           h(Tag, { color: typeColors[att.type] || 'default', style: { fontSize: 10, flexShrink: 0, marginTop: 2 } }, typeLabel),
@@ -6008,7 +6023,7 @@ function DetailDrawer(props) {
                 ? h(Tooltip, { title: 'Open in Data Explorer: ' + explorerPath },
                     h('a', { href: explorerLink, onClick: function(e) { openDataExplorer(explorerLink, explorerPath, e); }, style: { fontSize: 13, color: '#0070CC', cursor: 'pointer', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: 4 } }, deIcon, fname))
                 : githubUrl
-                  ? h(Tooltip, { title: 'Open on GitHub @ ' + (id.branch || gi.defaultRef || 'main') },
+                  ? h(Tooltip, { title: 'Open on ' + (gi.provider === 'github' ? 'GitHub' : gi.provider === 'gitlab' ? 'GitLab' : gi.provider === 'bitbucket' ? 'Bitbucket' : 'source') + ' @ ' + (id.commit ? String(id.commit).slice(0, 8) : (id.branch || gi.defaultRef || 'main')) },
                       h('a', { href: githubUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 13, color: '#543FDE', fontWeight: 500 } }, fname))
                   : dominoUrl
                     ? h('a', { href: dominoUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 13, color: '#543FDE', fontWeight: 500 } }, fname)

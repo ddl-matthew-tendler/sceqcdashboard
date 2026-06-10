@@ -912,24 +912,44 @@ def get_project_git_info(project_id: str):
         return {"provider": None}
 
     repo = repo_list[0]
-    provider = (repo.get("serviceProvider") or "").lower()
+    provider = (repo.get("serviceProvider") or "").lower() or None
     uri = repo.get("uri") or ""
 
-    owner, repo_name = None, None
-    # Parse owner/repo for GitHub URIs:
-    #   git@github.com:owner/repo.git
-    #   https://github.com/owner/repo.git
-    #   https://github.com/owner/repo
+    # Parse host, owner, repo from any of:
+    #   git@host:owner/repo.git
+    #   https://host/owner/repo.git
+    #   https://user@host/owner/repo
+    #   ssh://git@host:22/owner/repo.git
+    # Captures the host so GitHub Enterprise / self-hosted GitLab work.
     import re
-    m = re.search(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$", uri)
+    host, owner, repo_name = None, None, None
+    m = re.search(
+        r"(?:^|@|//)([^/:@\s]+)[:/]([^/\s]+)/([^\s]+?)(?:\.git)?/?$",
+        uri,
+    )
     if m:
-        owner, repo_name = m.group(1), m.group(2)
+        host = m.group(1)
+        owner = m.group(2)
+        repo_name = m.group(3)
+
+    # Infer provider from host when Domino didn't tell us, then narrow
+    # by hostname (handles Enterprise editions).
+    inferred = None
+    if host:
+        h = host.lower()
+        if "github" in h: inferred = "github"
+        elif "gitlab" in h: inferred = "gitlab"
+        elif "bitbucket" in h: inferred = "bitbucket"
+        elif "dev.azure.com" in h or "visualstudio.com" in h: inferred = "azuredevops"
+    if not provider and inferred:
+        provider = inferred
 
     ref_obj = repo.get("ref") or {}
     default_ref = ref_obj.get("value") if isinstance(ref_obj, dict) else None
 
     return {
-        "provider": provider or None,
+        "provider": provider,
+        "host": host,
         "owner": owner,
         "repo": repo_name,
         "uri": uri,
