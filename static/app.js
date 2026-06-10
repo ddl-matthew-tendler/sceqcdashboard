@@ -6987,7 +6987,7 @@ function DetailDrawer(props) {
     width: drawerWidth,
     styles: { body: { padding: 0, display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' } },
     extra: dominoUrl
-      ? h(Button, { type: 'primary', size: 'small', onClick: function() { window.open(dominoUrl, '_blank'); } }, '\u2197 View in Domino')
+      ? h(Button, { type: 'default', size: 'small', onClick: function() { window.open(dominoUrl, '_blank'); }, style: { borderColor: '#543FDE', color: '#543FDE' } }, '\u2197 View in Domino')
       : null,
   },
     // Drag-to-resize handle. Sits on the left edge of the drawer body and
