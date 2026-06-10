@@ -286,6 +286,20 @@ async function apiFetch(url, options) {
 
 function apiGet(path) { return apiFetch(path); }
 
+// Lazy-load a bundle's quality gates the first time something needs them
+// (stage popover, drawer Gates tab). Gates aren't shown on any dashboard,
+// so boot enrichment skips them; this fetches on demand and caches onto
+// bundle._gates. onLoaded fires after the cache is populated so the caller
+// can trigger a re-render.
+function ensureBundleGates(bundle, onLoaded) {
+  if (!bundle || !bundle.id) { if (onLoaded) onLoaded([]); return; }
+  if (bundle._gates) { if (onLoaded) onLoaded(bundle._gates); return; }
+  apiGet('api/bundles/' + bundle.id + '/gates')
+    .then(function(g) { bundle._gates = Array.isArray(g) ? g : []; })
+    .catch(function() { bundle._gates = []; })
+    .then(function() { if (onLoaded) onLoaded(bundle._gates); });
+}
+
 function apiPost(path, body) {
   return apiFetch(path, {
     method: 'POST',
@@ -2756,6 +2770,14 @@ function StagePopoverContent(props) {
   var dotState = props.dotState;
   var onFindingsClick = props.onFindingsClick;
   var onClose = props.onClose;
+
+  // Gates are lazy-loaded (not part of boot enrichment). Fetch them when
+  // the popover opens; bump local state so the gate count re-renders.
+  var _gv = useState(0);
+  var setGatesVersion = _gv[1];
+  useEffect(function() {
+    ensureBundleGates(bundle, function() { setGatesVersion(function(n) { return n + 1; }); });
+  }, [bundle && bundle.id]);
 
   var stageData = bundle.stages[stageIdx] || {};
   var assignee = stageData.assignee;
@@ -5940,6 +5962,12 @@ function DetailDrawer(props) {
   // over an out-of-range index across bundles with different stage counts.
   var _focus = useState(null); var focusedStageIdx = _focus[0]; var setFocusedStageIdx = _focus[1];
   useEffect(function() { setFocusedStageIdx(null); }, [bundleId]);
+  // Gates are lazy-loaded (skipped during boot enrichment). Fetch them when
+  // the drawer opens a bundle; bump state so the Gates tab + count update.
+  var _gv = useState(0); var setGatesVersion = _gv[1];
+  useEffect(function() {
+    if (bundle) ensureBundleGates(bundle, function() { setGatesVersion(function(n) { return n + 1; }); });
+  }, [bundleId]);
   // Drawer width: drag-to-resize via a handle on the left edge.
   // Width is persisted to localStorage on mouseup (not on every frame).
   var _dw = useState(function() {
@@ -13884,14 +13912,16 @@ function App() {
       var batch = bundleList.slice(i, i + batchSize);
       i += batchSize;
       Promise.all(batch.map(function(bundle) {
+        // Gates are intentionally NOT fetched here. They're used only in
+        // the stage popover and drawer Gates tab (both interactive), never
+        // on a dashboard — so we lazy-load them on demand via
+        // ensureBundleGates() and save a per-bundle request at boot.
         return Promise.all([
           apiGet('api/bundles/' + bundle.id + '/approvals').catch(function() { return []; }),
           apiGet('api/bundles/' + bundle.id + '/findings?limit=200').catch(function() { return { data: [] }; }),
-          apiGet('api/bundles/' + bundle.id + '/gates').catch(function() { return []; }),
         ]).then(function(r) {
           bundle._approvals = Array.isArray(r[0]) ? r[0] : [];
           bundle._findings = r[1].data || (Array.isArray(r[1]) ? r[1] : []);
-          bundle._gates = Array.isArray(r[2]) ? r[2] : [];
           bundle._enriched = true;
         });
       })).then(runNextBatch);
