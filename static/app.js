@@ -5128,7 +5128,22 @@ function EvidenceStageSection(props) {
             )
           : (props.assignee
               ? h('span', { style: { fontSize: 11, color: muted ? '#B0B0C0' : '#65657B' } }, '· ' + props.assignee)
-              : null)
+              : null),
+        // Required-field progress. Hidden when there are zero required.
+        props.requiredTotal > 0
+          ? h('span', {
+              style: {
+                fontSize: 11,
+                color: muted
+                  ? '#B0B0C0'
+                  : (props.requiredFilled === props.requiredTotal ? '#28A464' : '#C20A29'),
+                fontWeight: 500,
+              },
+              title: props.requiredFilled + ' of ' + props.requiredTotal + ' required fields completed',
+            },
+              '· ' + props.requiredFilled + ' / ' + props.requiredTotal + ' required'
+            )
+          : null
       ),
       h('span', { style: { color: muted ? '#C5C5D0' : '#8F8FA3', fontSize: 11, transition: 'transform 0.2s', display: 'inline-block', transform: open ? 'rotate(0deg)' : 'rotate(-90deg)' } }, '▼')
     ),
@@ -5571,6 +5586,9 @@ function DetailDrawer(props) {
     if (!force && evidenceData && evidenceData._bundleId === bundle.id) return;
     setEvidenceLoading(true);
     setEvidenceError(null);
+    // Capture the previous evidence map BEFORE the GET so we can diff
+    // and flash fields the agent just populated.
+    var prevMap = (evidenceData && evidenceData._bundleId === bundle.id && evidenceData.evidenceMap) || {};
     apiGet('api/bundles/' + bundle.id + '/detail')
       .then(function(data) {
         data._bundleId = bundle.id;
@@ -5586,6 +5604,30 @@ function DetailDrawer(props) {
         });
         setEvidenceForm(seed);
         setEvidenceDirty({});
+
+        // Detect fields that transitioned empty -> populated and pulse
+        // them so the user can see what the agent just wrote.
+        function wasEmpty(v) {
+          return v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
+        }
+        var newlyPopulated = {};
+        Object.keys(em).forEach(function(aid) {
+          var beforeV = prevMap[aid] && prevMap[aid].value;
+          var afterV = em[aid] && em[aid].value;
+          if (wasEmpty(beforeV) && !wasEmpty(afterV)) {
+            newlyPopulated[aid] = true;
+          }
+        });
+        if (Object.keys(newlyPopulated).length > 0) {
+          setFlashSet(function(prev) { return Object.assign({}, prev, newlyPopulated); });
+          setTimeout(function() {
+            setFlashSet(function(prev) {
+              var next = Object.assign({}, prev);
+              Object.keys(newlyPopulated).forEach(function(k) { delete next[k]; });
+              return next;
+            });
+          }, 2000);
+        }
       })
       .catch(function(err) { setEvidenceError(err.message || String(err)); })
       .then(function() { setEvidenceLoading(false); });
@@ -6078,8 +6120,30 @@ function DetailDrawer(props) {
       var assignee = stageDataFromBundle && stageDataFromBundle.assignee;
       var assigneeName = assignee ? (assignee.name || assignee.userName) : null;
       var members = projectMembersCache[fullBundle.projectId] || [];
-      var memberOptions = members.map(function(m) {
-        return { label: (m.firstName || '') + ' ' + (m.lastName || '') + ' (' + m.userName + ')', value: m.id };
+      // Float "agent" users to the top of the list so the recommended
+      // automation user is one click away. Match the same regex used by
+      // the Run Agent gating logic (/\bagent/) against userName + names.
+      function looksLikeAgent(m) {
+        var hay = ((m.userName || '') + ' ' + (m.firstName || '') + ' ' + (m.lastName || '')).toLowerCase();
+        return /\bagent/.test(hay);
+      }
+      var sortedMembers = members.slice().sort(function(a, b) {
+        var ag = looksLikeAgent(a), bg = looksLikeAgent(b);
+        if (ag && !bg) return -1;
+        if (!ag && bg) return 1;
+        return (a.userName || '').localeCompare(b.userName || '');
+      });
+      var memberOptions = sortedMembers.map(function(m) {
+        var isAgent = looksLikeAgent(m);
+        var displayName = ((m.firstName || '') + ' ' + (m.lastName || '')).trim() || m.userName;
+        return {
+          value: m.id,
+          // Plain-string label so Antd's filter/selected-value rendering
+          // works normally. Prefix with the sparkle for agent users so
+          // they're visually distinct in the open dropdown too.
+          label: (isAgent ? '✨ ' : '') + displayName + ' (' + m.userName + ')',
+          title: isAgent ? 'Recommended for automation' : undefined,
+        };
       });
       var resolvedAssigneeId = assignee ? assignee.id : undefined;
       if (resolvedAssigneeId && !memberOptions.some(function(o) { return o.value === resolvedAssigneeId; })) {
@@ -6135,6 +6199,27 @@ function DetailDrawer(props) {
       var bundleStageData = (fullBundle.stages || []).find(function(s) { return s.stage && s.stage.name === stage.name; });
       var assigneeNode = buildAssigneeControl(bundleStageData, stage.name);
       var canEdit = st === 'active' || st === 'done';
+
+      // Required-field progress for this stage header. Counts required
+      // input artifacts across this stage's evidence sets and approvals,
+      // reports how many are currently filled. Lets the user see "2 / 5
+      // required" without expanding the section.
+      var stageRequired = 0;
+      var stageRequiredFilled = 0;
+      (function() {
+        var artsForStage = [];
+        (stage.evidenceSet || []).forEach(function(es) { (es.artifacts || []).forEach(function(a) { artsForStage.push(a); }); });
+        (stage.approvals || []).forEach(function(ap) { ((ap.evidence || {}).artifacts || []).forEach(function(a) { artsForStage.push(a); }); });
+        artsForStage.forEach(function(a) {
+          if (!a.required) return;
+          if (a.artifactType !== 'input') return;
+          stageRequired++;
+          var ev = evidenceMap[a.id] || {};
+          var formVal = evidenceForm[a.id];
+          var v = formVal !== undefined ? formVal : ev.value;
+          if (valueLooksFilled(v)) stageRequiredFilled++;
+        });
+      })();
 
       // Run Agent is gated on the stage being assigned to a user whose
       // username or display name contains "agent". Anyone else clicking
@@ -6288,6 +6373,8 @@ function DetailDrawer(props) {
         statusColor: statusColor,
         assignee: assignee,
         assigneeNode: assigneeNode,
+        requiredFilled: stageRequiredFilled,
+        requiredTotal: stageRequired,
         defaultOpen: st === 'active',
       }, sectionContent);
     });
@@ -6375,7 +6462,20 @@ function DetailDrawer(props) {
       )
     ),
     open: visible,
-    onClose: onClose,
+    // Guard against accidental closes when there are unsaved evidence
+    // edits. Confirm before discarding.
+    onClose: function() {
+      var dirtyKeys = Object.keys(evidenceDirty || {}).filter(function(k) { return evidenceDirty[k]; });
+      if (dirtyKeys.length === 0) { onClose(); return; }
+      Modal.confirm({
+        title: 'Discard unsaved changes?',
+        content: h('div', { style: { fontSize: 12, color: '#65657B' } },
+          'You have ' + dirtyKeys.length + ' unsaved field' + (dirtyKeys.length === 1 ? '' : 's') + ' on this bundle. Closing will lose them.'),
+        okText: 'Discard and close', okButtonProps: { danger: true },
+        cancelText: 'Keep editing',
+        onOk: function() { onClose(); },
+      });
+    },
     width: drawerWidth,
     styles: { body: { padding: 0, display: 'flex', flexDirection: 'column', height: '100%', position: 'relative' } },
     extra: dominoUrl
@@ -6384,18 +6484,41 @@ function DetailDrawer(props) {
   },
     // Drag-to-resize handle. Sits on the left edge of the drawer body and
     // widens the drawer when dragged left. Double-click to reset to 560.
+    // Three faint dots in the middle hint at affordance without being
+    // loud; opacity boosts on hover.
     h('div', {
       onMouseDown: onResizeStart,
       onDoubleClick: onResizeDoubleClick,
       title: 'Drag to resize (double-click to reset)',
       style: {
-        position: 'absolute', left: 0, top: 0, bottom: 0, width: 6,
+        position: 'absolute', left: 0, top: 0, bottom: 0, width: 8,
         cursor: 'ew-resize', zIndex: 100,
         background: 'transparent',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
       },
-      onMouseEnter: function(e) { e.currentTarget.style.background = 'rgba(84,63,222,0.18)'; },
-      onMouseLeave: function(e) { e.currentTarget.style.background = 'transparent'; },
-    }),
+      onMouseEnter: function(e) {
+        e.currentTarget.style.background = 'rgba(84,63,222,0.18)';
+        var dots = e.currentTarget.querySelector('div');
+        if (dots) dots.style.opacity = '1';
+      },
+      onMouseLeave: function(e) {
+        e.currentTarget.style.background = 'transparent';
+        var dots = e.currentTarget.querySelector('div');
+        if (dots) dots.style.opacity = '0.25';
+      },
+    },
+      h('div', {
+        style: {
+          display: 'flex', flexDirection: 'column', gap: 3,
+          opacity: 0.25, transition: 'opacity 0.15s ease-out',
+          pointerEvents: 'none',
+        },
+      },
+        h('span', { style: { width: 3, height: 3, borderRadius: '50%', background: '#543FDE' } }),
+        h('span', { style: { width: 3, height: 3, borderRadius: '50%', background: '#543FDE' } }),
+        h('span', { style: { width: 3, height: 3, borderRadius: '50%', background: '#543FDE' } })
+      )
+    ),
     // View selector tabs
     h('div', { style: { borderBottom: '1px solid #E0E0E0', flexShrink: 0 } },
       h(Tabs, {
