@@ -89,3 +89,11 @@ example_domino_frontend_code/*
 
 # Runtime data — assignment rules persist to this file in dev (Domino runtime uses /domino/datasets/...)
 assignment_rules.json
+
+# Claude Code worktrees (transient; must never be committed as embedded repos)
+.claude/worktrees/
+
+# Local governance dumps / migration scratch (not part of the app)
+gov_dump/
+migrate_governance.py
+redundancy_mockup.html
