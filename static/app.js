@@ -3465,13 +3465,13 @@ function BulkActionBar(props) {
           loading: bulkLoading,
           onClick: handleBulkAssign,
         }, 'Assign'),
-        h('div', { style: { width: 1, height: 16, background: 'rgba(255,255,255,0.3)', flexShrink: 0 } }),
+        h('div', { style: { width: 1, height: 16, background: 'rgba(84,63,222,0.25)', flexShrink: 0 } }),
         h(Button, {
           size: 'small',
-          style: { background: 'rgba(255,255,255,0.15)', borderColor: 'rgba(255,255,255,0.4)', color: '#fff' },
+          style: { background: '#FFFFFF', borderColor: '#C9C5F2', color: '#1820A0', fontWeight: 500 },
           onClick: handleBulkAdvanceClick,
         }, 'Advance Stage'),
-        h(Button, { size: 'small', type: 'link', onClick: onClear, style: { color: '#fff' } }, 'Clear')
+        h(Button, { size: 'small', type: 'link', onClick: onClear, style: { color: '#3B3BD3' } }, 'Clear')
       )
     ),
     h(Modal, {
@@ -5965,6 +5965,10 @@ function DetailDrawer(props) {
   var _fl = useState({});  var flashSet = _fl[0];  var setFlashSet = _fl[1];    // artifactId -> true (briefly)
   // Stage transition state
   var _tr = useState(false); var transitioning = _tr[0]; var setTransitioning = _tr[1];
+  // Persistent inline error from the last failed transition. A toast
+  // auto-dismisses before the user can read Domino's reason; this Alert
+  // stays put under the stepper until they act again.
+  var _trErr = useState(null); var transitionError = _trErr[0]; var setTransitionError = _trErr[1];
   // Focused stage: only one stage's evidence renders at a time. Defaults
   // to the active stage when the drawer opens; the user can swap by
   // clicking another circle in the stepper. Null = "fall back to active".
@@ -6451,8 +6455,13 @@ function DetailDrawer(props) {
         return out;
       };
       collectArts(activeStageForCheck).forEach(function(a) {
-        if (!a.required) return;
         if (a.artifactType === 'guidance' || a.artifactType === 'policyScriptedCheck') return;
+        // Block advancement on explicitly-required fields AND on empty
+        // agent-populated outputs. Domino rejects the transition when a
+        // scripted check's result questions are unanswered on this bundle
+        // (e.g. the agent wrote its output to a different bundle), so the
+        // pre-check must match that rather than greenlighting a doomed click.
+        if (!a.required && !isAgentPopulated(a)) return;
         var ev = evidenceMap[a.id] || {};
         var formVal = evidenceForm[a.id];
         var current = formVal !== undefined ? formVal : ev.value;
@@ -6636,13 +6645,16 @@ function DetailDrawer(props) {
         okText: 'Advance Stage', cancelText: 'Cancel',
         onOk: function() {
           setTransitioning(true);
+          setTransitionError(null);
           return apiPost('api/bundles/' + bundle.id + '/transition', { stage: toStage })
             .then(function() {
               antd.notification.success({ message: '✓ Stage advanced', description: 'Now on: ' + toStage, placement: 'topRight', duration: 4 });
               loadEvidence(true);
             })
             .catch(function(err) {
-              antd.notification.error({ message: 'Transition failed', description: parseServerError(err.message || String(err)), duration: 8 });
+              var msg = parseServerError(err.message || String(err));
+              setTransitionError({ stage: toStage, message: msg });
+              antd.notification.error({ message: 'Transition failed', description: msg, duration: 8 });
             })
             .then(function() { setTransitioning(false); });
         },
@@ -6661,13 +6673,16 @@ function DetailDrawer(props) {
         okText: 'Mark Complete', cancelText: 'Cancel',
         onOk: function() {
           setTransitioning(true);
+          setTransitionError(null);
           return apiPost('api/bundles/' + bundle.id + '/transition', { state: 'Complete' })
             .then(function() {
               antd.notification.success({ message: '✓ Bundle complete', description: 'Marked Complete in Domino.', placement: 'topRight', duration: 4 });
               loadEvidence(true);
             })
             .catch(function(err) {
-              antd.notification.error({ message: 'Could not mark complete', description: parseServerError(err.message || String(err)), duration: 8 });
+              var msg = parseServerError(err.message || String(err));
+              setTransitionError({ stage: null, message: msg });
+              antd.notification.error({ message: 'Could not mark complete', description: msg, duration: 8 });
             })
             .then(function() { setTransitioning(false); });
         },
@@ -6807,8 +6822,13 @@ function DetailDrawer(props) {
         (stage.evidenceSet || []).forEach(function(es) { (es.artifacts || []).forEach(function(a) { artsForStage.push(a); }); });
         (stage.approvals || []).forEach(function(ap) { ((ap.evidence || {}).artifacts || []).forEach(function(a) { artsForStage.push(a); }); });
         artsForStage.forEach(function(a) {
-          if (!a.required) return;
           if (a.artifactType !== 'input') return;
+          // Count fields the stage genuinely needs before it can advance:
+          // explicitly-required inputs PLUS agent-populated outputs. An empty
+          // agent output means the agent hasn't written a result to THIS
+          // bundle, which Domino rejects on advance even when the policy
+          // doesn't flag the field "required" — so the count must reflect it.
+          if (!a.required && !isAgentPopulated(a)) return;
           stageRequired++;
           var ev = evidenceMap[a.id] || {};
           var formVal = evidenceForm[a.id];
@@ -7116,13 +7136,33 @@ function DetailDrawer(props) {
     // stage selector stays visible while the user scrolls the focused
     // stage's form. Background + negative top margin cancel the body's
     // built-in padding so the sticky element actually reaches the edge.
+    var transitionErrorAlert = transitionError
+      ? h(Alert, {
+          type: 'error', showIcon: true, closable: true,
+          onClose: function() { setTransitionError(null); },
+          style: { marginBottom: 8 },
+          message: transitionError.stage
+            ? 'Could not advance to "' + transitionError.stage + '"'
+            : 'Could not mark complete',
+          description: h('div', null,
+            h('div', { style: { marginBottom: 6 } }, transitionError.message),
+            /does not contain all questions required by policy/i.test(transitionError.message || '')
+              ? h('div', { style: { fontSize: 12, color: '#7A2E2E' } },
+                  'Domino requires answers that are not on this bundle yet. If a scripted check shows ',
+                  h('strong', null, 'Succeeded'),
+                  ' but its output fields are empty, the agent likely wrote its result to a different bundle (alias collision). Re-run the agent on this bundle, or confirm the agent is targeting this bundle’s ID.')
+              : null
+          ),
+        })
+      : null;
+
     var stickyHeader = h('div', {
       style: {
         position: 'sticky', top: -24, zIndex: 5, background: '#FFFFFF',
         paddingTop: 24, marginTop: -24, marginLeft: -24, marginRight: -24,
         paddingLeft: 24, paddingRight: 24,
       }
-    }, refreshBtn, stepper);
+    }, refreshBtn, transitionErrorAlert, stepper);
     return h('div', null, stickyHeader, focusedSection, debugPanel);
   }
 

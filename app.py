@@ -586,6 +586,22 @@ def run_scripted_check(bundle_id: str, artifact_id: str, body: dict):
     for k, v in resolved.items():
         final_command = final_command.replace("${" + k + "}", str(v))
 
+    # Always expose the governance identifiers for substitution, even though
+    # they are not declared parameters. This lets a policy's command template
+    # pass the target bundle to the agent explicitly, e.g.:
+    #     python scripts/qc_agent.py --bundle-id ${bundle_id} --tfl-name ...
+    # so the script writes its result back to THIS bundle instead of guessing
+    # by alias (which silently picks the wrong bundle when two share an alias).
+    # If the template doesn't reference these, nothing changes.
+    builtin_subs = {
+        "bundle_id": bundle_id,
+        "policy_id": policy_id,
+        "project_id": project_id,
+        "evidence_id": evidence_id,
+    }
+    for k, v in builtin_subs.items():
+        final_command = final_command.replace("${" + k + "}", str(v))
+
     # Accept either name (resolve to ID) or direct ID/slug from policy YAML.
     env_id = details.get("environmentId") or _find_environment_id(details.get("environment"), project_id)
     hw_id  = details.get("hardwareTierId") or _find_hw_tier_id(details.get("hardwareTier"), project_id)
