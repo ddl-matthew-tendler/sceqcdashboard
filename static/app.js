@@ -6396,12 +6396,21 @@ function DetailDrawer(props) {
     setFileViewer({ fname: fname, loading: true, html: '', error: null, sourceUrl: sourceUrl || null });
     var qs = 'projectId=' + encodeURIComponent(bundle.projectId || '') +
              '&fileName=' + encodeURIComponent(id.filename || fname);
+    // Send both; the backend prefers the branch (resolves reliably) and
+    // falls back to the commit. The branch is where the file lives.
+    if (id.branch) qs += '&branch=' + encodeURIComponent(id.branch);
     if (id.commit) qs += '&commit=' + encodeURIComponent(id.commit);
-    else if (id.branch) qs += '&branch=' + encodeURIComponent(id.branch);
     // Relative path (no leading slash) so it resolves under the Domino proxy
     // prefix, matching how apiGet/apiPost address the backend.
     fetch('api/attachments/raw?' + qs)
-      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+      .then(function (r) {
+        if (!r.ok) return r.text().then(function (t) {
+          var detail = t;
+          try { var j = JSON.parse(t); if (j && j.detail) detail = (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)); } catch (e) {}
+          throw new Error('HTTP ' + r.status + (detail ? ': ' + String(detail).slice(0, 300) : ''));
+        });
+        return r.text();
+      })
       .then(function (text) {
         setFileViewer(function (prev) {
           if (!prev || prev.fname !== fname) return prev;

@@ -1104,11 +1104,13 @@ def get_attachment_raw(projectId: str, fileName: str, branch: str = "", commit: 
     repo_id = repo_list[0].get("id")
     if not repo_id:
         raise HTTPException(status_code=404, detail="Could not resolve repository id")
+    # Prefer the branch: it resolves reliably and is where the agent commits
+    # its output. An abbreviated commit SHA may not resolve via git/raw.
     params = {"fileName": fileName}
-    if commit:
-        params["commit"] = commit
-    elif branch:
+    if branch:
         params["branchName"] = branch
+    elif commit:
+        params["commit"] = commit
     headers = get_auth_headers()
     url = f"{host}/v4/projects/{projectId}/gitRepositories/{repo_id}/git/raw"
     resp = requests.get(url, headers=headers, params=params, timeout=60)
