@@ -6393,7 +6393,16 @@ function DetailDrawer(props) {
   function openFileViewer(att, sourceUrl) {
     var id = att.identifier || {};
     var fname = id.filename || id.name || 'file';
-    setFileViewer({ fname: fname, loading: true, html: '', error: null, sourceUrl: sourceUrl || null });
+    // Capture what we'll request + the raw attachment identifier so a failure
+    // shows the real field names (catches branch/commit/filename mismatches).
+    var requested = {
+      projectId: bundle.projectId || null,
+      fileName: id.filename || fname,
+      branch: id.branch || null,
+      commit: id.commit || null,
+      attachmentIdentifier: id,
+    };
+    setFileViewer({ fname: fname, loading: true, html: '', error: null, detail: null, requested: requested, sourceUrl: sourceUrl || null });
     var qs = 'projectId=' + encodeURIComponent(bundle.projectId || '') +
              '&fileName=' + encodeURIComponent(id.filename || fname);
     // Send both; the backend prefers the branch (resolves reliably) and
@@ -6405,9 +6414,11 @@ function DetailDrawer(props) {
     fetch('api/attachments/raw?' + qs)
       .then(function (r) {
         if (!r.ok) return r.text().then(function (t) {
-          var detail = t;
-          try { var j = JSON.parse(t); if (j && j.detail) detail = (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)); } catch (e) {}
-          throw new Error('HTTP ' + r.status + (detail ? ': ' + String(detail).slice(0, 300) : ''));
+          var detail = null;
+          try { var j = JSON.parse(t); detail = (j && j.detail !== undefined) ? j.detail : j; } catch (e) { detail = t; }
+          var err = new Error('HTTP ' + r.status);
+          err.httpStatus = r.status; err.detail = detail;
+          throw err;
         });
         return r.text();
       })
@@ -6420,7 +6431,11 @@ function DetailDrawer(props) {
       .catch(function (err) {
         setFileViewer(function (prev) {
           if (!prev || prev.fname !== fname) return prev;
-          return Object.assign({}, prev, { loading: false, error: String((err && err.message) || err) });
+          return Object.assign({}, prev, {
+            loading: false,
+            error: String((err && err.message) || err),
+            detail: (err && err.detail !== undefined) ? err.detail : null,
+          });
         });
       });
   }
@@ -7420,7 +7435,19 @@ function DetailDrawer(props) {
             : fileViewer.error
               ? h(Alert, { type: 'error', showIcon: true, message: 'Could not load file',
                   description: h('div', null,
-                    fileViewer.error,
+                    h('div', { style: { fontWeight: 500, marginBottom: 8 } }, fileViewer.error),
+                    fileViewer.detail != null
+                      ? h('div', { style: { marginBottom: 8 } },
+                          h('div', { style: { fontSize: 11, color: '#8F8FA3', marginBottom: 2 } }, 'Server diagnostics'),
+                          h('pre', { className: 'rtf-mono', style: { whiteSpace: 'pre-wrap', maxHeight: 220, overflow: 'auto', background: '#FAFAFA', border: '1px solid #E0E0E0', borderRadius: 4, padding: 8, margin: 0 } },
+                            (typeof fileViewer.detail === 'string' ? fileViewer.detail : JSON.stringify(fileViewer.detail, null, 2))))
+                      : null,
+                    fileViewer.requested
+                      ? h('div', { style: { marginBottom: 8 } },
+                          h('div', { style: { fontSize: 11, color: '#8F8FA3', marginBottom: 2 } }, 'Requested (from attachment)'),
+                          h('pre', { className: 'rtf-mono', style: { whiteSpace: 'pre-wrap', maxHeight: 180, overflow: 'auto', background: '#FAFAFA', border: '1px solid #E0E0E0', borderRadius: 4, padding: 8, margin: 0 } },
+                            JSON.stringify(fileViewer.requested, null, 2)))
+                      : null,
                     fileViewer.sourceUrl ? h('div', { style: { marginTop: 8 } },
                       h('a', { href: fileViewer.sourceUrl, target: '_blank', rel: 'noopener noreferrer' }, 'Open the source file instead ↗')) : null) })
               : h('div', { className: 'rtf-viewer-body', dangerouslySetInnerHTML: { __html: fileViewer.html } })

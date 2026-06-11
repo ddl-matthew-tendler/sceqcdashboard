@@ -1090,33 +1090,102 @@ def get_project_git_info(project_id: str):
 
 @app.get("/api/attachments/raw")
 def get_attachment_raw(projectId: str, fileName: str, branch: str = "", commit: str = ""):
-    """Proxy the raw bytes of a file in a project's primary git repo so the
-    app can render it inline (e.g. the RTF viewer). Resolves the repository
-    id, then calls the git/raw endpoint with the caller's token. Returns the
-    content as text/plain. Pins to commit when provided, else branch."""
+    """Proxy the raw bytes of a file in a project's git repo so the app can
+    render it inline (RTF viewer). Tries every repo x every ref strategy
+    (branch, commit, default) and returns the first 200. On total failure
+    returns a structured diagnostic envelope (HTTP 502 detail) listing the
+    repos found and every attempt's status/body — so a single failed click
+    tells us exactly what to fix without another redeploy cycle."""
     host = get_domino_host()
     if not host:
         raise HTTPException(status_code=503, detail="DOMINO_API_HOST not set")
-    repos = v4_get(f"/projects/{projectId}/gitRepositories")
-    repo_list = repos if isinstance(repos, list) else []
+
+    # Resolve candidate repos. The project's OWN repo is `mainRepository` on
+    # the project detail; the /gitRepositories endpoint only returns IMPORTED
+    # repos (often empty), which is why it found nothing before. Try the main
+    # repo first, then imported repos from both sources, deduped by id.
+    repo_resolution = {}
+    repos_to_try = []
+    seen_ids = set()
+
+    def _add_repo(r):
+        if not r or not isinstance(r, dict) or not r.get("id"):
+            return
+        if r["id"] in seen_ids:
+            return
+        seen_ids.add(r["id"])
+        repos_to_try.append(r)
+
+    try:
+        proj = v4_get(f"/projects/{projectId}")
+        _add_repo(proj.get("mainRepository"))
+        for ir in (proj.get("importedGitRepositories") or []):
+            _add_repo(ir)
+        repo_resolution["projectDetail"] = "ok (main=%s, imported=%d)" % (
+            bool(proj.get("mainRepository")), len(proj.get("importedGitRepositories") or []))
+    except HTTPException as e:
+        repo_resolution["projectDetail"] = "error %s: %s" % (e.status_code, str(e.detail)[:160])
+    try:
+        extra = v4_get(f"/projects/{projectId}/gitRepositories")
+        for r in (extra if isinstance(extra, list) else []):
+            _add_repo(r)
+        repo_resolution["gitRepositories"] = "ok (%d)" % (len(extra) if isinstance(extra, list) else 0)
+    except HTTPException as e:
+        repo_resolution["gitRepositories"] = "error %s" % e.status_code
+
+    repo_list = repos_to_try
+    repo_summary = [{"id": r.get("id"), "name": r.get("name"),
+                     "serviceProvider": r.get("serviceProvider"), "uri": r.get("uri")}
+                    for r in repo_list]
     if not repo_list:
-        raise HTTPException(status_code=404, detail="Project has no git repositories")
-    repo_id = repo_list[0].get("id")
-    if not repo_id:
-        raise HTTPException(status_code=404, detail="Could not resolve repository id")
-    # Prefer the branch: it resolves reliably and is where the agent commits
-    # its output. An abbreviated commit SHA may not resolve via git/raw.
-    params = {"fileName": fileName}
+        raise HTTPException(status_code=404, detail={
+            "message": "Could not resolve any git repository for this project",
+            "projectId": projectId, "repoResolution": repo_resolution})
+
+    ref_strategies = []
     if branch:
-        params["branchName"] = branch
-    elif commit:
-        params["commit"] = commit
-    headers = get_auth_headers()
-    url = f"{host}/v4/projects/{projectId}/gitRepositories/{repo_id}/git/raw"
-    resp = requests.get(url, headers=headers, params=params, timeout=60)
-    if resp.status_code != 200:
-        raise HTTPException(status_code=resp.status_code, detail=resp.text[:500])
-    return Response(content=resp.content, media_type="text/plain; charset=utf-8")
+        ref_strategies.append(("branchName", branch))
+    if commit:
+        ref_strategies.append(("commit", commit))
+    ref_strategies.append((None, None))  # default branch
+
+    attempts = []
+    for r in repo_list:
+        rid = r.get("id")
+        if not rid:
+            continue
+        url = f"{host}/v4/projects/{projectId}/gitRepositories/{rid}/git/raw"
+        for pkey, pval in ref_strategies:
+            params = {"fileName": fileName}
+            if pkey:
+                params[pkey] = pval
+            ref_label = (pkey + "=" + str(pval)) if pkey else "default"
+            try:
+                resp = requests.get(url, headers=get_auth_headers(), params=params, timeout=60)
+            except Exception as ex:
+                attempts.append({"repo": r.get("name"), "repoId": rid, "ref": ref_label, "error": str(ex)[:200]})
+                continue
+            attempts.append({"repo": r.get("name"), "repoId": rid, "ref": ref_label,
+                             "status": resp.status_code,
+                             "bodyHead": "(ok)" if resp.status_code == 200 else resp.text[:160]})
+            if resp.status_code == 200:
+                out = Response(content=resp.content, media_type="text/plain; charset=utf-8")
+                out.headers["X-Source-Repo"] = str(r.get("name") or rid)
+                out.headers["X-Source-Ref"] = ref_label
+                return out
+
+    logger.error(f"[attachments/raw] all attempts failed for project={projectId} "
+                 f"file={fileName} branch={branch!r} commit={commit!r}: {attempts}")
+    raise HTTPException(status_code=502, detail={
+        "message": "Could not fetch file from any repo/ref combination",
+        "projectId": projectId,
+        "fileNameReceived": fileName,
+        "branchReceived": branch or None,
+        "commitReceived": commit or None,
+        "repoResolution": repo_resolution,
+        "repos": repo_summary,
+        "attempts": attempts,
+    })
 
 
 # ── Project Collaborators ─────────────────────────────────────────
