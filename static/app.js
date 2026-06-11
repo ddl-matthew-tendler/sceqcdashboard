@@ -4819,7 +4819,7 @@ function QCTrackerPage(props) {
       ],
       onFilter: function(v, r) { return r.state === v; },
       render: function(s) { return h(Tag, { color: stateColor(s), style: { fontSize: 11 } }, s); } },
-    { title: h(Tooltip, { title: 'Attachments (\u26A0 = outdated snapshots)' }, h('span', null, 'Links')), key: 'attachments', width: 60, align: 'center',
+    { title: h(Tooltip, { title: 'Attachments (\u26A0 = outdated snapshots)' }, h('span', null, 'Attachments')), key: 'attachments', width: 110, align: 'center',
       sorter: function(a, b) { return (a._attachments || []).length - (b._attachments || []).length; },
       filters: [
         { text: 'Has Stale Snapshots', value: 'stale' },
@@ -5382,6 +5382,81 @@ function GuidanceBanner(props) {
   );
 }
 
+// Lightweight RTF -> HTML converter for the in-app attachment viewer.
+// Clinical TFL output is space-aligned monospace text (SAS .lst style) using
+// \par line breaks, NOT RTF tables — so we render to a single monospace <pre>
+// that preserves every space, keeping column alignment intact. Handles bold/
+// italic, \tab, \cell (as a separator), and hex/unicode escapes. Unknown
+// control words are ignored. Non-RTF input falls back to the same <pre>.
+function rtfToHtml(rtf) {
+  function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  if (typeof rtf !== 'string' || rtf.indexOf('\\rtf') === -1) {
+    return '<pre class="rtf-mono">' + esc(rtf == null ? '' : String(rtf)) + '</pre>';
+  }
+  var IGNORE_DEST = {
+    fonttbl: 1, colortbl: 1, stylesheet: 1, info: 1, pict: 1, generator: 1,
+    themedata: 1, colorschememapping: 1, latentstyles: 1, listtable: 1,
+    listoverridetable: 1, rsidtbl: 1, datastore: 1, header: 1, footer: 1,
+    footnote: 1, xmlnstbl: 1, revtbl: 1,
+  };
+  var i = 0, n = rtf.length, stack = [];
+  var state = { bold: false, italic: false, ignore: false, ucskip: 1 };
+  var lines = [], cur = [], skip = 0;
+  function styled(t) { t = esc(t); if (state.bold) t = '<strong>' + t + '</strong>'; if (state.italic) t = '<em>' + t + '</em>'; return t; }
+  function emit(t) { if (state.ignore || !t) return; cur.push(styled(t)); }
+  function endLine() { lines.push(cur.join('')); cur = []; }
+  function cw(w, p) {
+    if (IGNORE_DEST[w]) { state.ignore = true; return; }
+    switch (w) {
+      case 'par': case 'line': case 'softline': case 'row': case 'nestrow': endLine(); break;
+      case 'cell': case 'nestcell': if (!state.ignore) cur.push('  '); break;
+      case 'tab': if (!state.ignore) cur.push('\t'); break;
+      case 'b': state.bold = (p !== 0); break;
+      case 'i': state.italic = (p !== 0); break;
+      case 'uc': state.ucskip = (p == null ? 1 : p); break;
+      case 'u': if (p != null) { emit(String.fromCharCode(p < 0 ? p + 65536 : p)); skip = state.ucskip; } break;
+      case 'emdash': emit('—'); break; case 'endash': emit('–'); break;
+      case 'lquote': emit('‘'); break; case 'rquote': emit('’'); break;
+      case 'ldblquote': emit('“'); break; case 'rdblquote': emit('”'); break;
+      case 'bullet': emit('•'); break;
+      default: break;
+    }
+  }
+  while (i < n) {
+    var c = rtf[i];
+    if (c === '{') { stack.push({ bold: state.bold, italic: state.italic, ignore: state.ignore, ucskip: state.ucskip }); i++; continue; }
+    if (c === '}') { if (stack.length) state = stack.pop(); i++; continue; }
+    if (c === '\\') {
+      var nx = rtf[i + 1];
+      if (nx && /[a-zA-Z]/.test(nx)) {
+        var j = i + 1, w = ''; while (j < n && /[a-zA-Z]/.test(rtf[j])) { w += rtf[j]; j++; }
+        var num = '', neg = false; if (rtf[j] === '-') { neg = true; j++; } while (j < n && /[0-9]/.test(rtf[j])) { num += rtf[j]; j++; }
+        if (rtf[j] === ' ') j++;
+        i = j; cw(w, num === '' ? null : (neg ? -1 : 1) * parseInt(num, 10));
+      } else if (nx === "'") {
+        var hex = rtf.substr(i + 2, 2); i += 4;
+        if (skip > 0) { skip--; } else { var code = parseInt(hex, 16); if (!isNaN(code)) emit(String.fromCharCode(code)); }
+      } else if (nx === '*') { state.ignore = true; i += 2; }
+      else if (nx === '~') { emit(' '); i += 2; }
+      else if (nx === '_') { emit('‑'); i += 2; }
+      else if (nx === '\\' || nx === '{' || nx === '}') { emit(nx); i += 2; }
+      else if (nx === '\n' || nx === '\r') { endLine(); i += 2; }
+      else { i += 2; }
+      continue;
+    }
+    if (c === '\r' || c === '\n') { i++; continue; }
+    var k = i;
+    while (k < n && rtf[k] !== '\\' && rtf[k] !== '{' && rtf[k] !== '}' && rtf[k] !== '\r' && rtf[k] !== '\n') k++;
+    var run = rtf.slice(i, k); i = k;
+    if (skip > 0) { while (skip > 0 && run.length) { run = run.slice(1); skip--; } }
+    if (run) emit(run);
+  }
+  if (cur.length) endLine();
+  while (lines.length && lines[lines.length - 1].trim() === '') lines.pop();
+  var body = lines.join('\n');
+  return '<pre class="rtf-mono">' + (body || '(empty document)') + '</pre>';
+}
+
 // Heuristic: a field is "agent-populated" when its helpText explicitly says so.
 // Matches "Populated automatically", "Populated by the agent", "Auto-populated", etc.
 function isAgentPopulated(art) {
@@ -5940,6 +6015,9 @@ function DetailDrawer(props) {
   var _evD = useState({});     var evidenceDirty = _evD[0];   var setEvidenceDirty = _evD[1];  // artifactId -> true
   var _evS = useState({});     var evidenceSaving = _evS[0];  var setEvidenceSaving = _evS[1]; // evidenceSetId -> true
   var _evR = useState({});     var checkRunning = _evR[0];    var setCheckRunning = _evR[1];   // artifactId -> true
+  // In-app file viewer (RTF rendered to HTML; text-like files shown as-is).
+  // null when closed; otherwise {fname, loading, html, error, sourceUrl}.
+  var _fv = useState(null);    var fileViewer = _fv[0];      var setFileViewer = _fv[1];
   // Auto-save plumbing. The save handler is captured into this ref each
   // render so the debounced timer always calls the freshest closure (with
   // the latest evidenceForm + evidenceDirty values), instead of a stale
@@ -6057,6 +6135,11 @@ function DetailDrawer(props) {
       .then(function(data) {
         data._bundleId = bundle.id;
         setEvidenceData(data);
+        // Reconcile the dashboard row with this fresh detail (stage/state/
+        // assignee) so the table doesn't lag behind the drawer.
+        if (typeof props.onBundleRefreshed === 'function' && data.bundle) {
+          props.onBundleRefreshed(bundle.id, data.bundle);
+        }
         // Seed form values from submitted evidence
         var seed = {};
         var em = data.evidenceMap || {};
@@ -6303,6 +6386,34 @@ function DetailDrawer(props) {
   }
 
   // ── View: Attachments ───────────────────────────────────────
+  // File types we can show inline. RTF is parsed to HTML; the rest render
+  // as plain text via the parser's <pre> fallback.
+  var VIEWABLE_EXT = /\.(rtf|txt|log|json|csv|tsv|md|py|sas|r)$/i;
+
+  function openFileViewer(att, sourceUrl) {
+    var id = att.identifier || {};
+    var fname = id.filename || id.name || 'file';
+    setFileViewer({ fname: fname, loading: true, html: '', error: null, sourceUrl: sourceUrl || null });
+    var qs = 'projectId=' + encodeURIComponent(bundle.projectId || '') +
+             '&fileName=' + encodeURIComponent(id.filename || fname);
+    if (id.commit) qs += '&commit=' + encodeURIComponent(id.commit);
+    else if (id.branch) qs += '&branch=' + encodeURIComponent(id.branch);
+    fetch(apiUrl('/api/attachments/raw?' + qs))
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
+      .then(function (text) {
+        setFileViewer(function (prev) {
+          if (!prev || prev.fname !== fname) return prev;
+          return Object.assign({}, prev, { loading: false, html: rtfToHtml(text) });
+        });
+      })
+      .catch(function (err) {
+        setFileViewer(function (prev) {
+          if (!prev || prev.fname !== fname) return prev;
+          return Object.assign({}, prev, { loading: false, error: String((err && err.message) || err) });
+        });
+      });
+  }
+
   function renderAttachments() {
     if (attachCount === 0) return h(Empty, { description: 'No attachments linked.' });
     return h('div', null,
@@ -6382,18 +6493,29 @@ function DetailDrawer(props) {
         return h('div', { key: i, style: { display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 0', borderBottom: '1px solid #F5F5F8' } },
           h(Tag, { color: typeColors[att.type] || 'default', style: { fontSize: 10, flexShrink: 0, marginTop: 2 } }, typeLabel),
           h('div', { style: { flex: 1, minWidth: 0 } },
-            h('div', { style: { display: 'flex', alignItems: 'center', gap: 6 } },
-              explorerLink
-                ? h(Tooltip, { title: 'Open in Data Explorer: ' + explorerPath },
-                    h('a', { href: explorerLink, onClick: function(e) { openDataExplorer(explorerLink, explorerPath, e); }, style: { fontSize: 13, color: '#0070CC', cursor: 'pointer', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: 4 } }, deIcon, fname))
-                : githubUrl
-                  ? h(Tooltip, { title: 'Open on ' + (gi.provider === 'github' ? 'GitHub' : gi.provider === 'gitlab' ? 'GitLab' : gi.provider === 'bitbucket' ? 'Bitbucket' : 'source') + ' @ ' + (id.commit ? String(id.commit).slice(0, 8) : (id.branch || gi.defaultRef || 'main')) },
-                      h('a', { href: githubUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 13, color: '#543FDE', fontWeight: 500 } }, fname))
-                  : dominoUrl
-                    ? h('a', { href: dominoUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 13, color: '#543FDE', fontWeight: 500 } }, fname)
-                    : h('span', { style: { fontSize: 13, fontWeight: 500 } }, fname),
-              versionTag
-            ),
+            (function () {
+              var canView = att.type === 'Report' && id.filename && bundle.projectId && VIEWABLE_EXT.test(fname);
+              var sourceLink = githubUrl
+                ? h(Tooltip, { title: 'Open source on ' + (gi.provider === 'github' ? 'GitHub' : gi.provider === 'gitlab' ? 'GitLab' : gi.provider === 'bitbucket' ? 'Bitbucket' : 'provider') + ' @ ' + (id.commit ? String(id.commit).slice(0, 8) : (id.branch || gi.defaultRef || 'main')) },
+                    h('a', { href: githubUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 12, color: '#8F8FA3', flexShrink: 0 } }, '↗'))
+                : null;
+              return h('div', { style: { display: 'flex', alignItems: 'center', gap: 6 } },
+                explorerLink
+                  ? h(Tooltip, { title: 'Open in Data Explorer: ' + explorerPath },
+                      h('a', { href: explorerLink, onClick: function(e) { openDataExplorer(explorerLink, explorerPath, e); }, style: { fontSize: 13, color: '#0070CC', cursor: 'pointer', fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: 4 } }, deIcon, fname))
+                  : canView
+                    ? h(Tooltip, { title: 'View in app' },
+                        h('a', { onClick: function(e) { e.preventDefault(); openFileViewer(att, githubUrl); }, style: { fontSize: 13, color: '#543FDE', cursor: 'pointer', fontWeight: 500 } }, fname))
+                    : githubUrl
+                      ? h(Tooltip, { title: 'Open on ' + (gi.provider === 'github' ? 'GitHub' : gi.provider === 'gitlab' ? 'GitLab' : gi.provider === 'bitbucket' ? 'Bitbucket' : 'source') + ' @ ' + (id.commit ? String(id.commit).slice(0, 8) : (id.branch || gi.defaultRef || 'main')) },
+                          h('a', { href: githubUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 13, color: '#543FDE', fontWeight: 500 } }, fname))
+                      : dominoUrl
+                        ? h('a', { href: dominoUrl, target: '_blank', rel: 'noopener noreferrer', style: { fontSize: 13, color: '#543FDE', fontWeight: 500 } }, fname)
+                        : h('span', { style: { fontSize: 13, fontWeight: 500 } }, fname),
+                versionTag,
+                canView ? sourceLink : null
+              );
+            })(),
             metaLine
           )
         );
@@ -6649,6 +6771,10 @@ function DetailDrawer(props) {
           return apiPost('api/bundles/' + bundle.id + '/transition', { stage: toStage })
             .then(function() {
               antd.notification.success({ message: '✓ Stage advanced', description: 'Now on: ' + toStage, placement: 'topRight', duration: 4 });
+              // Drop the manual focus so the drawer follows to the new active
+              // stage (effectiveFocusIdx falls back to currentIdx) instead of
+              // staying pinned on the stage we just completed.
+              setFocusedStageIdx(null);
               loadEvidence(true);
             })
             .catch(function(err) {
@@ -7261,7 +7387,34 @@ function DetailDrawer(props) {
     // Active view content
     h('div', { style: { padding: '16px 24px', flex: 1, overflow: 'auto' } },
       renderActiveView()
-    )
+    ),
+    // In-app file viewer (RTF rendered to HTML; text shown as-is). Portals
+    // above the drawer; close via the X or backdrop.
+    fileViewer
+      ? h(Modal, {
+          open: true,
+          title: fileViewer.fname,
+          width: 900,
+          zIndex: 1100,
+          onCancel: function () { setFileViewer(null); },
+          footer: fileViewer.sourceUrl
+            ? h('a', { href: fileViewer.sourceUrl, target: '_blank', rel: 'noopener noreferrer', style: { color: '#543FDE' } }, '↗ Open source file')
+            : null,
+          styles: { body: { maxHeight: '70vh', overflow: 'auto' } },
+        },
+          fileViewer.loading
+            ? h('div', { style: { textAlign: 'center', padding: 40 } },
+                h(Spin, null),
+                h('div', { style: { marginTop: 8, fontSize: 12, color: '#8F8FA3' } }, 'Loading file…'))
+            : fileViewer.error
+              ? h(Alert, { type: 'error', showIcon: true, message: 'Could not load file',
+                  description: h('div', null,
+                    fileViewer.error,
+                    fileViewer.sourceUrl ? h('div', { style: { marginTop: 8 } },
+                      h('a', { href: fileViewer.sourceUrl, target: '_blank', rel: 'noopener noreferrer' }, 'Open the source file instead ↗')) : null) })
+              : h('div', { className: 'rtf-viewer-body', dangerouslySetInnerHTML: { __html: fileViewer.html } })
+        )
+      : null
   );
 }
 
@@ -12154,6 +12307,26 @@ function App() {
     setDrawerOpen(true);
   }
 
+  // Push fresh stage/state from the drawer's live /detail back into the
+  // matching dashboard row, so the table stops disagreeing with the drawer
+  // after an advance / complete / reassignment (previously the row stayed
+  // frozen from page load until a full dashboard refresh).
+  function handleBundleRefreshed(bundleId, freshBundle) {
+    if (!bundleId || !freshBundle) return;
+    setBundles(function(prev) {
+      var changed = false;
+      var next = prev.map(function(b) {
+        if (b.id !== bundleId) return b;
+        var merged = Object.assign({}, b);
+        if (freshBundle.stage !== undefined && freshBundle.stage !== b.stage) { merged.stage = freshBundle.stage; changed = true; }
+        if (freshBundle.state !== undefined && freshBundle.state !== b.state) { merged.state = freshBundle.state; changed = true; }
+        if (freshBundle.stageAssignee !== undefined) { merged.stageAssignee = freshBundle.stageAssignee; changed = true; }
+        return merged;
+      });
+      return changed ? next : prev;
+    });
+  }
+
   // ── Effective report config (computed from stored + defaults) ──
   var effectiveRoleMapping = useMemo(function() {
     var defaults = buildDefaultRoleMapping(livePolicies, bundles);
@@ -12521,6 +12694,7 @@ function App() {
         initialView: drawerInitialView,
         initialStage: drawerInitialStage,
         debugMode: debugMode,
+        onBundleRefreshed: handleBundleRefreshed,
       })
     )
   );

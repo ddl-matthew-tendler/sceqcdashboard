@@ -1740,3 +1740,19 @@ body {
   background-size: 200% 100%;
   animation: evidenceAgentShimmer 2s linear infinite;
 }
+
+/* ── In-app file viewer (RTF / text → monospace HTML) ─────────── */
+.rtf-viewer-body { color: #2E2E38; }
+.rtf-viewer-body .rtf-mono {
+  font-family: "JetBrains Mono", "SF Mono", "Fira Code", "Cascadia Mono", Menlo, Monaco, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  /* Preserve every space so SAS-style column alignment survives; scroll
+     horizontally instead of wrapping so columns never shift. */
+  white-space: pre;
+  overflow-x: auto;
+  margin: 0;
+  padding: 4px 0;
+  color: #2E2E38;
+  tab-size: 4;
+}

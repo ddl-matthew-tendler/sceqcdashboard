@@ -1088,6 +1088,35 @@ def get_project_git_info(project_id: str):
     }
 
 
+@app.get("/api/attachments/raw")
+def get_attachment_raw(projectId: str, fileName: str, branch: str = "", commit: str = ""):
+    """Proxy the raw bytes of a file in a project's primary git repo so the
+    app can render it inline (e.g. the RTF viewer). Resolves the repository
+    id, then calls the git/raw endpoint with the caller's token. Returns the
+    content as text/plain. Pins to commit when provided, else branch."""
+    host = get_domino_host()
+    if not host:
+        raise HTTPException(status_code=503, detail="DOMINO_API_HOST not set")
+    repos = v4_get(f"/projects/{projectId}/gitRepositories")
+    repo_list = repos if isinstance(repos, list) else []
+    if not repo_list:
+        raise HTTPException(status_code=404, detail="Project has no git repositories")
+    repo_id = repo_list[0].get("id")
+    if not repo_id:
+        raise HTTPException(status_code=404, detail="Could not resolve repository id")
+    params = {"fileName": fileName}
+    if commit:
+        params["commit"] = commit
+    elif branch:
+        params["branchName"] = branch
+    headers = get_auth_headers()
+    url = f"{host}/v4/projects/{projectId}/gitRepositories/{repo_id}/git/raw"
+    resp = requests.get(url, headers=headers, params=params, timeout=60)
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text[:500])
+    return Response(content=resp.content, media_type="text/plain; charset=utf-8")
+
+
 # ── Project Collaborators ─────────────────────────────────────────
 
 @app.get("/api/projects/{project_id}/collaborators")
