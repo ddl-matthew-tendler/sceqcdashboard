@@ -6398,7 +6398,9 @@ function DetailDrawer(props) {
              '&fileName=' + encodeURIComponent(id.filename || fname);
     if (id.commit) qs += '&commit=' + encodeURIComponent(id.commit);
     else if (id.branch) qs += '&branch=' + encodeURIComponent(id.branch);
-    fetch(apiUrl('/api/attachments/raw?' + qs))
+    // Relative path (no leading slash) so it resolves under the Domino proxy
+    // prefix, matching how apiGet/apiPost address the backend.
+    fetch('api/attachments/raw?' + qs)
       .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); })
       .then(function (text) {
         setFileViewer(function (prev) {
