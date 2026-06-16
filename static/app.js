@@ -5457,6 +5457,20 @@ function rtfToHtml(rtf) {
   return '<pre class="rtf-mono">' + (body || '(empty document)') + '</pre>';
 }
 
+// Render a unified diff / patch to color-coded monospace HTML.
+function diffToHtml(text) {
+  function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  var lines = String(text == null ? '' : text).split('\n').map(function (ln) {
+    var cls = '';
+    if (/^(\+\+\+|---|diff |index |new file|deleted file|rename )/.test(ln)) cls = 'diff-meta';
+    else if (/^@@/.test(ln)) cls = 'diff-hunk';
+    else if (/^\+/.test(ln)) cls = 'diff-add';
+    else if (/^-/.test(ln)) cls = 'diff-del';
+    return '<span class="' + cls + '">' + (esc(ln) || ' ') + '</span>';
+  });
+  return '<pre class="rtf-mono diff-view">' + lines.join('\n') + '</pre>';
+}
+
 // Heuristic: a field is "agent-populated" when its helpText explicitly says so.
 // Matches "Populated automatically", "Populated by the agent", "Auto-populated", etc.
 function isAgentPopulated(art) {
@@ -6018,6 +6032,9 @@ function DetailDrawer(props) {
   // In-app file viewer (RTF rendered to HTML; text-like files shown as-is).
   // null when closed; otherwise {fname, loading, html, error, sourceUrl}.
   var _fv = useState(null);    var fileViewer = _fv[0];      var setFileViewer = _fv[1];
+  // "Explain everything" narrative. null when closed; otherwise
+  // {loading, narrative, error}.
+  var _xp = useState(null);    var explainState = _xp[0];    var setExplainState = _xp[1];
   // Auto-save plumbing. The save handler is captured into this ref each
   // render so the debounced timer always calls the freshest closure (with
   // the latest evidenceForm + evidenceDirty values), instead of a stale
@@ -6388,7 +6405,7 @@ function DetailDrawer(props) {
   // ── View: Attachments ───────────────────────────────────────
   // File types we can show inline. RTF is parsed to HTML; the rest render
   // as plain text via the parser's <pre> fallback.
-  var VIEWABLE_EXT = /\.(rtf|txt|log|json|csv|tsv|md|py|sas|r)$/i;
+  var VIEWABLE_EXT = /\.(rtf|txt|log|json|csv|tsv|md|py|sas|r|diff|patch)$/i;
 
   function openFileViewer(att, sourceUrl) {
     var id = att.identifier || {};
@@ -6423,9 +6440,11 @@ function DetailDrawer(props) {
         return r.text();
       })
       .then(function (text) {
+        var isDiff = /\.(diff|patch)$/i.test(fname);
+        var html = isDiff ? diffToHtml(text) : rtfToHtml(text);
         setFileViewer(function (prev) {
           if (!prev || prev.fname !== fname) return prev;
-          return Object.assign({}, prev, { loading: false, html: rtfToHtml(text) });
+          return Object.assign({}, prev, { loading: false, html: html });
         });
       })
       .catch(function (err) {
@@ -6438,6 +6457,66 @@ function DetailDrawer(props) {
           });
         });
       });
+  }
+
+  // "Explain everything" — gather the bundle's stage/evidence trail (+ the
+  // root-cause JSON attachment if present) and ask the app's LLM to narrate it
+  // in plain English for the study lead.
+  function handleExplain() {
+    if (!evidenceData) return;
+    setExplainState({ loading: true, narrative: '', error: null });
+    var policy = evidenceData.policy || {};
+    var fullB = evidenceData.bundle || bundle;
+    var emap = evidenceData.evidenceMap || {};
+    function valStr(v) { return Array.isArray(v) ? v.join(', ') : String(v); }
+    function isFilled(v) { return !(v == null || v === '' || (Array.isArray(v) && !v.length)); }
+    var stagesOut = (policy.stages || []).map(function (st) {
+      var fields = [];
+      function pushArt(a, allowGuidance) {
+        if (a.artifactType === 'policyScriptedCheck') return;
+        if (a.artifactType === 'guidance' && !allowGuidance) return;
+        var ev = emap[a.id] || {};
+        if (!isFilled(ev.value)) return;
+        fields.push({
+          label: (a.details || {}).label || (a.details || {}).name || a.id,
+          value: valStr(ev.value),
+          author: ev.submittedBy || null,
+          agent: isAgentPopulated(a) || isAgentAuthored(ev.submittedBy),
+        });
+      }
+      (st.evidenceSet || []).forEach(function (es) { (es.artifacts || []).forEach(function (a) { pushArt(a); }); });
+      (st.approvals || []).forEach(function (ap) { (((ap.evidence || {}).artifacts) || []).forEach(function (a) { pushArt(a); }); });
+      return { stage: st.name, isCurrent: st.name === (fullB.stage || ''), fields: fields };
+    });
+    var atts = (effectiveAttachments || []).map(function (a) {
+      var id = a.identifier || {};
+      return { name: a.name || id.filename || id.name, filename: id.filename || null, type: a.type };
+    });
+
+    function postExplain(rootcause) {
+      apiPost('api/bundles/' + bundle.id + '/explain', {
+        bundleName: bundle.name, stages: stagesOut, attachments: atts, rootcause: rootcause || null,
+      }).then(function (res) {
+        setExplainState(function (prev) { return prev ? { loading: false, narrative: (res && res.narrative) || '', error: null } : prev; });
+      }).catch(function (err) {
+        setExplainState(function (prev) { return prev ? { loading: false, narrative: '', error: parseServerError(err.message || String(err)) } : prev; });
+      });
+    }
+    // If the root-cause agent attached its structured JSON, fetch it so the
+    // narrative can explain the "why" — otherwise narrate from evidence alone.
+    var rcAtt = (effectiveAttachments || []).find(function (a) { return /_rootcause\.json$/i.test((a.identifier || {}).filename || ''); });
+    if (rcAtt && bundle.projectId) {
+      var rid = rcAtt.identifier || {};
+      var qs = 'projectId=' + encodeURIComponent(bundle.projectId) + '&fileName=' + encodeURIComponent(rid.filename);
+      if (rid.branch) qs += '&branch=' + encodeURIComponent(rid.branch);
+      if (rid.commit) qs += '&commit=' + encodeURIComponent(rid.commit);
+      fetch('api/attachments/raw?' + qs)
+        .then(function (r) { return r.ok ? r.text() : null; })
+        .then(function (t) { var rc = null; if (t) { try { rc = JSON.parse(t); } catch (e) {} } postExplain(rc); })
+        .catch(function () { postExplain(null); });
+    } else {
+      postExplain(null);
+    }
   }
 
   function renderAttachments() {
@@ -7209,6 +7288,10 @@ function DetailDrawer(props) {
           : null
       ),
       h('div', { style: { display: 'flex', gap: 6 } },
+        window.__SCE_AI_ENABLED !== false
+          ? h(Tooltip, { title: 'Plain-English summary of everything that happened on this deliverable' },
+              h(Button, { size: 'small', onClick: handleExplain, style: { color: '#543FDE', borderColor: '#C9C5F2' } }, '✨ Explain everything'))
+          : null,
         h(Button, { size: 'small', onClick: function() { loadEvidence(true); } }, '⟳ Refresh'),
         // Two cases for the primary action:
         //   - There is a next stage  -> "Advance to next stage"
@@ -7451,6 +7534,26 @@ function DetailDrawer(props) {
                     fileViewer.sourceUrl ? h('div', { style: { marginTop: 8 } },
                       h('a', { href: fileViewer.sourceUrl, target: '_blank', rel: 'noopener noreferrer' }, 'Open the source file instead ↗')) : null) })
               : h('div', { className: 'rtf-viewer-body', dangerouslySetInnerHTML: { __html: fileViewer.html } })
+        )
+      : null,
+    // "Explain everything" narrative modal.
+    explainState
+      ? h(Modal, {
+          open: true,
+          title: h('span', null, '✨ What happened — ', h('span', { style: { fontWeight: 400, color: '#65657B' } }, bundle.name)),
+          width: 720,
+          zIndex: 1100,
+          onCancel: function () { setExplainState(null); },
+          footer: null,
+          styles: { body: { maxHeight: '72vh', overflow: 'auto' } },
+        },
+          explainState.loading
+            ? h('div', { style: { textAlign: 'center', padding: 40 } },
+                h(Spin, null),
+                h('div', { style: { marginTop: 8, fontSize: 12, color: '#65657B' } }, 'Reading the evidence trail and writing the summary…'))
+            : explainState.error
+              ? h(Alert, { type: 'error', showIcon: true, message: 'Could not generate summary', description: explainState.error })
+              : h('div', { style: { fontSize: 13, lineHeight: 1.6, color: '#2E2E38' } }, renderInlineMd(explainState.narrative))
         )
       : null
   );

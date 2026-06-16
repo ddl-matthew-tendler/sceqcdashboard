@@ -2016,6 +2016,65 @@ async def analyze_findings(body: dict):
         raise HTTPException(status_code=500, detail=f"Analysis failed: {e}")
 
 
+@app.post("/api/bundles/{bundle_id}/explain")
+async def explain_bundle(bundle_id: str, body: dict):
+    """Narrate, in plain English for a study lead, everything that happened on
+    this deliverable: what each agent did, what was found, why (root cause if
+    available), what changed, the recommendation, and what the human must
+    decide. The frontend passes the already-loaded evidence + optional
+    root-cause JSON so we don't re-fetch."""
+    try:
+        import anthropic as _anthropic
+    except ImportError:
+        raise HTTPException(status_code=503, detail="anthropic package not installed")
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Claude integration not configured — set ANTHROPIC_API_KEY in environment.")
+
+    model = os.environ.get("CLAUDE_MODEL", "claude-3-5-sonnet-20241022")
+    bundle_name = body.get("bundleName", "this deliverable")
+    stages = body.get("stages", [])
+    rootcause = body.get("rootcause")
+    attachments = body.get("attachments", [])
+    ts = datetime.utcnow().isoformat() + "Z"
+
+    prompt = (
+        "You are explaining a governed clinical-trial QC workflow to a busy study lead who is NOT technical.\n"
+        f'Deliverable: "{bundle_name}".\n\n'
+        "Below is the full evidence trail captured on the governance bundle — each stage, what was answered, "
+        "and which values an automated agent populated (author contains 'agent', or marked agent-populated).\n\n"
+        f"STAGES + EVIDENCE (JSON):\n{json.dumps(stages, indent=2)[:12000]}\n\n"
+    )
+    if rootcause:
+        prompt += f"ROOT-CAUSE ANALYSIS (JSON, from the root-cause agent):\n{json.dumps(rootcause, indent=2)[:6000]}\n\n"
+    if attachments:
+        prompt += f"ATTACHMENTS ON THE BUNDLE:\n{json.dumps(attachments, indent=2)[:2000]}\n\n"
+    prompt += (
+        "Write a clear plain-English narrative (markdown: short bold section headers, short paragraphs, bullets "
+        "where useful; ~250-400 words). Use these sections:\n"
+        "**What happened** — the journey through the stages in order.\n"
+        "**What the agents found** — the key QC result/discrepancy in concrete terms.\n"
+        "**Why it differs** — the root cause, tied to the code, if available.\n"
+        "**What changed** — any fix/commit the agent proposed or made.\n"
+        "**Recommendation & your decision** — what the agent recommends and exactly what the study lead must accept/reject.\n\n"
+        "Be specific (cite the actual numbers/values). Do not invent facts not present above. No preamble."
+    )
+
+    try:
+        client = _anthropic.Anthropic(api_key=api_key)
+        message = client.messages.create(
+            model=model,
+            max_tokens=1600,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        narrative = message.content[0].text.strip()
+        logger.info(f"[ExplainBundle] bundle={bundle_id} stages={len(stages)} hasRootcause={bool(rootcause)}")
+        return {"narrative": narrative, "generatedAt": ts}
+    except Exception as e:
+        logger.error(f"[ExplainBundle] Claude call failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Explain failed: {e}")
+
+
 # ── Static files & SPA ────────────────────────────────────────────
 
 # Prevent browser from caching static assets during development — ensures

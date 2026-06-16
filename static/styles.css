@@ -1756,3 +1756,10 @@ body {
   color: #2E2E38;
   tab-size: 4;
 }
+
+/* ── Diff / patch rendering in the file viewer ───────────────── */
+.rtf-viewer-body .diff-view { white-space: pre; }
+.rtf-viewer-body .diff-view .diff-add  { color: #28A464; display: block; }
+.rtf-viewer-body .diff-view .diff-del  { color: #C20A29; display: block; }
+.rtf-viewer-body .diff-view .diff-hunk { color: #0070CC; display: block; }
+.rtf-viewer-body .diff-view .diff-meta { color: #8F8FA3; font-weight: 600; display: block; }
