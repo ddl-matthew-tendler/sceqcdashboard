@@ -9311,7 +9311,9 @@ function AIInsightsPage(props) {
   var aiEnabled = typeof window.__SCE_AI_ENABLED === 'boolean' ? window.__SCE_AI_ENABLED : true;
   useEffect(function() {
     if (typeof window.__SCE_AI_ENABLED !== 'undefined') return;
-    fetch('/api/config').then(function(r) { return r.json(); }).then(function(cfg) {
+    // Relative path so it resolves under the Domino proxy prefix (a leading
+    // slash 404s behind the proxy and silently leaves the flag unset).
+    fetch('api/config').then(function(r) { return r.json(); }).then(function(cfg) {
       window.__SCE_AI_ENABLED = cfg.ai_enabled !== false;
     }).catch(function() { window.__SCE_AI_ENABLED = false; });
   }, []);
@@ -12403,6 +12405,14 @@ function App() {
   // On mount: try live data first, fall back to dummy
   useEffect(function() {
     fetchLiveData(true);
+    // Resolve the AI feature flag app-wide so AI-gated controls (e.g. the
+    // drawer's "Explain everything" button) hide when ANTHROPIC_API_KEY isn't
+    // configured, instead of showing and erroring on click.
+    if (typeof window.__SCE_AI_ENABLED === 'undefined') {
+      fetch('api/config').then(function(r) { return r.json(); })
+        .then(function(cfg) { window.__SCE_AI_ENABLED = cfg.ai_enabled !== false; })
+        .catch(function() { window.__SCE_AI_ENABLED = false; });
+    }
   }, []);
 
   // Handle dummy data toggle
