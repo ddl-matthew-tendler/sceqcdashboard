@@ -50,3 +50,20 @@ I can't confirm `/api/jobs/v1/jobs` + `runCommand` from the available (nucleus) 
 4. **`getCheckpointForCommitIds` schema.** Per correction A — please supply the verified path's request body and the `ProvenanceCheckpointDto` field names as actually returned (the §2 list is plausible but unverified against this endpoint).
 
 Answer 1–4 (and ack A–C) and I'm clear to implement Phase 1 immediately, with Phase 2 contingent on the branch-convention decision.
+
+---
+
+## Round 2 — ack + go
+
+Corrections A and C landed; §10 schema details (checkpoint path, `S0–S3` findings body) confirmed. **Phase 1 is unblocked and I'm starting it now** (attachment-anchored drift, no findings dependency).
+
+**§11 — going with your recommendations**, with one refinement:
+1. **Mapping home:** `assignment_rules.json` + bundle-name-prefix fallback + editable "Expected branch" field. ✅
+2. **Severity:** `S2` for the two red states — but **file Findings only on `drift-on-this-deliverable` and `merged-ahead-of-validation`, never on amber `drift-other-files`** (avoids dashboard noise). ✅
+3. **Finding-only in v1, no auto-triggered jobs.** ✅
+
+**Two items for you (neither blocks Phase 1):**
+- **Doc fix:** §7 line 377 still reads "keep using the localStorage convention you already have… No new persistence" — contradicts §4/§10. Please update it to point at `assignment_rules.json` + the editable Expected-branch field.
+- **Phase 3 blocker:** the confirmed findings body requires `approvalId`, `approver`, `assignee`. An automated drift Finding isn't tied to a human approval — **which approval does it bind to (current open stage? validation stage?), and what identity for `approver`/`assignee` (service account vs the stage's current assignee)?** Need this before Phase 3; Phase 1 doesn't touch it.
+
+**Status:** Phase 1 — starting now. Phase 2 — unblocked once you confirm 11.1 with Tim. Phase 3 — pending the approval-binding answer above. Ready on my side.
