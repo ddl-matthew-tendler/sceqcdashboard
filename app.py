@@ -289,6 +289,263 @@ def v4_get(path, params=None):
     return resp.json()
 
 
+# ── Git-linkage helpers (Phase 1: attachment-anchored drift) ───────
+# See GIT_LINKAGE_IMPLEMENTATION_SPEC.md. All reads go through v4_get.
+# A small in-process TTL cache collapses repeated branch/commit lookups
+# during one dashboard refresh — 218 deliverables fan out to far fewer
+# distinct (project, repo, branch) tuples.
+import time as _time
+import threading as _threading
+
+_ttl_store = {}
+_ttl_lock = _threading.Lock()
+
+
+def _ttl_cache(ttl_seconds=60):
+    """Tiny positional-arg TTL memoizer. No cachetools dependency."""
+    def deco(fn):
+        def wrapped(*args):
+            key = (fn.__name__, args)
+            now = _time.monotonic()
+            with _ttl_lock:
+                hit = _ttl_store.get(key)
+                if hit and (now - hit[0]) < ttl_seconds:
+                    return hit[1]
+            val = fn(*args)
+            with _ttl_lock:
+                _ttl_store[key] = (now, val)
+            return val
+        return wrapped
+    return deco
+
+
+def _commit_sha(c):
+    if isinstance(c, str):
+        return c
+    if isinstance(c, dict):
+        return c.get("id") or c.get("sha") or c.get("commitId")
+    return None
+
+
+@_ttl_cache(60)
+def resolve_repos(project_id):
+    """Return [{id,name,uri,serviceProvider,isMain}], deduped; [] for non-git
+    or on error. Mirrors the repo-resolution landmine fix in /api/attachments/raw:
+    the project's OWN repo is `mainRepository` on the project detail; the
+    /gitRepositories endpoint only returns IMPORTED repos (often empty)."""
+    try:
+        proj = v4_get(f"/projects/{project_id}")
+    except HTTPException as e:
+        logger.warning(f"[git-linkage] project fetch failed {project_id}: {e.status_code}")
+        return []
+    # NOTE: do NOT guard on projectType == "git_based". On this cluster git-backed
+    # projects report projectType "Analytic" yet carry a `mainRepository`. The real
+    # signal is whether any repo with a URI resolves below; non-git projects simply
+    # yield no repos and are skipped by the empty-list return.
+    seen, out = set(), []
+
+    def add(r, is_main):
+        if isinstance(r, dict) and r.get("id") and r["id"] not in seen:
+            seen.add(r["id"])
+            out.append({"id": r["id"], "name": r.get("name"), "uri": r.get("uri"),
+                        "serviceProvider": r.get("serviceProvider"), "isMain": is_main})
+
+    add(proj.get("mainRepository"), True)
+    for ir in (proj.get("importedGitRepositories") or []):
+        add(ir, False)
+    try:
+        extra = v4_get(f"/projects/{project_id}/gitRepositories")
+        for r in (extra if isinstance(extra, list) else []):
+            add(r, False)
+    except HTTPException:
+        pass
+    return out
+
+
+@_ttl_cache(60)
+def get_branch_head(project_id, repo_id, branch):
+    """Returns one of:
+      {'branchName','commitId'}  — branch found
+      None                       — read OK, branch genuinely absent
+      {'_error': msg}            — read failed (e.g. 403 upstream git creds);
+                                    caller must NOT treat this as 'not-started'.
+    searchPattern is substring in some Domino versions and a glob in others, so
+    we match by exact name server-side rather than trusting the filter."""
+    if not branch:
+        return None
+    try:
+        res = v4_get(
+            f"/projects/{project_id}/gitRepositories/{repo_id}/git/branches",
+            params={"searchPattern": branch, "count": 100},
+        )
+    except HTTPException as e:
+        return {"_error": f"git branches read failed ({e.status_code})"}
+    branches = res if isinstance(res, list) else (res or {}).get("branches", [])
+    for b in (branches or []):
+        name = b.get("name") or b.get("branchName")
+        if name == branch:
+            return {"branchName": name,
+                    "commitId": b.get("commitId") or b.get("sha") or b.get("headCommitId")}
+    return None
+
+
+@_ttl_cache(60)
+def list_commits(project_id, repo_id, branch, count=200):
+    """HEAD-first list of commit objects for a branch; [] on error/absent."""
+    if not branch:
+        return []
+    try:
+        res = v4_get(
+            f"/projects/{project_id}/gitRepositories/{repo_id}/git/commits",
+            params={"branch": branch, "count": count},
+        )
+    except HTTPException:
+        return []
+    items = res if isinstance(res, list) else (res or {}).get("commits", [])
+    return items or []
+
+
+@_ttl_cache(60)
+def project_default_branch(project_id):
+    try:
+        ref = v4_get(f"/projects/{project_id}/projectDefaultBranch")
+    except HTTPException:
+        return None
+    if isinstance(ref, str):
+        return ref
+    return (ref or {}).get("value") or (ref or {}).get("name") or (ref or {}).get("branch")
+
+
+@_ttl_cache(60)
+def get_checkpoint_for_commit(project_id, commit_id):
+    """ProvenanceCheckpointDto or None. Companion enrichment only — never gates a
+    badge. Verified path: POST /v4/workspace/project/{projectId}/getCheckpointForCommitIds."""
+    if not commit_id:
+        return None
+    try:
+        return _v4_post(
+            f"/workspace/project/{project_id}/getCheckpointForCommitIds",
+            json_body={"commitIds": [commit_id]},
+        )
+    except HTTPException:
+        return None
+
+
+def _compute_drift(d):
+    """Compute the drift badge for one deliverable. Sequential within an item;
+    the route fans these out across items. Badge vocabulary (frontend DriftBadge):
+    no-validated-commit | not-started | in-development | in-sync |
+    drift-other-files | drift-on-this-deliverable | drift | merged-ahead-of-validation | skipped."""
+    bundle_id = d.get("bundleId")
+    project_id = d.get("projectId")
+    branch = d.get("expectedBranch") or None
+    filename = d.get("filename") or None
+    validated_commit = d.get("validatedCommit") or None
+
+    res = {"bundleId": bundle_id, "validated_at": None, "branch_state": None,
+           "badge": "no-validated-commit", "badge_reason": ""}
+
+    if not project_id:
+        res["badge"] = "skipped"; res["badge_reason"] = "no projectId"
+        return res
+    repos = resolve_repos(project_id)
+    if not repos:
+        res["badge"] = "skipped"; res["badge_reason"] = "no git repo / non-git project"
+        return res
+    repo = next((r for r in repos if r.get("isMain")), repos[0])
+    repo_id = repo["id"]
+
+    head = get_branch_head(project_id, repo_id, branch)
+    git_error = head.get("_error") if isinstance(head, dict) and head.get("_error") else None
+    found = isinstance(head, dict) and head.get("commitId") is not None
+    head_commit = head.get("commitId") if found else None
+    branch_exists = found
+    branch_state = {"branchName": branch, "headCommit": head_commit, "exists": branch_exists,
+                    "aheadOfValidated": None, "mergedToDefault": None,
+                    "fileTouchedSinceValidated": None}
+    res["branch_state"] = branch_state
+
+    if validated_commit:
+        res["validated_at"] = {"branch": branch, "commit": validated_commit,
+                               "source": d.get("validatedSource"), "filename": filename}
+
+    # Couldn't read the repo's branches — never imply 'not-started'/'in-sync'.
+    if git_error:
+        res["badge"] = "check-unavailable"; res["badge_reason"] = git_error
+        return res
+
+    # No validated anchor → dev-status only (Phase 2 territory; still useful).
+    if not validated_commit:
+        if not branch:
+            res["badge"] = "no-validated-commit"; res["badge_reason"] = "no evidence and no expected branch"
+        elif not branch_exists:
+            res["badge"] = "not-started"; res["badge_reason"] = f"branch '{branch}' not found"
+        else:
+            res["badge"] = "in-development"; res["badge_reason"] = f"branch '{branch}' exists; no validated evidence yet"
+        return res
+
+    if not branch:
+        res["badge"] = "skipped"; res["badge_reason"] = "validated evidence has no branch on its identifier"
+        return res
+    if not branch_exists:
+        res["badge"] = "not-started"; res["badge_reason"] = f"branch '{branch}' not found"
+        return res
+
+    commits = list_commits(project_id, repo_id, branch, count=200)
+    shas = [_commit_sha(c) for c in commits]
+    ahead = shas.index(validated_commit) if validated_commit in shas else None
+    branch_state["aheadOfValidated"] = ahead
+
+    # File-level check: best-effort, no extra calls — only if commit objects
+    # already carry changed-file lists. Otherwise leave unknown (None).
+    file_touched = None
+    if filename and ahead and ahead > 0:
+        known, touched = False, False
+        for c in commits[:ahead]:
+            files = (c.get("changedFiles") or c.get("affectedPaths")
+                     or c.get("files")) if isinstance(c, dict) else None
+            if files is not None:
+                known = True
+                for f in files:
+                    name = (f.get("path") or f.get("filename")) if isinstance(f, dict) else f
+                    if name and (filename in str(name) or str(name) in filename):
+                        touched = True
+                        break
+            if touched:
+                break
+        file_touched = touched if known else None
+    branch_state["fileTouchedSinceValidated"] = file_touched
+
+    default_branch = project_default_branch(project_id)
+    merged = None
+    if default_branch and default_branch != branch:
+        dshas = [_commit_sha(c) for c in list_commits(project_id, repo_id, default_branch, count=500)]
+        merged = (validated_commit in dshas) and (head_commit != validated_commit)
+    branch_state["mergedToDefault"] = merged
+
+    # Badge rules (§1), most-significant first.
+    if head_commit and head_commit == validated_commit:
+        res["badge"] = "in-sync"; res["badge_reason"] = "branch HEAD == validated commit"
+    elif merged:
+        res["badge"] = "merged-ahead-of-validation"
+        res["badge_reason"] = "validated commit merged to default branch; HEAD has advanced"
+    elif ahead and ahead > 0:
+        if file_touched is True:
+            res["badge"] = "drift-on-this-deliverable"
+            res["badge_reason"] = f"{ahead} commit(s) ahead; {filename} changed since validation"
+        elif file_touched is False:
+            res["badge"] = "drift-other-files"
+            res["badge_reason"] = f"{ahead} commit(s) ahead; {filename} unchanged"
+        else:
+            res["badge"] = "drift"
+            res["badge_reason"] = f"{ahead} commit(s) ahead; file-level check unavailable"
+    elif ahead is None:
+        res["badge"] = "drift"; res["badge_reason"] = "validated commit not found in branch history"
+    else:
+        res["badge"] = "in-sync"; res["badge_reason"] = "at validated commit"
+    return res
+
+
 # ── Bundles (Studies) ──────────────────────────────────────────────
 
 @app.get("/api/bundles")
@@ -1188,6 +1445,58 @@ def get_attachment_raw(projectId: str, fileName: str, branch: str = "", commit: 
     })
 
 
+# ── Git-linkage routes (Phase 1) ──────────────────────────────────
+
+@app.get("/api/projects/{project_id}/branches")
+def list_project_branches(project_id: str, names: str = ""):
+    """Resolve one or more expected branch names to their HEAD for a project.
+    Multi-name (comma-separated) so the frontend batches per project."""
+    wanted = [n.strip() for n in names.split(",") if n.strip()]
+    repos = resolve_repos(project_id)
+    if not repos or not wanted:
+        return {"branches": {n: None for n in wanted}, "repo": None}
+    main = next((r for r in repos if r.get("isMain")), repos[0])
+    out = {}
+    with ThreadPoolExecutor(max_workers=16) as ex:
+        for name, head in ex.map(
+            lambda n: (n, get_branch_head(project_id, main["id"], n)), wanted):
+            out[name] = head
+    return {"branches": out, "repo": main["id"]}
+
+
+@app.get("/api/projects/{project_id}/provenance")
+def get_project_provenance(project_id: str, commit: str):
+    """Provenance Checkpoint for a commit — enriches the drift tooltip with the
+    execution that produced the evidence. Returns {} if none."""
+    return get_checkpoint_for_commit(project_id, commit) or {}
+
+
+@app.post("/api/deliverables/drift")
+def deliverables_drift(body: dict):
+    """Batch drift computation. Body: {deliverables: [{bundleId, projectId,
+    expectedBranch, filename, validatedCommit, validatedSource}]}. The dashboard
+    hits this once per refresh; concurrency + caching live server-side."""
+    items = body.get("deliverables", [])
+    if not isinstance(items, list):
+        raise HTTPException(status_code=400, detail="Body must include a 'deliverables' array")
+    results = [None] * len(items)
+
+    def work(i):
+        try:
+            return i, _compute_drift(items[i] or {})
+        except Exception as e:
+            logger.warning(f"[git-linkage] drift compute failed idx {i}: {e}")
+            return i, {"bundleId": (items[i] or {}).get("bundleId"), "validated_at": None,
+                       "branch_state": None, "badge": "skipped",
+                       "badge_reason": f"error: {str(e)[:120]}"}
+
+    if items:
+        with ThreadPoolExecutor(max_workers=16) as ex:
+            for i, res in ex.map(work, range(len(items))):
+                results[i] = res
+    return {"results": results}
+
+
 # ── Project Collaborators ─────────────────────────────────────────
 
 @app.get("/api/projects/{project_id}/collaborators")
@@ -1938,7 +2247,12 @@ def generate_status_report(body: dict):
 def get_config():
     """Return feature flags for the frontend."""
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    return {"ai_enabled": bool(api_key)}
+    return {
+        "ai_enabled": bool(api_key),
+        # Git-linkage drift badges. Default on; set DRIFT_ENABLED=0 to hide.
+        # Frontend also honors a ?drift=1 / ?drift=0 query override.
+        "drift_enabled": os.environ.get("DRIFT_ENABLED", "1") != "0",
+    }
 
 
 @app.post("/api/analyze-findings")
