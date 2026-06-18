@@ -3,7 +3,9 @@
 **Reader:** the agent maintaining `/mnt/code/app.py` + `/mnt/code/static/app.js`.
 **Companion to:** `GIT_LINKAGE_FOR_DOMINO_EXPERT.md` (the brief).
 **Scope:** Phases 1–3 of git-linkage. Phase 4 (provider webhook receiver) is **out of scope** until UCB asks for sub-minute reaction time.
-**Assumption:** all UCB projects are `projectType == "git_based"`. No DFS code paths anywhere. Add a one-line guard that logs+skips a deliverable whose project is not git_based; do not branch logic on project type.
+**Assumption:** all UCB projects are git-backed (i.e., git provider, not DFS). No DFS code paths anywhere.
+
+> **Corrected in round 4** (`app.py:340-353`, implementing agent finding): **do not guard on `projectType == "git_based"`.** On this cluster, git-backed projects report `projectType: "Analytic"` despite carrying a real `mainRepository`. The enum we documented in §A3 (`git_based | dfs`) is the swagger's documented surface, but the deployed value here is the legacy `Analytic`/`DataSet` enum from `swagger.json:53604` siblings. **Real signal:** resolve repos and check `mainRepository` (and/or `importedGitRepositories[]`) for a non-empty `uri`. Non-git projects yield no repos and are skipped by the empty-list return — no explicit guard needed.
 
 ---
 
@@ -30,6 +32,7 @@ For each **deliverable = governance bundle**, derive two new computed values:
 
 Drift badge logic (one of):
 - `validated_at` is null → **"No validated commit"** (gray).
+- **The git read failed (e.g. 403, network error, repo not resolvable) → "Check unavailable"** (loud, dashed warning tag — *never green*). See §C7 for the credential context. This state is mandatory on a GxP dashboard: a failed read must never silently fall back to "in sync."
 - `branch_state.exists` is false → **"Not started"** (gray).
 - `branch_state.headCommit == validated_at.commit` → **"In sync"** (green).
 - `branch_state.aheadOfValidated > 0` and `fileTouchedSinceValidated == false` → **"Drift (other files)"** (amber).
@@ -123,11 +126,13 @@ def public_post(path: str, json_body=None):
 def resolve_repos(project_id: str) -> list[dict]:
     """Returns [{id, uri, ref, serviceProvider, isMain: bool}, ...] deduped by id.
     Mirrors the existing logic in /api/attachments/raw; extract to a single helper
-    and reuse from there to eliminate the duplication."""
+    and reuse from there to eliminate the duplication.
+
+    NOTE: do NOT guard on projectType == "git_based". On this cluster git-backed
+    projects report projectType "Analytic" yet carry a real mainRepository.
+    Resolve repos and let the empty-list return skip non-git projects.
+    """
     proj = v4_get(f"/projects/{project_id}")
-    if proj.get("projectType") != "git_based":
-        logger.warning(f"[git-linkage] skipping non-git project {project_id} (type={proj.get('projectType')})")
-        return []
     seen, out = set(), []
     main = proj.get("mainRepository")
     if main and main.get("id") and main["id"] not in seen:
@@ -194,7 +199,7 @@ def get_checkpoint_for_commit(project_id: str, repo_id: str, commit_id: str) -> 
 
 ### `GET /api/projects/{projectId}/branches?names=ADAE,ADSL`
 
-Returns `{branches: {<name>: {branchName, headCommit} | null}}`. Multi-name to let the frontend batch per project. Skip non-git_based projects (return empty).
+Returns `{branches: {<name>: {branchName, headCommit} | null}}`. Multi-name to let the frontend batch per project. Projects that resolve to zero repos return empty (replaces the prior "skip non-git_based" wording — see §0 correction).
 
 Internally: `resolve_repos(projectId)` → for each `(repo, name)`, `get_branch_head(...)`. Aggregate. ThreadPool fan-out using the existing 16-worker pattern (`app.py:376`).
 
@@ -390,13 +395,28 @@ Originally I bundled this with Phase 1. Decoupling at the implementing agent's r
 ### One new component: `DriftBadge`
 
 Props: `{badge, validated_at, branch_state}` from the new `/api/deliverables/drift` response.
-Renders one of the six states from Section 1 with AntD `Tag` colors:
+Renders one of the seven states from Section 1 with AntD `Tag` colors:
 - `in-sync` → green
 - `drift-other-files` → gold
 - `drift-on-this-deliverable` → red
 - `merged-ahead-of-validation` → red, bold
 - `not-started` → default
 - `no-validated-commit` → default
+- `check-unavailable` → dashed warning tag; tooltip surfaces the underlying error (e.g. "Invalid Upstream Credentials" — see §7b). Never silently degrades to green.
+
+### §7b. Git read credentials — known 403 on `git/branches` and `git/commits`
+
+**Confirmed in round 4** by the implementing agent: with a bare platform API key, `gitRepositories/{repoId}/git/branches` and `git/commits` return **`403 "Invalid Upstream Credentials"`** on this cluster. This contradicts my round-1 brief answer to Q7 ("v4 ref endpoints serve from Domino-cached refs — no provider creds needed for branches/commits"); on UCB's deployment they do reach upstream and require a mapped credential.
+
+**What this means for Phase 1:**
+- The frontend ships with the `check-unavailable` badge state. Live drift lights up the moment the credential path is sorted; no frontend rework needed.
+- A probe script `git_branches_probe.py` is committed to the repo. Matt should run it inside a Domino workspace (where the sidecar identity carries his GitHub credentials) to confirm whether the same call succeeds. This disambiguates "sidecar identity doesn't inherit git creds outside Domino" vs "this cluster never serves cached refs."
+
+**Outcomes and follow-ups (one of):**
+- Probe succeeds inside Domino → sidecar-identity issue. **Action:** document as a deployment prerequisite ("the app must run inside Domino as a user whose project has mapped GitHub credentials"). No tracker code change.
+- Probe still 403s inside Domino → cluster config / per-repo credential mapping is mandatory. **Action:** UCB sets up a service-account credential mapped at the project repository level (`/v4/projects/{projectId}/repository/{repoId}/credentialMapping`). No tracker code change.
+
+**Do not engineer per-user credential propagation into the tracker.** That's a multi-day rabbit hole and the wrong abstraction for a read-mostly dashboard. Document the requirement, let UCB configure the deployment.
 
 Tooltip on hover: "Validated @ `<branch>@<sha[:8]>` · HEAD @ `<sha[:8]>` · `N` commits ahead". If `checkpoint` is present, append "Generated by execution `<executionName>` at `<executionStart>`".
 
@@ -432,7 +452,7 @@ Click `DriftBadge` → open the existing file viewer at the branch HEAD if drift
 ### Phase 3 — scheduled-job sweep
 - Run the script manually first (`python scripts/qc_drift_sweep.py` in a workspace) before scheduling.
 - Verify idempotency: run twice in a row → no duplicate Findings.
-- Verify project guard: a non-git_based project in the bundle list is skipped, not errored.
+- Verify non-git projects: a bundle whose project resolves to zero repos returns empty (replaces prior "guard on projectType" test — see §0 correction).
 
 ### Migration sanity
 - Compare a job started via the **old** `/v4/jobs/start` flow against one started via the **new** `/api/jobs/v1/jobs` for the same `runCommand` — both should produce equivalent execution records.
@@ -444,7 +464,7 @@ Click `DriftBadge` → open the existing file viewer at the branch HEAD if drift
 - Webhook receiver for Git providers. Push to Phase 4 if and only if UCB explicitly asks for sub-minute reaction time and accepts the standing-infra trade.
 - Domino Flows. Stay with Scheduled Jobs. If QC for a deliverable evolves into a true multi-step DAG with heterogeneous environments, revisit; otherwise the Flyte-via-DominoJobTask wrapping is overhead.
 - MCP routing on the request hot path. Keep the v4 + public API proxy as the read path; reserve MCP for operator/setup workflows.
-- DFS code paths. All UCB projects are git_based. Guard, don't branch.
+- DFS code paths. All UCB projects are git-backed. (Don't guard on `projectType == "git_based"` either — see §0 correction; resolve on `mainRepository` presence.)
 - Replacing `attachment.identifier.commit` parsing with provenance-only lookups. The attachment identifier is the canonical, documented anchor. Provenance is a companion enrichment.
 
 ---
