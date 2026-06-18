@@ -1777,6 +1777,56 @@ function FindingsPage(props) {
 //     Overdue Findings = open findings past their dueDate (stuck in rework loop)
 //   These proxies are standard in pharma QC analytics where full audit trails aren't available.
 //
+// ── Drift badge: code-vs-validation sync state for one deliverable ──
+// Renders the badge from POST /api/deliverables/drift. "check-unavailable"
+// is deliberately LOUD (dashed warning tag) and never looks green — on a GxP
+// dashboard a failed branch read must NOT read as "in sync".
+function DriftBadge(props) {
+  var drift = props.drift;
+  if (!drift || !drift.badge || drift.badge === 'skipped') return null;
+  var bs = drift.branch_state || {};
+  var va = drift.validated_at || {};
+  function sha(x) { return x ? String(x).slice(0, 8) : '–'; }
+
+  var CFG = {
+    'in-sync':                    { color: 'success',    label: 'In sync',            icon: 'CheckCircleOutlined' },
+    'in-development':             { color: 'processing', label: 'In development',      icon: 'BranchesOutlined' },
+    'not-started':                { color: 'default',    label: 'No branch',           icon: 'BranchesOutlined' },
+    'no-validated-commit':        { color: 'default',    label: 'No validated commit', icon: null },
+    'drift':                      { color: 'warning',    label: 'Drift',               icon: 'WarningOutlined' },
+    'drift-other-files':          { color: 'warning',    label: 'Drift (other files)', icon: 'WarningOutlined' },
+    'drift-on-this-deliverable':  { color: 'error',      label: 'Drift',               icon: 'WarningOutlined' },
+    'merged-ahead-of-validation': { color: 'error',      label: 'Merged ahead',        icon: 'WarningOutlined' },
+    'check-unavailable':          { color: 'default',    label: 'Check unavailable',   icon: 'WarningOutlined' },
+  };
+  var cfg = CFG[drift.badge] || { color: 'default', label: drift.badge, icon: null };
+
+  var lines = [];
+  if (drift.badge === 'check-unavailable') {
+    lines.push('Domino could not read the branch — drift is NOT being checked.');
+    lines.push('Git credential mapping may need configuration.');
+    if (drift.badge_reason) lines.push('(' + drift.badge_reason + ')');
+  } else {
+    if (va.commit) lines.push('Validated @ ' + (va.branch ? va.branch + '@' : '') + sha(va.commit));
+    if (bs.headCommit) lines.push('HEAD @ ' + sha(bs.headCommit));
+    if (typeof bs.aheadOfValidated === 'number') lines.push(bs.aheadOfValidated + ' commit(s) ahead of validation');
+    if (drift.badge_reason) lines.push(drift.badge_reason);
+  }
+  var tip = h('div', { style: { fontSize: 12 } },
+    lines.map(function (l, i) { return h('div', { key: i }, l); }));
+
+  var IconComp = (cfg.icon && icons && icons[cfg.icon]) ? icons[cfg.icon] : null;
+  var style = { fontSize: 11, marginInlineEnd: 0 };
+  if (drift.badge === 'check-unavailable') style.borderStyle = 'dashed';
+
+  return h(Tooltip, { title: tip },
+    h(Tag, { color: cfg.color, style: style },
+      IconComp ? h(IconComp, { style: { marginRight: 4 } }) : null,
+      cfg.label
+    )
+  );
+}
+
 function MetricsPage(props) {
   var bundles = props.bundles;
   var terms = props.terms || DEFAULT_TERMS;
@@ -1789,6 +1839,41 @@ function MetricsPage(props) {
   var _mf = useState(null);
   var metricsFilter = _mf[0];
   var setMetricsFilter = _mf[1];
+
+  // Code-vs-validation drift, keyed by bundleId. Batched into one POST; the
+  // backend handles per-(project,branch) concurrency + caching.
+  var _drift = useState({});
+  var driftMap = _drift[0];
+  var setDriftMap = _drift[1];
+  useEffect(function () {
+    if (window.__SCE_DRIFT_ENABLED === false) { setDriftMap({}); return; }
+    if (!bundles || !bundles.length) { setDriftMap({}); return; }
+    var inputs = [];
+    bundles.forEach(function (b) {
+      if (!b || !b.projectId) return;
+      var rep = (b._attachments || []).find(function (a) {
+        return a && a.type === 'Report' && a.identifier && a.identifier.branch;
+      });
+      if (!rep) return;
+      var idf = rep.identifier;
+      inputs.push({
+        bundleId: b.id, projectId: b.projectId, expectedBranch: idf.branch,
+        filename: idf.filename || null, validatedCommit: idf.commit || null,
+        validatedSource: idf.source || null,
+      });
+    });
+    if (!inputs.length) { setDriftMap({}); return; }
+    var cancelled = false;
+    apiPost('api/deliverables/drift', { deliverables: inputs })
+      .then(function (res) {
+        if (cancelled) return;
+        var m = {};
+        ((res && res.results) || []).forEach(function (r) { if (r && r.bundleId) m[r.bundleId] = r; });
+        setDriftMap(m);
+      })
+      .catch(function () { /* non-critical: badges simply won't render */ });
+    return function () { cancelled = true; };
+  }, [bundles]);
 
   // Use shared report config from App level
   var effectiveMapping = reportConfig.roleMapping || {};
@@ -2719,11 +2804,14 @@ function MetricsPage(props) {
               })(),
               onFilter: function(val, rec) { return rec.repoBranch === val; },
             },
+            { title: 'Code sync', key: 'drift', width: 130,
+              render: function(_, r) { return h(DriftBadge, { drift: driftMap[r.id] }); },
+            },
           ]),
           rowKey: 'id',
           pagination: { pageSize: 15, size: 'small', showSizeChanger: true, pageSizeOptions: ['10', '15', '25', '50'] },
           size: 'small',
-          scroll: { x: 250 + allRoleLabels.length * 320 + 110 },
+          scroll: { x: 250 + allRoleLabels.length * 320 + 110 + 130 },
         })
       )
     ),
@@ -12471,10 +12559,19 @@ function App() {
     // Resolve the AI feature flag app-wide so AI-gated controls (e.g. the
     // drawer's "Explain everything" button) hide when ANTHROPIC_API_KEY isn't
     // configured, instead of showing and erroring on click.
-    if (typeof window.__SCE_AI_ENABLED === 'undefined') {
+    // Query override for the drift feature (?drift=0 to hide, ?drift=1 to force).
+    var _q = new URLSearchParams(window.location.search);
+    if (_q.has('drift')) window.__SCE_DRIFT_ENABLED = _q.get('drift') !== '0';
+    if (typeof window.__SCE_AI_ENABLED === 'undefined' || typeof window.__SCE_DRIFT_ENABLED === 'undefined') {
       fetch('api/config').then(function(r) { return r.json(); })
-        .then(function(cfg) { window.__SCE_AI_ENABLED = cfg.ai_enabled !== false; })
-        .catch(function() { window.__SCE_AI_ENABLED = false; });
+        .then(function(cfg) {
+          if (typeof window.__SCE_AI_ENABLED === 'undefined') window.__SCE_AI_ENABLED = cfg.ai_enabled !== false;
+          if (typeof window.__SCE_DRIFT_ENABLED === 'undefined') window.__SCE_DRIFT_ENABLED = cfg.drift_enabled !== false;
+        })
+        .catch(function() {
+          if (typeof window.__SCE_AI_ENABLED === 'undefined') window.__SCE_AI_ENABLED = false;
+          if (typeof window.__SCE_DRIFT_ENABLED === 'undefined') window.__SCE_DRIFT_ENABLED = false;
+        });
     }
   }, []);
 
