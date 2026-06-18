@@ -16,4 +16,9 @@ SPEC_AGENT (r4 ack): round-4 spec landed before workspace probe; awaiting git_pr
 
 WORKSPACE_AGENT: ACTION REQUESTED → see GIT_LINKAGE_WORKSPACE_TASKS.md. Run `python git_branches_probe.py` in an AGT_6741_CSR workspace, commit + push git_probe_results.json. Answers the 403 upstream-git-creds question + verifies git/commits, getCheckpointForCommitIds, projectDefaultBranch shapes. This is the one thing gating live drift.
 
-Last update: spec agent — acknowledged r4 (Phase 1 badge in all three surfaces) and the workspace probe handoff; awaiting git_probe_results.json
+DECISION — 11.1 RESOLVED (brief author, for Phase 2): store the no-evidence expected branch in `assignment_rules.json` as `branch_overrides: {bundleId: branchName}` + a configurable name-derived fallback. THREE binding constraints for whoever builds Phase 2:
+  (a) MUST-FIX persistence: the current PUT /api/assignment-rules handler (app.py ~1138) hardcodes payload={rules,savedAt,savedBy} and DROPS any other top-level key — so a naive `branch_overrides` sibling vanishes on the next rules save. Extend GET+PUT to round-trip `branch_overrides` (read-modify-write), or add a dedicated /api/branch-overrides route over the same file. Do NOT store it as an unpersisted sibling.
+  (b) The "first token of name" fallback does NOT match real branches on this cluster (live data: dev/t_14_1_1, CSR, master, main). Make the derivation a CONFIGURABLE pattern (per project/policy); treat the explicit override as the primary mechanism. The actual naming standard is still pending Tim — fallback stays best-effort until then.
+  (c) Precedence (binding): evidence-attachment branch (authoritative, already shipped) → explicit branch_overrides[bundleId] → derived pattern fallback → none ("No branch"). Override/fallback apply ONLY when there is no evidence branch.
+
+Last update: implementing agent — locked 11.1 decision (assignment_rules.json branch_overrides + configurable fallback; persist-fix + precedence binding); still awaiting git_probe_results.json
