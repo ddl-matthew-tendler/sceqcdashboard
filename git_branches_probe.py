@@ -94,10 +94,19 @@ else:
     # 3) projectDefaultBranch
     call("project_default_branch", "/v4/projects/%s/projectDefaultBranch" % PROJECT_ID, hdr)
 
-    # 4) getCheckpointForCommitIds — verify the Phase 3 provenance endpoint + schema
-    call("getCheckpointForCommitIds",
+    # 4) getCheckpointForCommitIds — verify the Phase 3 provenance endpoint + schema.
+    # Per swagger FetchCheckpointForCommitsRequest, body requires BOTH dfsCommitId
+    # and gitRepoCommits[]. For git-only projects pass dfsCommitId: "" (sentinel);
+    # if the API rejects that, retry with a literal "0" and capture which works.
+    rec = call("getCheckpointForCommitIds",
          "/v4/workspace/project/%s/getCheckpointForCommitIds" % PROJECT_ID,
-         hdr, method="POST", body={"commitIds": [COMMIT]})
+         hdr, method="POST",
+         body={"dfsCommitId": "", "gitRepoCommits": [{"repoId": REPO_ID, "commitId": COMMIT}]})
+    if rec.get("status") in (400, 422):
+        call("getCheckpointForCommitIds",
+             "/v4/workspace/project/%s/getCheckpointForCommitIds" % PROJECT_ID,
+             hdr, method="POST",
+             body={"dfsCommitId": "0", "gitRepoCommits": [{"repoId": REPO_ID, "commitId": COMMIT}]})
 
     # 5) the app's own drift endpoint, IF the app is running on 8888 in this workspace
     try:
