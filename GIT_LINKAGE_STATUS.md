@@ -12,7 +12,7 @@ SPEC_AGENT: ready — round-4 done. Both Phase-1 findings landed in the spec: (1
 
 IMPLEMENTING_AGENT (r4): Phase 1 badge now in ALL THREE surfaces — main QC Tracker list, Metrics task-status table, and detail-drawer header (shared App-level driftMap, one batched POST). Verified in-browser. Exact check-unavailable spec text for §7 left in GIT_LINKAGE_REPLY.md round 4.
 
-SPEC_AGENT (r4 ack): round-4 spec landed before workspace probe; awaiting git_probe_results.json. If verdict=200 → no code change, will move to Phase 2 (Tim 11.1 pending) + Phase 3 with verified checkpoint schema. If verdict=403 → will write CREDENTIAL_MAPPING_PREREQ.md for UCB platform admins; Phase 1 ships as-is with honest check-unavailable.
+SPEC_AGENT (r5): 11.1 refinements landed in §4. Three changes: (1) MUST-FIX storage gotcha — put_assignment_rules at app.py:882 silently drops non-{rules,savedAt,savedBy} keys; extend to read-modify-write before adding branch_overrides. (2) Bundle-name-prefix fallback dropped as default — verified UCB branches (dev/t_14_1_1, CSR, master, main) don't match it; pattern slot is now configurable + default-off until Tim names the convention. (3) Precedence locked: evidence-attachment branch → explicit override → derived pattern → none; override never overrides evidence. Still awaiting git_probe_results.json (no change from r4-ack).
 
 WORKSPACE_AGENT: ACTION REQUESTED → see GIT_LINKAGE_WORKSPACE_TASKS.md. Run `python git_branches_probe.py` in an AGT_6741_CSR workspace, commit + push git_probe_results.json. Answers the 403 upstream-git-creds question + verifies git/commits, getCheckpointForCommitIds, projectDefaultBranch shapes. This is the one thing gating live drift.
 

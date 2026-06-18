@@ -209,15 +209,38 @@ Returns `ProvenanceCheckpointDto` or `null`. Used by the drift card to enrich th
 
 ### Where `expectedBranch` and `filename` come from
 
-**Resolved with implementing agent — no new convention needed for Phase 1.** Branch + filename are read live from the bundle's most-recent **Report** attachment identifier (parser already exists at `static/app.js:1887-1899`). That is the only Phase 1 data source.
+**Phase 1:** Branch + filename are read live from the bundle's most-recent **Report** attachment identifier (parser already exists at `static/app.js:1887-1899`). No new convention. Already shipped.
 
-Phase 2's "branch exists but no evidence yet" case (Tim's UCB ask: *"if someone makes a branch to work on ADAE, can this automatically track its status"*) cannot ride on attachments — by definition there is no attachment yet. Three options, **pick one with UCB** before coding Phase 2:
+**Phase 2 (no-evidence case):** for deliverables that haven't produced an attachment yet, we need a separate source. **Decision (round 5, implementing-agent refinements):**
 
-1. **`assignment_rules.json` override** (recommended). The tracker already file-backs per-deliverable config via `/api/assignment-rules` (`app.py:849-882`). Add a `branch_overrides: {bundleId: branchName}` map. Pros: team owns the file, audit-trail-friendly, no governance policy change, easy to bulk-load via CSV (matches the bulk-objectives flow you already shipped). Cons: another field for Study Leads to maintain.
-2. **Bundle-name convention.** Derive `expectedBranch` from the bundle name (e.g., "ADAE Dataset v3" → `ADAE`). Pros: zero config. Cons: fragile, breaks the moment Study Leads name a bundle differently.
-3. **Governance evidenceSet artifact.** Add an "expected branch" artifact to the policy's first stage so it's captured during bundle creation. Pros: GxP-clean. Cons: requires UCB-side policy change.
+#### Precedence chain (apply top-down; first hit wins)
 
-**Recommendation:** ship Phase 2 with #1 plus optional #2 fallback ("if no override, try `expectedBranch = bundle.name.split()[0]`"). Surface this in the dashboard as an editable "Expected branch" field on the deliverable detail panel.
+1. **Evidence-attachment branch** (when evidence exists — *authoritative, never overridden*, GxP-defensible). Already shipped in Phase 1.
+2. **Explicit override** in `assignment_rules.json` → `branch_overrides[bundleId]`. Manual or CSV-imported.
+3. **Configurable derivation pattern** (per project or per policy). See "Pattern" below — only fires when neither evidence nor override resolves.
+4. **None** → render `no-validated-commit` / `not-started` badge as appropriate.
+
+The override and pattern apply *only* to the no-evidence case. They never override a branch read off real evidence.
+
+#### Storage — must-fix on the existing PUT handler
+
+`assignment_rules.json` is the right home, BUT: `put_assignment_rules` at `app.py:882` hardcodes the on-disk payload to `{rules, savedAt, savedBy}` and silently discards any other top-level key. **Adding `branch_overrides` as a sibling without changing the handler will cause it to vanish on the first save.** Two fix options:
+
+- **(Recommended)** Extend `put_assignment_rules` to read-modify-write: load the current file, overwrite only the keys present in the request body, write the merged result back. Keeps one file, one endpoint, atomic on single-write.
+- **(Alternative)** Add a dedicated `/api/branch-overrides` GET/PUT pair backed by the same file but operating on the `branch_overrides` key only. Slightly cleaner separation, but two endpoints racing on the same file → needs the read-modify-write logic anyway. Less worth it.
+
+Pick option 1. This is a small change — file-backed config; atomicity comes from the single file write. Must land in the same PR as `branch_overrides` introduction or overrides will disappear.
+
+#### Pattern — the actual substance of 11.1
+
+The original "bundle-name first token" heuristic does **not** match real UCB branches. Verified live: branches in play include `dev/t_14_1_1`, `CSR`, `master`, `main` — none of which would be produced by `bundle.name.split()[0]`. So the pattern fallback is mostly decorative until we know the convention.
+
+**Open with Tim** — the question to actually ask is *what is the convention*, not *do we accept a fallback*. Examples that would make a pattern viable:
+- `dev/<deliverable-code>` where `<deliverable-code>` is the bundle's display-id field
+- `<study-code>/<deliverable-code>` where both come from bundle metadata
+- A free-form mapping per project (in which case the pattern config goes in `assignment_rules.json` alongside the overrides)
+
+Until UCB confirms a pattern, **ship Phase 2 with only the override layer enabled**, and add the pattern slot as a no-op default-off config. Surface the override in the dashboard as an editable "Expected branch" field on the deliverable detail panel (single-input edit, writes via the read-modify-write PUT).
 
 ### `POST /api/deliverables/drift`
 
