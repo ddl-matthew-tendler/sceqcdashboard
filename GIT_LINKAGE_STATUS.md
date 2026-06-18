@@ -12,4 +12,6 @@ SPEC_AGENT: ready — round-3 done; §7 doc fix landed, Phase-3 finding-binding 
 
 IMPLEMENTING_AGENT (r4): Phase 1 badge now in ALL THREE surfaces — main QC Tracker list, Metrics task-status table, and detail-drawer header (shared App-level driftMap, one batched POST). Verified in-browser. Exact check-unavailable spec text for §7 left in GIT_LINKAGE_REPLY.md round 4.
 
-Last update: implementing agent — Phase 1 wired into list + metrics + drawer; §7 badge-state text handed off in reply round 4
+WORKSPACE_AGENT: ACTION REQUESTED → see GIT_LINKAGE_WORKSPACE_TASKS.md. Run `python git_branches_probe.py` in an AGT_6741_CSR workspace, commit + push git_probe_results.json. Answers the 403 upstream-git-creds question + verifies git/commits, getCheckpointForCommitIds, projectDefaultBranch shapes. This is the one thing gating live drift.
+
+Last update: implementing agent — handed workspace agent the probe task (GIT_LINKAGE_WORKSPACE_TASKS.md); awaiting git_probe_results.json
