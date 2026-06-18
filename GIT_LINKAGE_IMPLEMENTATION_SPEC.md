@@ -56,16 +56,29 @@ Already wired via `gov_get`. No change. Pull `attachment-overviews` (existing ro
 | `GET /v4/projects/{projectId}/projectDefaultBranch` | default branch (for "merged ahead" detection) |
 
 ### v4 — new (this is the missed primitive)
-| Path | Use | Schema |
-|---|---|---|
-| `POST /v4/projects/{projectId}/getCheckpointForCommits` | given a list of commit SHAs, get the **Provenance Checkpoint** that produced them | request: `{commitIds: [string]}` ; response: `ProvenanceCheckpointDto` |
-| `GET /v4/mlflow/execution/{executionId}/provenanceCheckpoints` | when you know the execution that produced an attachment (rare for now), pull checkpoints | response: array of `ProvenanceCheckpointDto` |
 
-`ProvenanceCheckpointDto` fields we use:
-- `id`, `executionId`, `executionName`, `executionStart`
-- `gitRepoCommits[]` — `{repositoryId, commitId, branch?}` per repo. **This is the cross-repo lineage** including imported repos.
+**Corrected from initial draft** — the path was wrong in the first cut of this spec. Verified against `swagger.json:7249`:
+
+| Path | Use |
+|---|---|
+| `POST /v4/workspace/project/{projectId}/getCheckpointForCommitIds` | given a (dfsCommitId, [{repoId, commitId}]) tuple, get the **Provenance Checkpoint** |
+| `GET /v4/mlflow/execution/{executionId}/provenanceCheckpoints` | when you know the execution that produced the evidence, pull checkpoints array |
+
+`FetchCheckpointForCommitsRequest` (request body for the POST — both fields marked `required` in swagger):
+```json
+{
+  "dfsCommitId": "",
+  "gitRepoCommits": [
+    { "repoId": "<24-hex>", "commitId": "<sha>" }
+  ]
+}
+```
+For git-based projects pass `dfsCommitId: ""` (sentinel). If the API rejects empty string, treat as 400 and skip the checkpoint enrichment — drift still works off `attachment.identifier`. Worth a probe on first integration.
+
+`ProvenanceCheckpointDto` (response) fields we consume:
+- `id`, `executionId`, `executionName`, `executionStart`, `commitMessage`
+- `gitRepoCommits[]` — each item is a `ProvenanceGitRepoDto`: **`{id, name, commitId, branchName, isMainRepo}`** (note: `id`/`branchName`, not `repositoryId`/`branch` — different shape from the request side).
 - `mainGitBranch`
-- `commitMessage`
 - (ignore: `dfsCommit`, `dfsBranch`, `importedProjects[]` for our scope)
 
 ### Public API — migrate to these
@@ -155,11 +168,19 @@ def project_default_branch(project_id: str) -> str | None:
 
 # --- Provenance Checkpoint (companion anchor) ---
 
-def get_checkpoint_for_commit(project_id: str, commit_id: str) -> dict | None:
+def get_checkpoint_for_commit(project_id: str, repo_id: str, commit_id: str) -> dict | None:
+    """Returns ProvenanceCheckpointDto or None.
+
+    Path is /v4/workspace/project/{projectId}/getCheckpointForCommitIds
+    (NOT /v4/projects/{id}/... — different namespace).
+    Both dfsCommitId and gitRepoCommits are schema-required; pass "" for the
+    DFS side since UCB is git-only.
+    """
+    body = {"dfsCommitId": "", "gitRepoCommits": [{"repoId": repo_id, "commitId": commit_id}]}
     try:
         return _v4_post(
-            f"/projects/{project_id}/getCheckpointForCommits",
-            json_body={"commitIds": [commit_id]},
+            f"/workspace/project/{project_id}/getCheckpointForCommitIds",
+            json_body=body,
         )
     except HTTPException:
         return None
@@ -181,10 +202,27 @@ Internally: `resolve_repos(projectId)` → for each `(repo, name)`, `get_branch_
 
 Returns `ProvenanceCheckpointDto` or `null`. Used by the drift card to enrich the "validated at" panel with `executionName`, `executionStart`, full `gitRepoCommits[]`.
 
+### Where `expectedBranch` and `filename` come from
+
+**Resolved with implementing agent — no new convention needed for Phase 1.** Branch + filename are read live from the bundle's most-recent **Report** attachment identifier (parser already exists at `static/app.js:1887-1899`). That is the only Phase 1 data source.
+
+Phase 2's "branch exists but no evidence yet" case (Tim's UCB ask: *"if someone makes a branch to work on ADAE, can this automatically track its status"*) cannot ride on attachments — by definition there is no attachment yet. Three options, **pick one with UCB** before coding Phase 2:
+
+1. **`assignment_rules.json` override** (recommended). The tracker already file-backs per-deliverable config via `/api/assignment-rules` (`app.py:849-882`). Add a `branch_overrides: {bundleId: branchName}` map. Pros: team owns the file, audit-trail-friendly, no governance policy change, easy to bulk-load via CSV (matches the bulk-objectives flow you already shipped). Cons: another field for Study Leads to maintain.
+2. **Bundle-name convention.** Derive `expectedBranch` from the bundle name (e.g., "ADAE Dataset v3" → `ADAE`). Pros: zero config. Cons: fragile, breaks the moment Study Leads name a bundle differently.
+3. **Governance evidenceSet artifact.** Add an "expected branch" artifact to the policy's first stage so it's captured during bundle creation. Pros: GxP-clean. Cons: requires UCB-side policy change.
+
+**Recommendation:** ship Phase 2 with #1 plus optional #2 fallback ("if no override, try `expectedBranch = bundle.name.split()[0]`"). Surface this in the dashboard as an editable "Expected branch" field on the deliverable detail panel.
+
 ### `POST /api/deliverables/drift`
 
 Body: `{ deliverables: [{bundleId, projectId, expectedBranch, filename, validatedCommit, validatedSource}] }`.
 Returns `{ results: [{bundleId, validated_at, branch_state, badge, badge_reason}] }` — one entry per input.
+
+Caller (frontend) builds the deliverable list. For each bundle:
+- If it has a most-recent Report attachment: pass `expectedBranch`, `filename`, `validatedCommit` from the attachment identifier.
+- If it has none and Phase 2 mapping resolves a branch: pass `expectedBranch` only; `validatedCommit` = null. Server returns `branch_state` and a `not-started` / `in-development` badge.
+- If neither: skip the bundle. The badge is rendered client-side as `no-validated-commit`.
 
 This is the **batch endpoint** the dashboard hits once per refresh. Server-side concurrency, server-side caching. The frontend does no fan-out itself.
 
@@ -251,10 +289,27 @@ def trigger_qc_job(project_id, run_command, title):
         headers=HEADERS,
         json={"projectId": project_id, "runCommand": run_command, "title": title}).json()
 
-def file_finding(bundle_id, title, description, severity="Medium"):
-    return requests.post(f"{BASE}/api/governance/findings", headers=HEADERS,
-        json={"bundleId": bundle_id, "title": title, "name": title,
-              "description": description, "severity": severity}).json()
+def file_finding(bundle, approval_id, name, description, severity="S2",
+                 assignee=None, approver=None):
+    """Create a governance Finding.
+
+    Per governance_swagger.json:1599 + guardrails.CreateFindingRequest, the
+    REQUIRED fields are: bundleId, approvalId, approver, assignee, name, severity.
+    'title' is NOT a field. Severity is the S0–S3 enum (NOT High/Medium/Low).
+    approver/assignee are {id, name} FindingUser objects, both required.
+    """
+    # approver/assignee come from the bundle's approvals (see /api/bundles/{id}/approvals,
+    # app.py:331). Pick the responsible approver and the deliverable's Study Lead.
+    body = {
+        "bundleId": bundle["id"],
+        "approvalId": approval_id,           # from approvals list
+        "approver": approver,                # {"id": "...", "name": "..."}
+        "assignee": assignee,                # {"id": "...", "name": "..."}
+        "name": name,
+        "description": description,
+        "severity": severity,                # "S0" | "S1" | "S2" | "S3"
+    }
+    return requests.post(f"{BASE}/api/governance/findings", headers=HEADERS, json=body).json()
 
 def main():
     deliverables = [deliverable_payload(b) for b in list_active_bundles()]
@@ -282,37 +337,21 @@ if __name__ == "__main__":
 
 ---
 
-## 6. v4 → Public API migration (do this alongside Phase 1)
+## 6. v4 → Public API migration — **deferred, separate PR, post-demo**
 
-### 6a. Replace `_v4_post("/jobs/start", ...)` at `app.py:614`
+Originally I bundled this with Phase 1. Decoupling at the implementing agent's request: two of the touched paths (scripted-check job-start at `app.py:614`; RTF viewer raw read at `app.py:1091`) are working today, and the Public Jobs API shape (`/api/jobs/v1/jobs`, `runCommand` field) isn't in the nucleus swagger we have locally — it's documented in the Domino plugin's jobs skill but unverified against this cluster's `assets/public-api.json`. Regression risk on the demo path outweighs the cleanup benefit.
 
-```python
-# OLD
-job_req = {"projectId": project_id, "commandToRun": final_command}
-job = _v4_post("/jobs/start", json_body=job_req)
+**Action for Phases 1–3:** ignore this section. Keep using `_v4_post("/jobs/start", …)` and the existing `git/raw` flow. Drift sweep job-starts (§5) also use existing v4 calls until §6 is verified.
 
-# NEW
-job_req = {"projectId": project_id, "runCommand": final_command, "title": title or "Scripted check"}
-job = public_post("/api/jobs/v1/jobs", json_body=job_req)
-```
-
-`runCommand` is the public-API field name (not `commandToRun`). Pass `hardwareTierId` and `environmentId` directly — no need for the lookup helpers (`_find_hw_tier_id`, `_find_environment_id`) if the caller can supply ids; keep the lookups as a convenience layer.
-
-### 6b. Replace `git/raw` deep-link reads at `app.py:1091`
-
-```python
-# OLD (v4)
-url = f"{host}/v4/projects/{projectId}/gitRepositories/{rid}/git/raw"
-
-# NEW (public, when projectType is git_based)
-url = f"{host}/api/projects/v1/projects/{projectId}/files/{commit}/{path}/content"
-```
-
-Keep the existing repo-resolution probe as a fallback (the public path needs a commit SHA, not a branch+repo tuple — for callers that pass branch instead, resolve to a commit first via `get_branch_head`).
+**Action post-demo:**
+1. Curl `$DOMINO_API_HOST/assets/public-api.json` from a workspace, confirm `/api/jobs/v1/jobs` is present and the body shape matches.
+2. Behind a feature flag, dual-write: send to both `/v4/jobs/start` and `/api/jobs/v1/jobs` for one job and diff the resulting execution records.
+3. Cut over scripted-check → public Jobs API.
+4. Repeat the verification for the public files-at-commit reader before touching the RTF viewer.
 
 ### 6c. Governance host derivation (already in place — don't regress)
 
-`_get_gov_host()` in `app.py:91` probes candidate hosts because governance is not on `$DOMINO_API_HOST`. Match this pattern if you ever proxy a new governance route — do not assume `$DOMINO_API_HOST` works.
+`_get_gov_host()` in `app.py:91` probes candidate hosts because governance is not on `$DOMINO_API_HOST`. Match this pattern if you ever proxy a new governance route — do not assume `$DOMINO_API_HOST` works. **This is the one §6 item that stays in scope** because it affects any new governance routes you add (e.g., the `gov_post("/findings", …)` route in §5).
 
 ---
 
@@ -377,11 +416,21 @@ Click `DriftBadge` → open the existing file viewer at the branch HEAD if drift
 
 ---
 
-## 10. Open questions for the implementing agent to confirm before coding
+## 10. Open questions — resolved
 
-1. Does your existing localStorage `study/deliverable → branch` mapping have a per-deliverable filename, or only branch? The badge needs both for the `fileTouchedSinceValidated` calculation. If only branch, the badge collapses to "Drift (any files)" — still useful.
-2. Confirm `gov_get("/findings", ...)` exists or is easy to add — the scheduled job needs it for idempotency.
-3. Hardware tier / environment id resolution for the Phase 3 scheduled job: are you OK using the project's defaults (no override) for the initial cut?
-4. Acceptable to ship Phase 1 + 2 behind a feature flag (`?drift=1` query param) for one sprint before defaulting on?
+Answers from the implementing agent, recorded here so future readers don't re-litigate:
 
-Send these answers (or "go") and the implementing agent has everything needed to ship.
+1. **Branch + filename source.** No localStorage convention — both come live from the most-recent Report attachment identifier (`static/app.js:1887-1899`). Spec §4 updated accordingly: Phase 1 is attachment-anchored only; Phase 2 needs a separate mapping (see §4 "Where expectedBranch and filename come from").
+2. **Findings list/create.** Per-bundle list exists (`app.py:331`). Create is not currently proxied — implementing agent will add a thin `gov_post("/findings", body)` route. Body shape confirmed in §5 (required: `bundleId`, `approvalId`, `approver`, `assignee`, `name`, `severity`; severity enum is `S0..S3`, not `High/Medium/Low`).
+3. **HW tier / environment.** Use project defaults — existing job-start path already omits unresolved ids and Domino falls back (`app.py:606-612`). No new resolution logic for Phase 3.
+4. **Feature gate.** Mirror the existing config-driven pattern (`/api/config → window.__SCE_AI_ENABLED`, `app.js:9374`) with a `drift_enabled` flag. Honor `?drift=1` as a dev override.
+
+## 11. Open questions back to the brief author / UCB
+
+These are customer-facing decisions, not implementation choices:
+
+1. **Phase 2 mapping home.** §4 lists three options for where `expectedBranch` lives for deliverables without evidence yet. Recommendation is `assignment_rules.json` + a bundle-name-prefix fallback. Confirm with Tim before Phase 2 coding starts.
+2. **Severity scale for drift Findings.** Severity is `S0..S3`. Default `S2` for drift-on-this-deliverable / merged-ahead-of-validation? Or only file Findings at all when QC fails (rather than on drift)?
+3. **Auto-trigger QC jobs in v1, or Finding-only?** Recommendation is Finding-only for v1 (human in the loop, no automated job spend) and revisit after one cycle of dashboard accuracy data.
+
+Send §11 answers (or "go with recommendations") and the implementing agent has everything needed to ship.
