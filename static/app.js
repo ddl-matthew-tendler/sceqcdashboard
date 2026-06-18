@@ -3799,6 +3799,11 @@ function CSVUploadDrawer(props) {
       row._rowNum = i + 1;
       rows.push(row);
     }
+    applyRows(headers, rows);
+  }
+
+  // Shared by CSV and JSON parsers: stash rows, auto-map columns, advance to mapping step.
+  function applyRows(headers, rows) {
     setCsvHeaders(headers);
     setCsvRows(rows);
     // Auto-map columns by name similarity
@@ -3825,6 +3830,42 @@ function CSVUploadDrawer(props) {
     setStep(1);
   }
 
+  // Parse JSON: accepts a top-level array of objects, or an object wrapping one
+  // under a common key (deliverables / bundles / rows / items / data). Each object
+  // becomes one row; headers are the union of keys across all objects so the same
+  // mapping/preview/upload flow used for CSV applies unchanged.
+  function parseJSON(text) {
+    var data;
+    try { data = JSON.parse(text); }
+    catch(e) { antd.message.error('Could not parse JSON: ' + ((e && e.message) || e)); return; }
+    if (data && !Array.isArray(data) && typeof data === 'object') {
+      var wrapKey = ['deliverables', 'bundles', 'rows', 'items', 'records', 'data'].find(function(k) { return Array.isArray(data[k]); });
+      if (wrapKey) data = data[wrapKey];
+    }
+    if (!Array.isArray(data)) { antd.message.error('JSON must be an array of objects, or an object with a "deliverables" array.'); return; }
+    if (data.length === 0) { antd.message.error('JSON file contains no rows.'); return; }
+    var headerSet = []; var seenHeader = {};
+    data.forEach(function(obj) {
+      if (obj && typeof obj === 'object') {
+        Object.keys(obj).forEach(function(k) { if (!seenHeader[k]) { seenHeader[k] = true; headerSet.push(k); } });
+      }
+    });
+    if (headerSet.length === 0) { antd.message.error('JSON rows have no fields to map.'); return; }
+    var rows = [];
+    data.forEach(function(obj, idx) {
+      if (!obj || typeof obj !== 'object') return;
+      var row = {};
+      headerSet.forEach(function(k) {
+        var v = obj[k];
+        row[k] = (v === null || v === undefined) ? '' : (typeof v === 'object' ? JSON.stringify(v) : String(v));
+      });
+      row._rowNum = idx + 1;
+      rows.push(row);
+    });
+    if (rows.length === 0) { antd.message.error('JSON contains no valid object rows.'); return; }
+    applyRows(headerSet, rows);
+  }
+
   function parseCSVLine(line) {
     var result = []; var current = ''; var inQuotes = false;
     for (var i = 0; i < line.length; i++) {
@@ -3846,10 +3887,12 @@ function CSVUploadDrawer(props) {
   function handleFileChange(info) {
     var file = info.file;
     if (file.status === 'removed') { setCsvFile(null); return; }
-    setCsvFile(file.originFileObj || file);
+    var f = file.originFileObj || file;
+    setCsvFile(f);
+    var isJSON = /\.json$/i.test(file.name || (f && f.name) || '');
     var reader = new FileReader();
-    reader.onload = function(e) { parseCSV(e.target.result); };
-    reader.readAsText(file.originFileObj || file);
+    reader.onload = function(e) { (isJSON ? parseJSON : parseCSV)(e.target.result); };
+    reader.readAsText(f);
   }
 
   // Helper: resolve a name to a policy/project ID
@@ -4030,6 +4073,19 @@ function CSVUploadDrawer(props) {
     URL.revokeObjectURL(url);
   }
 
+  // Download a blank JSON template (array of objects with the expected fields)
+  function downloadJSONTemplate() {
+    var sample = [
+      { name: 'ADAE Q1 2026', policyName: 'ADaM QC Plan - High Risk', projectName: 'My Project' },
+      { name: 'ADSL Q1 2026', policyName: 'ADaM QC Plan - High Risk', projectName: 'My Project' }
+    ];
+    var blob = new Blob([JSON.stringify(sample, null, 2)], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = 'deliverable_upload_template.json'; a.click();
+    URL.revokeObjectURL(url);
+  }
+
   var steps = [
     { title: 'Upload' },
     { title: 'Map Columns' },
@@ -4039,7 +4095,7 @@ function CSVUploadDrawer(props) {
   ];
 
   return h(Drawer, {
-    title: 'Import ' + B + 's from CSV',
+    title: 'Import ' + B + 's from CSV or JSON',
     open: visible,
     onClose: handleClose,
     width: 720,
@@ -4060,7 +4116,7 @@ function CSVUploadDrawer(props) {
     step === 0 ? h('div', null,
       h(antd.Upload.Dragger, {
         name: 'file',
-        accept: '.csv,.tsv',
+        accept: '.csv,.tsv,.json',
         maxCount: 1,
         beforeUpload: function() { return false; },
         onChange: handleFileChange,
@@ -4069,19 +4125,22 @@ function CSVUploadDrawer(props) {
         h('p', { className: 'ant-upload-drag-icon' },
           icons && icons.InboxOutlined ? h(icons.InboxOutlined, { style: { fontSize: 48, color: '#543FDE' } }) : h('span', { style: { fontSize: 36 } }, '\uD83D\uDCC1')
         ),
-        h('p', { className: 'ant-upload-text' }, 'Click or drag a CSV file here'),
-        h('p', { className: 'ant-upload-hint' }, 'The file should have a header row. Each row will create one ' + B.toLowerCase() + '.')
+        h('p', { className: 'ant-upload-text' }, 'Click or drag a CSV or JSON file here'),
+        h('p', { className: 'ant-upload-hint' }, 'CSV needs a header row; JSON should be an array of objects. Each row/object creates one ' + B.toLowerCase() + '.')
       ),
       // Quick actions
       h('div', { style: { marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' } },
         h(Button, { size: 'small', onClick: downloadTemplate,
           icon: icons && icons.DownloadOutlined ? h(icons.DownloadOutlined) : null,
-        }, 'Download Template')
+        }, 'Download CSV Template'),
+        h(Button, { size: 'small', onClick: downloadJSONTemplate,
+          icon: icons && icons.DownloadOutlined ? h(icons.DownloadOutlined) : null,
+        }, 'Download JSON Template')
       ),
       h('div', { style: { marginTop: 16 } },
         h(antd.Collapse, { items: [{
           key: 'template',
-          label: 'CSV Template & Requirements',
+          label: 'CSV / JSON Template & Requirements',
           children: h('div', null,
             h('p', { style: { fontSize: 12, color: '#65657B' } }, 'Required columns:'),
             h('ul', { style: { fontSize: 12, color: '#65657B', paddingLeft: 20 } },
@@ -4093,6 +4152,10 @@ function CSVUploadDrawer(props) {
             h('p', { style: { fontSize: 12, color: '#8F8FA3', marginTop: 8 } }, 'Example CSV:'),
             h('pre', { style: { fontSize: 11, background: '#F5F5F5', padding: 8, borderRadius: 4 } },
               'name,policyName,projectName\n"ADAE Q1 2026","ADaM QC Plan - High Risk","My Project"\n"ADSL Q1 2026","ADaM QC Plan - High Risk","My Project"'
+            ),
+            h('p', { style: { fontSize: 12, color: '#8F8FA3', marginTop: 8 } }, 'Example JSON (array of objects, or wrapped under a "deliverables" key):'),
+            h('pre', { style: { fontSize: 11, background: '#F5F5F5', padding: 8, borderRadius: 4 } },
+              '[\n  { "name": "ADAE Q1 2026", "policyName": "ADaM QC Plan - High Risk", "projectName": "My Project" },\n  { "name": "ADSL Q1 2026", "policyName": "ADaM QC Plan - High Risk", "projectName": "My Project" }\n]'
             )
           )
         }] })
@@ -5144,11 +5207,11 @@ function QCTrackerPage(props) {
             icon: icons && icons.DownloadOutlined ? h(icons.DownloadOutlined) : null,
           }, 'Status Report')
         ),
-        h(Tooltip, { title: 'Import ' + capFirst(B).toLowerCase() + 's from a CSV file' },
+        h(Tooltip, { title: 'Import ' + capFirst(B).toLowerCase() + 's from a CSV or JSON file' },
           h(Button, {
             onClick: function() { setCsvDrawerOpen(true); },
             icon: icons && icons.UploadOutlined ? h(icons.UploadOutlined) : null,
-          }, 'Import CSV')
+          }, 'Import CSV / JSON')
         )
       )
     ),
