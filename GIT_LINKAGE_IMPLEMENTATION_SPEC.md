@@ -289,25 +289,55 @@ def trigger_qc_job(project_id, run_command, title):
         headers=HEADERS,
         json={"projectId": project_id, "runCommand": run_command, "title": title}).json()
 
-def file_finding(bundle, approval_id, name, description, severity="S2",
-                 assignee=None, approver=None):
-    """Create a governance Finding.
+def pick_drift_approval(bundle_id):
+    """Return (approval_id, approver_user) for binding an automated drift Finding.
 
-    Per governance_swagger.json:1599 + guardrails.CreateFindingRequest, the
-    REQUIRED fields are: bundleId, approvalId, approver, assignee, name, severity.
-    'title' is NOT a field. Severity is the S0–S3 enum (NOT High/Medium/Low).
-    approver/assignee are {id, name} FindingUser objects, both required.
+    Rules (round-3 decision, see Phase-3 finding-binding doc below):
+      1. Prefer the currently-open approval (status PendingSubmission or
+         PendingReview) — that's the stage actively gating the deliverable, so
+         drift findings show up in the gating reviewer's queue.
+      2. If the bundle is fully approved (no Pending* status), bind to the
+         most-recent Approved approval — that's the stage whose validity is now
+         questioned by the drift signal.
+      3. approver = approval.approvers[0] mapped to {id, name}.
+      4. assignee = same as approver in v1. (Alternative: per-bundle override
+         from assignment_rules.json; not implemented in v1.)
     """
-    # approver/assignee come from the bundle's approvals (see /api/bundles/{id}/approvals,
-    # app.py:331). Pick the responsible approver and the deliverable's Study Lead.
+    approvals = requests.get(f"{BASE}/api/bundles/{bundle_id}/approvals",
+                             headers=HEADERS).json() or []
+    pending = next((a for a in approvals
+                    if a.get("status") in ("PendingSubmission", "PendingReview")), None)
+    target = pending or sorted(
+        [a for a in approvals if a.get("status") == "Approved"],
+        key=lambda a: a.get("updatedAt", ""), reverse=True
+    )[:1]
+    target = pending or (target[0] if target else None)
+    if not target or not target.get("approvers"):
+        return None, None
+    a = target["approvers"][0]
+    return target["id"], {"id": a["id"], "name": a["name"]}
+
+def file_finding(bundle, name, description, severity="S2"):
+    """Create a governance Finding for automated drift.
+
+    Per governance_swagger.json:1599 + guardrails.CreateFindingRequest, REQUIRED:
+    bundleId, approvalId, approver, assignee, name, severity. 'title' is NOT a
+    field. Severity is S0–S3 (NOT High/Medium/Low). approver/assignee are {id,name}.
+    """
+    approval_id, approver = pick_drift_approval(bundle["id"])
+    if not approval_id:
+        # No bindable approval — log and skip rather than 400. Should be rare;
+        # a bundle with no approvals at all isn't a normal SCE state.
+        logger.warning(f"[drift-sweep] no approval to bind finding on bundle {bundle['id']}; skipping")
+        return None
     body = {
         "bundleId": bundle["id"],
-        "approvalId": approval_id,           # from approvals list
-        "approver": approver,                # {"id": "...", "name": "..."}
-        "assignee": assignee,                # {"id": "...", "name": "..."}
+        "approvalId": approval_id,
+        "approver": approver,                # first approver on the live/most-recent approval
+        "assignee": approver,                # v1: same person; routes to gating reviewer
         "name": name,
         "description": description,
-        "severity": severity,                # "S0" | "S1" | "S2" | "S3"
+        "severity": severity,                # "S0" | "S1" | "S2" | "S3"; default S2 for drift
     }
     return requests.post(f"{BASE}/api/governance/findings", headers=HEADERS, json=body).json()
 
@@ -374,11 +404,14 @@ Tooltip on hover: "Validated @ `<branch>@<sha[:8]>` · HEAD @ `<sha[:8]>` · `N`
 
 In the existing bundle-list refresh (`static/app.js` ~1895 area where attachments are processed), after the bundle list resolves, collect `{bundleId, projectId, expectedBranch, filename, validatedCommit}` and `POST /api/deliverables/drift` once. Set badges from the response.
 
-`expectedBranch` mapping: keep using the localStorage convention you already have for study/deliverable → branch. No new persistence.
+`expectedBranch` mapping (matches §4 "Where expectedBranch and filename come from"):
+- Phase 1: read live from the most-recent Report attachment identifier (`static/app.js:1887-1899`). No persistence needed.
+- Phase 2: `assignment_rules.json` `branch_overrides: {bundleId: branchName}` field (file-backed, audit-trail-friendly), with bundle-name-prefix as a fallback heuristic. Surface as an editable "Expected branch" field on the deliverable detail panel.
+- There is **no** localStorage deliverable→branch convention today; do not add one.
 
 ### Deep-link the badge
 
-Click `DriftBadge` → open the existing file viewer at the branch HEAD if drift, or at `validatedCommit` if green. Use the new public-API `files/{commit}/{path}/content` route from 6b.
+Click `DriftBadge` → open the existing file viewer at the branch HEAD if drift, or at `validatedCommit` if green. Use the existing `/api/attachments/raw` flow (v4 `git/raw`) — the §6 Public-API migration is deferred per the note in §6.
 
 ---
 
@@ -424,6 +457,18 @@ Answers from the implementing agent, recorded here so future readers don't re-li
 2. **Findings list/create.** Per-bundle list exists (`app.py:331`). Create is not currently proxied — implementing agent will add a thin `gov_post("/findings", body)` route. Body shape confirmed in §5 (required: `bundleId`, `approvalId`, `approver`, `assignee`, `name`, `severity`; severity enum is `S0..S3`, not `High/Medium/Low`).
 3. **HW tier / environment.** Use project defaults — existing job-start path already omits unresolved ids and Domino falls back (`app.py:606-612`). No new resolution logic for Phase 3.
 4. **Feature gate.** Mirror the existing config-driven pattern (`/api/config → window.__SCE_AI_ENABLED`, `app.js:9374`) with a `drift_enabled` flag. Honor `?drift=1` as a dev override.
+
+## 10b. Phase 3 finding-binding (resolved round 3)
+
+The implementing agent flagged that the verified `CreateFindingRequest` schema requires `approvalId`, `approver`, `assignee` — but an automated drift Finding has no human approval action behind it. Resolution:
+
+- **`approvalId`:** bind to the **currently-open approval** (status `PendingSubmission` or `PendingReview`). If the bundle is fully approved, bind to the **most-recent `Approved`** approval — the stage whose validity is now in question.
+- **`approver`:** the first entry in that approval's `approvers[]` array, mapped to `{id, name}`. Drives the routing — the finding lands in the gating reviewer's queue, which is the right human attention for "this stage may be stale."
+- **`assignee`:** same person as `approver` for v1. (A later option: per-bundle override via `assignment_rules.json` if Study Leads want to triage to a different role first. Not in v1 scope.)
+- **No service-account identity.** The schema requires real Domino users on both `approver` and `assignee`. There is no "system" enum value. Routing to the gating reviewer is therefore both the simplest and most defensible choice — the human who has authority over the stage is the human who sees the drift signal.
+- **Edge case — bundle with zero approvals:** log + skip rather than 400. Not a normal SCE state; if it happens, the missing Findings will surface in the sweep logs.
+
+See the updated `pick_drift_approval` + `file_finding` helpers in §5.
 
 ## 11. Open questions back to the brief author / UCB
 
