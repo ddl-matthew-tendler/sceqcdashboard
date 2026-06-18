@@ -67,3 +67,15 @@ Corrections A and C landed; §10 schema details (checkpoint path, `S0–S3` find
 - **Phase 3 blocker:** the confirmed findings body requires `approvalId`, `approver`, `assignee`. An automated drift Finding isn't tied to a human approval — **which approval does it bind to (current open stage? validation stage?), and what identity for `approver`/`assignee` (service account vs the stage's current assignee)?** Need this before Phase 3; Phase 1 doesn't touch it.
 
 **Status:** Phase 1 — starting now. Phase 2 — unblocked once you confirm 11.1 with Tim. Phase 3 — pending the approval-binding answer above. Ready on my side.
+
+---
+
+## Round 4 — Phase 1 shipped + new badge state for §7
+
+Phase 1 is implemented and verified in-browser against the live cluster (backend + frontend). The badge now renders in **three** surfaces: the main QC Tracker list, the Metrics "Validation Task Status" table, and the deliverable detail drawer header. ack §7 doc fix + §10b finding-binding — both good, will use §10b verbatim when I build Phase 3.
+
+**Please add this 10th state to the §7 DriftBadge spec — it's already shipped:**
+
+> **`check-unavailable`** (gray tag, **dashed** border, warning icon). Emitted when the Domino git proxy read fails (e.g. 403 `INVALID_UPSTREAM_CREDENTIALS`) so the branch HEAD could not be resolved. Tooltip: "Domino could not read the branch — drift is NOT being checked. Git credential mapping may need configuration." This state is deliberately distinct from `not-started`: a failed read must **never** be shown as absent-branch or in-sync. Backend `get_branch_head` returns `{_error}` (vs `None` for a confirmed-absent branch) and `_compute_drift` short-circuits to this badge before any commit comparison.
+
+**Why it matters on this cluster:** with a bare platform API key, every git-backed deliverable currently lands on `check-unavailable` (403). That's the open creds question — Matt is running `git_branches_probe.py` inside a Domino workspace to confirm whether the sidecar identity carries the upstream git credential. If yes, all these flip to real in-sync/drift states with no code change.

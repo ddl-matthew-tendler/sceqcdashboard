@@ -1840,40 +1840,8 @@ function MetricsPage(props) {
   var metricsFilter = _mf[0];
   var setMetricsFilter = _mf[1];
 
-  // Code-vs-validation drift, keyed by bundleId. Batched into one POST; the
-  // backend handles per-(project,branch) concurrency + caching.
-  var _drift = useState({});
-  var driftMap = _drift[0];
-  var setDriftMap = _drift[1];
-  useEffect(function () {
-    if (window.__SCE_DRIFT_ENABLED === false) { setDriftMap({}); return; }
-    if (!bundles || !bundles.length) { setDriftMap({}); return; }
-    var inputs = [];
-    bundles.forEach(function (b) {
-      if (!b || !b.projectId) return;
-      var rep = (b._attachments || []).find(function (a) {
-        return a && a.type === 'Report' && a.identifier && a.identifier.branch;
-      });
-      if (!rep) return;
-      var idf = rep.identifier;
-      inputs.push({
-        bundleId: b.id, projectId: b.projectId, expectedBranch: idf.branch,
-        filename: idf.filename || null, validatedCommit: idf.commit || null,
-        validatedSource: idf.source || null,
-      });
-    });
-    if (!inputs.length) { setDriftMap({}); return; }
-    var cancelled = false;
-    apiPost('api/deliverables/drift', { deliverables: inputs })
-      .then(function (res) {
-        if (cancelled) return;
-        var m = {};
-        ((res && res.results) || []).forEach(function (r) { if (r && r.bundleId) m[r.bundleId] = r; });
-        setDriftMap(m);
-      })
-      .catch(function () { /* non-critical: badges simply won't render */ });
-    return function () { cancelled = true; };
-  }, [bundles]);
+  // Code-vs-validation drift, keyed by bundleId — fetched once at App level.
+  var driftMap = props.driftMap || {};
 
   // Use shared report config from App level
   var effectiveMapping = reportConfig.roleMapping || {};
@@ -4474,6 +4442,8 @@ function QCTrackerPage(props) {
   var _fs5 = useState([]); var filterFlags = _fs5[0]; var setFilterFlags = _fs5[1];
   var _fs8 = useState(null); var filterStage = _fs8[0]; var setFilterStage = _fs8[1];
   var _fs6 = useState([]); var selectedRowKeys = _fs6[0]; var setSelectedRowKeys = _fs6[1];
+  // Code-vs-validation drift, keyed by bundleId (fetched once at App level).
+  var driftMap = props.driftMap || {};
   // Findings & attachments drawer state
   var _fd1 = useState(false); var findingsDrawerOpen = _fd1[0]; var setFindingsDrawerOpen = _fd1[1];
   var _fd2 = useState(null); var findingsDrawerBundle = _fd2[0]; var setFindingsDrawerBundle = _fd2[1];
@@ -5016,6 +4986,8 @@ function QCTrackerPage(props) {
         return true;
       },
       render: function(_, record) { return h(StatusFlags, { bundle: record, onFindingsClick: function(b) { setFindingsDrawerBundle(b); setFindingsDrawerOpen(true); } }); } },
+    { title: h(Tooltip, { title: 'Whether the code branch behind this deliverable has moved since its validated evidence was generated.' }, h('span', { style: { cursor: 'help', borderBottom: '1px dashed #B0B0C0' } }, 'Code sync')), key: 'drift', width: 130,
+      render: function(_, record) { return h(DriftBadge, { drift: driftMap[record.id] }); } },
   ];
 
   // Positional per-stage column pairs: Stage 1 / Stage 1 Assignee, Stage 2 / Stage 2 Assignee, …
@@ -7571,6 +7543,7 @@ function DetailDrawer(props) {
       h('span', null, bundle.name),
       h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 } },
         h(Tag, { color: stateColor(bundle.state), style: { fontSize: 11, margin: 0 } }, bundle.state),
+        h(DriftBadge, { drift: props.drift }),
         h('span', { style: { fontSize: 12, color: '#8F8FA3', fontWeight: 400 } }, bundle.projectName || '')
       )
     ),
@@ -11756,6 +11729,9 @@ function ConfigurationPage(props) {
 function App() {
   var _s1 = useState('tracker'); var activePage = _s1[0]; var setActivePage = _s1[1];
   var _s2 = useState([]); var bundles = _s2[0]; var setBundles = _s2[1];
+  // Code-vs-validation drift, keyed by bundleId. Fetched once at App level and
+  // shared across the tracker list, the metrics table, and the detail drawer.
+  var _sDrift = useState({}); var driftMap = _sDrift[0]; var setDriftMap = _sDrift[1];
   var _s3 = useState(true); var loading = _s3[0]; var setLoading = _s3[1];
   // {done,total} while initial enrichment streams; null otherwise. Drives the
   // progress hint under the loading skeleton so a long first load (hundreds of
@@ -12575,6 +12551,39 @@ function App() {
     }
   }, []);
 
+  // Code-vs-validation drift for every deliverable with a branch-bearing Report
+  // attachment. One batched POST; backend handles per-(project,branch) caching.
+  // Shared via driftMap to the tracker list, metrics table, and detail drawer.
+  useEffect(function () {
+    if (window.__SCE_DRIFT_ENABLED === false) { setDriftMap({}); return; }
+    if (!bundles || !bundles.length) { setDriftMap({}); return; }
+    var inputs = [];
+    bundles.forEach(function (b) {
+      if (!b || !b.projectId) return;
+      var rep = (b._attachments || []).find(function (a) {
+        return a && a.type === 'Report' && a.identifier && a.identifier.branch;
+      });
+      if (!rep) return;
+      var idf = rep.identifier;
+      inputs.push({
+        bundleId: b.id, projectId: b.projectId, expectedBranch: idf.branch,
+        filename: idf.filename || null, validatedCommit: idf.commit || null,
+        validatedSource: idf.source || null,
+      });
+    });
+    if (!inputs.length) { setDriftMap({}); return; }
+    var cancelled = false;
+    apiPost('api/deliverables/drift', { deliverables: inputs })
+      .then(function (res) {
+        if (cancelled) return;
+        var m = {};
+        ((res && res.results) || []).forEach(function (r) { if (r && r.bundleId) m[r.bundleId] = r; });
+        setDriftMap(m);
+      })
+      .catch(function () { /* non-critical: badges simply won't render */ });
+    return function () { cancelled = true; };
+  }, [bundles]);
+
   // Handle dummy data toggle
   function handleToggleDummy(checked) {
     setUseDummy(checked);
@@ -12697,7 +12706,7 @@ function App() {
     // All other pages get scopedBundles
     switch (activePage) {
       case 'tracker':
-        return h(QCTrackerPage, { bundles: scopedBundles, loading: loading, onSelectBundle: handleSelectBundle, selectedBundle: selectedBundle, terms: terms, projectMembersCache: projectMembersCache, dataExplorerUrl: dataExplorerUrl, connected: connected, policies: livePolicies, projects: liveProjects, debugMode: debugMode, hiddenCols: appHiddenCols, setHiddenCols: setAppHiddenCols, shownStageCols: appShownStageCols, setShownStageCols: setAppShownStageCols, currentUser: currentUser, scopeCurrentUser: scopeCurrentUser, scopeProjects: scopeProjects, onRefresh: function() { if (connected) fetchLiveData(); } });
+        return h(QCTrackerPage, { bundles: scopedBundles, driftMap: driftMap, loading: loading, onSelectBundle: handleSelectBundle, selectedBundle: selectedBundle, terms: terms, projectMembersCache: projectMembersCache, dataExplorerUrl: dataExplorerUrl, connected: connected, policies: livePolicies, projects: liveProjects, debugMode: debugMode, hiddenCols: appHiddenCols, setHiddenCols: setAppHiddenCols, shownStageCols: appShownStageCols, setShownStageCols: setAppShownStageCols, currentUser: currentUser, scopeCurrentUser: scopeCurrentUser, scopeProjects: scopeProjects, onRefresh: function() { if (connected) fetchLiveData(); } });
       case 'rules':
         return h(AssignmentRulesPage, { bundles: bundles, setBundles: setBundles, assignmentRules: assignmentRules, setAssignmentRules: setAssignmentRules, terms: terms, projectMembersCache: projectMembersCache, livePolicies: livePolicies, onNavigate: setActivePage });
       case 'milestones':
@@ -12707,7 +12716,7 @@ function App() {
       case 'findings':
         return h(FindingsPage, { bundles: scopedBundles, loading: loading, terms: terms });
       case 'metrics':
-        return h(MetricsPage, { bundles: scopedBundles, terms: terms, livePolicies: livePolicies, reportConfig: reportConfig, onSelectBundle: handleSelectBundle });
+        return h(MetricsPage, { bundles: scopedBundles, driftMap: driftMap, terms: terms, livePolicies: livePolicies, reportConfig: reportConfig, onSelectBundle: handleSelectBundle });
       case 'stages':
         return h(StageAssignmentsPage, { bundles: bundles, terms: terms, projectMembersCache: projectMembersCache, onNavigate: setActivePage });
       case 'automation':
@@ -12997,6 +13006,7 @@ function App() {
       ),
       h(DetailDrawer, {
         bundle: selectedBundle,
+        drift: selectedBundle ? driftMap[selectedBundle.id] : null,
         visible: drawerOpen,
         onClose: function() { setDrawerOpen(false); setDrawerInitialView(null); setDrawerInitialStage(null); },
         terms: terms,
