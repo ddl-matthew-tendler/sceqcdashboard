@@ -1,0 +1,50 @@
+{
+  "projectId": "6a0f4ff854f7a90cadd0cb51",
+  "repoId": "6a0f4ffa54f7a90cadd0cb54",
+  "commit": "53ed2c4a0890910b53745050676e7110c3ab79ec",
+  "attempts": [
+    {
+      "body": {
+        "dfsCommitId": "",
+        "gitRepoCommits": [
+          {
+            "repoId": "6a0f4ffa54f7a90cadd0cb54",
+            "commitId": "53ed2c4a0890910b53745050676e7110c3ab79ec"
+          }
+        ]
+      },
+      "status": 400,
+      "resp": {
+        "message": "Invalid id: ",
+        "success": false
+      }
+    },
+    {
+      "body": {
+        "dfsCommitId": "0",
+        "gitRepoCommits": [
+          {
+            "repoId": "6a0f4ffa54f7a90cadd0cb54",
+            "commitId": "53ed2c4a0890910b53745050676e7110c3ab79ec"
+          }
+        ]
+      },
+      "status": 400,
+      "resp": {
+        "message": "Invalid id: 0",
+        "success": false
+      }
+    },
+    {
+      "body": {
+        "commitIds": [
+          "53ed2c4a0890910b53745050676e7110c3ab79ec"
+        ]
+      },
+      "status": 400,
+      "resp": {
+        "message": "Json validation error List((obj.dfsCommitId,List(JsonValidationError(List(error.path.missing),List()))), (obj.gitRepoCommits,List(JsonValidationError(List(error.path.missing),List()))))"
+      }
+    }
+  ]
+}

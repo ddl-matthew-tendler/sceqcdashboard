@@ -84,21 +84,33 @@ Already wired via `gov_get`. No change. Pull `attachment-overviews` (existing ro
 `FetchCheckpointForCommitsRequest` (request body for the POST — both fields marked `required` in swagger):
 ```json
 {
-  "dfsCommitId": "",
+  "dfsCommitId": "<valid-24-hex-DFS-commit-id>",
   "gitRepoCommits": [
     { "repoId": "<24-hex>", "commitId": "<sha>" }
   ]
 }
 ```
-For git-based projects pass `dfsCommitId: ""` (sentinel). If the API rejects empty string, treat as 400 and skip the checkpoint enrichment — drift still works off `attachment.identifier`. Worth a probe on first integration.
 
-`ProvenanceCheckpointDto` (response) fields we consume:
+> **⚠ FINDING — `getCheckpointForCommitIds` is inapplicable for git-only UCB projects (probed r7, `git_checkpoint_probe.json`).**
+>
+> Three body shapes tried; all returned 400:
+> - `{"dfsCommitId": "", "gitRepoCommits": [...]}` → `400 "Invalid id: "` — **empty string is rejected, not a valid sentinel.**
+> - `{"dfsCommitId": "0", "gitRepoCommits": [...]}` → `400 "Invalid id: 0"` — no numeric placeholder works either.
+> - `{"commitIds": ["<sha>"]}` → `400` JSON validation error: both `dfsCommitId` and `gitRepoCommits` are strictly required — **this is the shape `app.py` currently posts; it is wrong and will always 400.**
+>
+> **Root cause:** `dfsCommitId` must be a real, valid Domino DFS commit ID. UCB's git-only projects have no DFS commits, so there is no valid value to pass. This endpoint is a DFS+Git hybrid facility that does not apply to pure-git projects.
+>
+> **Consequence for Phase 3:** `get_checkpoint_for_commit` will always return `None` for UCB deliverables. Drift computation is unaffected (checkpoint is optional enrichment). The tooltip execution-name/execution-start enrichment needs an alternative path.
+>
+> **Alternative path for tooltip enrichment:** `GET /v4/mlflow/execution/{executionId}/provenanceCheckpoints` — viable only if `executionId` is present in the attachment `identifier`. Check whether `attachment.identifier.executionId` is populated on Report attachments produced by Domino Jobs; if so, use this GET endpoint instead. If not, omit execution enrichment from the tooltip (drift badge still fully functional).
+>
+> **Fix needed in `app.py`:** `get_checkpoint_for_commit` currently posts `{"commitIds": [id]}` (wrong shape). Update to post the correct `{"dfsCommitId": ..., "gitRepoCommits": [...]}` shape — though for git-only projects it will still return 400 and the helper will correctly return `None`. The fix matters for mixed DFS+Git projects on other clusters.
+
+`ProvenanceCheckpointDto` (response) fields we consume — **unverified, from swagger schema only; the endpoint does not return 200 for git-only projects:**
 - `id`, `executionId`, `executionName`, `executionStart`, `commitMessage`
 - `gitRepoCommits[]` — each item is a `ProvenanceGitRepoDto`: **`{id, name, commitId, branchName, isMainRepo}`** (note: `id`/`branchName`, not `repositoryId`/`branch` — different shape from the request side).
 - `mainGitBranch`
 - (ignore: `dfsCommit`, `dfsBranch`, `importedProjects[]` for our scope)
-
-> **⚠ UNRESOLVED — Phase 3 gate.** The field names above are derived from the swagger schema (`ProvenanceCheckpointDto`) but have **not yet been verified against a live call** on this cluster. The probe script was run inline and `getCheckpointForCommitIds` output was not captured in `git_probe_results.json`. Do not treat the field names above as authoritative until verified. To unblock Phase 3: run `POST /v4/workspace/project/6a209fea16b2d73bc1502007/getCheckpointForCommitIds` with repo `6a209fed16b2d73bc150200a` and a known commit from `dev/t_14_1_1`, capture the full response body, and update this block.
 
 ### Public API — migrate to these
 | Path | Replaces |
@@ -223,13 +235,19 @@ def get_checkpoint_for_commit(project_id: str, repo_id: str, commit_id: str) -> 
 
     Path is /v4/workspace/project/{projectId}/getCheckpointForCommitIds
     (NOT /v4/projects/{id}/... — different namespace).
-    Both dfsCommitId and gitRepoCommits are schema-required; pass "" for the
-    DFS side since UCB is git-only.
+    Both dfsCommitId and gitRepoCommits are strictly required by the API.
 
-    ⚠ UNRESOLVED (Phase 3 gate): response field names are from the swagger schema only;
-    not yet verified against a live call on sce-coalition. See §2 unresolved note.
-    Treat ProvenanceCheckpointDto field names as provisional until git_probe_results.json
-    is captured and this block is updated.
+    ⚠ FINDING (probe r7, git_checkpoint_probe.json): this endpoint is inapplicable
+    for git-only UCB projects. dfsCommitId must be a real DFS commit ID — empty
+    string and "0" are both rejected with 400 "Invalid id". Git-only projects have
+    no DFS commits, so this will always return None for UCB deliverables.
+
+    NOTE: the current app.py body {"commitIds": [id]} is WRONG — the API requires
+    both dfsCommitId and gitRepoCommits. Fix the body even though it still returns
+    None for git-only projects (correctness matters for mixed DFS+Git clusters).
+
+    For tooltip execution enrichment, use GET /v4/mlflow/execution/{executionId}/
+    provenanceCheckpoints if attachment.identifier.executionId is present instead.
     """
     body = {"dfsCommitId": "", "gitRepoCommits": [{"repoId": repo_id, "commitId": commit_id}]}
     try:
