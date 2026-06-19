@@ -1807,6 +1807,12 @@ function DriftBadge(props) {
     lines.push('Git credential mapping may need configuration.');
     if (drift.badge_reason) lines.push('(' + drift.badge_reason + ')');
   } else {
+    if (bs.branchName) {
+      var srcNote = bs.branchSource === 'override' ? ' (manual override)'
+        : bs.branchSource === 'candidate-match' ? ' (inferred — no evidence yet)'
+        : '';
+      lines.push('Branch: ' + bs.branchName + srcNote);
+    }
     if (va.commit) lines.push('Validated @ ' + (va.branch ? va.branch + '@' : '') + sha(va.commit));
     if (bs.headCommit) lines.push('HEAD @ ' + sha(bs.headCommit));
     if (typeof bs.aheadOfValidated === 'number') lines.push(bs.aheadOfValidated + ' commit(s) ahead of validation');
@@ -12563,10 +12569,14 @@ function App() {
       var rep = (b._attachments || []).find(function (a) {
         return a && a.type === 'Report' && a.identifier && a.identifier.branch;
       });
-      if (!rep) return;
-      var idf = rep.identifier;
+      var idf = (rep && rep.identifier) || {};
+      // Always include name + policyKey so the backend can resolve a branch via
+      // override / candidate-matching when there's no evidence branch (Phase 2).
+      // Evidence fields are sent when a Report attachment carries them.
       inputs.push({
-        bundleId: b.id, projectId: b.projectId, expectedBranch: idf.branch,
+        bundleId: b.id, projectId: b.projectId,
+        name: b.name || null, policyKey: b.policyName || null,
+        expectedBranch: idf.branch || null,
         filename: idf.filename || null, validatedCommit: idf.commit || null,
         validatedSource: idf.source || null,
       });

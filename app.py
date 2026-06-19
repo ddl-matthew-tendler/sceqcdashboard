@@ -394,6 +394,30 @@ def get_branch_head(project_id, repo_id, branch):
 
 
 @_ttl_cache(60)
+def list_branch_names(project_id, repo_id):
+    """All branch names for a repo. Returns a list of names, or {'_error': msg}
+    on a failed read. Used for Phase-2 candidate-matching, which only ever
+    resolves to a branch that actually exists."""
+    try:
+        res = v4_get(
+            f"/projects/{project_id}/gitRepositories/{repo_id}/git/branches",
+            params={"count": 1000},
+        )
+    except HTTPException as e:
+        return {"_error": f"git branches read failed ({e.status_code})"}
+    branches = (res if isinstance(res, list)
+                else (res or {}).get("branches")
+                     or (res or {}).get("data", {}).get("items")
+                     or [])
+    names = []
+    for b in (branches or []):
+        n = (b.get("name") or b.get("branchName")) if isinstance(b, dict) else b
+        if n:
+            names.append(n)
+    return names
+
+
+@_ttl_cache(60)
 def list_commits(project_id, repo_id, branch, count=200):
     """HEAD-first list of commit objects for a branch; [] on error/absent."""
     if not branch:
@@ -446,7 +470,117 @@ def get_checkpoint_for_commit(project_id, commit_id):
         return None
 
 
-def _compute_drift(d):
+# ── Phase 2: expected-branch resolution (configurable candidate-matching) ──
+#
+# Precedence (binding, per STATUS 11.1):
+#   evidence-attachment branch  → explicit override → candidate-match → none.
+# We NEVER guess a branch that doesn't exist: candidates are matched against the
+# repo's ACTUAL branch list, so a match is always a real branch.
+_DEFAULT_BRANCH_CONFIG = {
+    "enabled": True,
+    # Tokens expanded per deliverable; see _expand_branch_candidates.
+    "templates": ["{name}", "{nameSlug}", "{nameFirstToken}", "{policyKey}"],
+    # Cartesian-multiplied with each template.
+    "prefixes": ["", "dev/", "feature/"],
+}
+
+
+def _branch_settings():
+    """(branch_config, branch_overrides) merged over defaults. Reads the same
+    assignment_rules.json store the Configuration page persists to."""
+    try:
+        store = _read_assignment_store()
+    except (OSError, json.JSONDecodeError):
+        store = {}
+    cfg = dict(_DEFAULT_BRANCH_CONFIG)
+    user_cfg = store.get("branch_config")
+    if isinstance(user_cfg, dict):
+        cfg.update({k: v for k, v in user_cfg.items() if v is not None})
+    overrides = store.get("branch_overrides")
+    return cfg, (overrides if isinstance(overrides, dict) else {})
+
+
+def _slug(s, sep="_"):
+    """Lowercase, collapse any run of non-alphanumerics to `sep`, trim."""
+    out, prev_sep = [], False
+    for ch in str(s).lower():
+        if ch.isalnum():
+            out.append(ch); prev_sep = False
+        elif not prev_sep:
+            out.append(sep); prev_sep = True
+    return "".join(out).strip(sep)
+
+
+def _expand_branch_candidates(d, cfg):
+    """Generate candidate branch names from a deliverable using configured
+    templates × prefixes. Unknown tokens drop that template (no literal
+    '{name}' leaks into a candidate)."""
+    name = (d.get("name") or d.get("bundleName") or "").strip()
+    policy_key = (d.get("policyKey") or d.get("policyName") or "").strip()
+    first_token = ""
+    if name:
+        # Split on whitespace and common separators for the first meaningful token.
+        for tok in name.replace("-", " ").replace("_", " ").replace("/", " ").split():
+            first_token = tok; break
+    tokens = {
+        "{name}": name,
+        "{nameSlug}": _slug(name) if name else "",
+        "{nameFirstToken}": first_token,
+        "{policyKey}": policy_key,
+        "{policyKeySlug}": _slug(policy_key) if policy_key else "",
+    }
+    candidates = []
+    seen = set()
+    for tmpl in (cfg.get("templates") or []):
+        body = tmpl
+        skip = False
+        for tok, val in tokens.items():
+            if tok in body:
+                if not val:
+                    skip = True; break
+                body = body.replace(tok, val)
+        if skip or "{" in body:  # unfilled token → not a usable candidate
+            continue
+        for pre in (cfg.get("prefixes") or [""]):
+            cand = f"{pre}{body}"
+            if cand and cand not in seen:
+                seen.add(cand); candidates.append(cand)
+    return candidates
+
+
+def _match_candidate_branch(candidates, real_names):
+    """First candidate that matches a real branch (case-insensitive) wins;
+    returns the REAL branch name (preserving its actual casing)."""
+    lower_map = {n.lower(): n for n in real_names}
+    for cand in candidates:
+        hit = lower_map.get(cand.lower())
+        if hit:
+            return hit
+    return None
+
+
+def _resolve_expected_branch(d, project_id, repo_id, settings):
+    """Returns (branch_name, source) where source ∈
+    {'evidence','override','candidate-match', None}. Evidence wins and is
+    handled by the caller (d['expectedBranch']); this fills in the rest."""
+    cfg, overrides = settings
+    bundle_id = d.get("bundleId")
+    ov = overrides.get(bundle_id) if bundle_id else None
+    if ov:
+        return ov, "override"
+    if not cfg.get("enabled", True):
+        return None, None
+    candidates = _expand_branch_candidates(d, cfg)
+    if not candidates:
+        return None, None
+    names = list_branch_names(project_id, repo_id)
+    if isinstance(names, dict):  # {_error}
+        return None, None
+    match = _match_candidate_branch(candidates, names)
+    return (match, "candidate-match") if match else (None, None)
+
+
+def _compute_drift(d, settings=None):
     """Compute the drift badge for one deliverable. Sequential within an item;
     the route fans these out across items. Badge vocabulary (frontend DriftBadge):
     no-validated-commit | not-started | in-development | in-sync |
@@ -454,6 +588,7 @@ def _compute_drift(d):
     bundle_id = d.get("bundleId")
     project_id = d.get("projectId")
     branch = d.get("expectedBranch") or None
+    branch_source = "evidence" if branch else None
     filename = d.get("filename") or None
     validated_commit = d.get("validatedCommit") or None
 
@@ -470,12 +605,22 @@ def _compute_drift(d):
     repo = next((r for r in repos if r.get("isMain")), repos[0])
     repo_id = repo["id"]
 
+    # Phase 2: when there's no evidence-derived branch, fall back to an explicit
+    # per-deliverable override, then candidate-matching against the real branch
+    # list. Evidence always wins and is never overridden.
+    if not branch:
+        if settings is None:
+            settings = _branch_settings()
+        resolved, branch_source = _resolve_expected_branch(d, project_id, repo_id, settings)
+        branch = resolved or None
+
     head = get_branch_head(project_id, repo_id, branch)
     git_error = head.get("_error") if isinstance(head, dict) and head.get("_error") else None
     found = isinstance(head, dict) and "branchName" in head
     head_commit = head.get("commitId") if found else None
     branch_exists = found
-    branch_state = {"branchName": branch, "headCommit": head_commit, "exists": branch_exists,
+    branch_state = {"branchName": branch, "branchSource": branch_source,
+                    "headCommit": head_commit, "exists": branch_exists,
                     "aheadOfValidated": None, "mergedToDefault": None,
                     "fileTouchedSinceValidated": None}
     res["branch_state"] = branch_state
@@ -1524,10 +1669,11 @@ def deliverables_drift(body: dict):
     if not isinstance(items, list):
         raise HTTPException(status_code=400, detail="Body must include a 'deliverables' array")
     results = [None] * len(items)
+    settings = _branch_settings()  # read store once; shared across all items
 
     def work(i):
         try:
-            return i, _compute_drift(items[i] or {})
+            return i, _compute_drift(items[i] or {}, settings=settings)
         except Exception as e:
             logger.warning(f"[git-linkage] drift compute failed idx {i}: {e}")
             return i, {"bundleId": (items[i] or {}).get("bundleId"), "validated_at": None,
