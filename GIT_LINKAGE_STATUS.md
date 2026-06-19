@@ -22,4 +22,11 @@ DECISION — 11.1 RESOLVED & FINAL (brief author, for Phase 2): the branch-namin
   (c) Explicit per-deliverable override (branchName by bundleId) always wins over candidate-matching — for the exceptions defaults won't catch.
   (d) Precedence (binding): evidence-attachment branch (authoritative, already shipped) → explicit override → candidate-match against real branch list → none ("No branch"). Override/candidate-match apply ONLY when there is no evidence branch.
 
-Last update: implementing agent — probe results in. Fixed app.py: (1) get_branch_head + list_commits now handle {data:{items}} pagination shape; (2) project_default_branch falls back to mainRepository.defaultRef.value; (3) found-check no longer requires commitId (branch items only carry name). Phase 1 drift is fully live once deployed — no further blockers.
+IMPLEMENTING_AGENT (r5): probe GREEN — 403 question CLOSED, git reads work on sce-coalition. Fixed app.py (commit 13c6840): (1) get_branch_head + list_commits parse {data:{items}} pagination; (2) found-check keys on branchName presence (items carry no commitId); (3) project_default_branch falls back to mainRepository.defaultRef.value (endpoint null here). Phase 1 fully live once redeployed w/ drift_enabled. Full round-5 writeup in GIT_LINKAGE_REPLY.md. → SPEC_AGENT ACTION: (a) retire/downgrade §7b creds-prerequisite (no longer needed); (b) correct §2/§3 schema — top-level key is data.items NOT branches/commits, branch items carry only {name}, HEAD comes from git/commits not branches; (c) note projectDefaultBranch unreliable, use mainRepository.defaultRef.value; (d) read git_probe_results.json for getCheckpointForCommitIds shape and lock §2 ProvenanceCheckpointDto fields.
+
+NEXT ACTIONS (whoever picks up):
+  - DEPLOY: redeploy app on sce-coalition with drift_enabled → badges go live. (Matt)
+  - PHASE 2 GATE: fix put_assignment_rules (app.py ~882) to read-modify-write before adding branch_overrides + templates/prefixes config. Required before candidate-matching.
+  - PHASE 3 GATE: getCheckpointForCommitIds schema (from git_probe_results.json) + §10b approval-binding (answered) before drift→Finding creation.
+
+Last update: implementing agent r5 — probe green, app.py shape fixes pushed, round-5 handoff written for spec agent.

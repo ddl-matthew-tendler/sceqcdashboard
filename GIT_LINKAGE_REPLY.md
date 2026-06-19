@@ -79,3 +79,22 @@ Phase 1 is implemented and verified in-browser against the live cluster (backend
 > **`check-unavailable`** (gray tag, **dashed** border, warning icon). Emitted when the Domino git proxy read fails (e.g. 403 `INVALID_UPSTREAM_CREDENTIALS`) so the branch HEAD could not be resolved. Tooltip: "Domino could not read the branch — drift is NOT being checked. Git credential mapping may need configuration." This state is deliberately distinct from `not-started`: a failed read must **never** be shown as absent-branch or in-sync. Backend `get_branch_head` returns `{_error}` (vs `None` for a confirmed-absent branch) and `_compute_drift` short-circuits to this badge before any commit comparison.
 
 **Why it matters on this cluster:** with a bare platform API key, every git-backed deliverable currently lands on `check-unavailable` (403). That's the open creds question — Matt is running `git_branches_probe.py` inside a Domino workspace to confirm whether the sidecar identity carries the upstream git credential. If yes, all these flip to real in-sync/drift states with no code change.
+
+---
+
+## Round 5 — probe came back GREEN, the 403 question is closed
+
+**Headline: git reads work inside Domino. The sidecar identity DOES carry the upstream git credential.** `GET …/git/branches` returned **200** with real branch data (`dev/t_14_1_1`, `main`) when run from a workspace on **sce-coalition** (the cluster the app actually deploys to). The local 403 was against a *different* deployment and is no longer relevant. **No credential-mapping prerequisite for UCB.** You can retire the §7b "deployment-prerequisite / credentialMapping" branch of the spec — or downgrade it to a footnote ("creds confirmed present on sce-coalition; document the requirement only if a future cluster lacks them").
+
+**Three real API-shape findings the probe surfaced (all already fixed in app.py, commit `13c6840`):**
+
+1. **Branch/commit responses are paginated** — shape is `{data:{items:[{name}, …]}}`, **not** the `{branches:[…]}` / `{commits:[…]}` the spec assumed. `get_branch_head` and `list_commits` now read `data.items` (with the old keys kept as fallbacks). **Please correct any §2/§3 schema text that shows `branches`/`commits` as the top-level key.**
+2. **Branch-list items carry only `{name}` — no `commitId`/`sha` per item.** So "branch exists" is now keyed on `name` presence, not a commit id. Consequence: the branch HEAD commit is **not** available from the branches call; HEAD is derived from the first item of `git/commits` instead. If §3 implies HEAD comes from the branches listing, fix it.
+3. **`projectDefaultBranch` returns `null` body (200)** on this cluster. Fallback added: read `mainRepository.defaultRef.value` from the project detail. **Please note in §3/§8 that `projectDefaultBranch` is unreliable and `mainRepository.defaultRef.value` is the authoritative default-branch source here.**
+
+**Still pending from the probe — Phase 3 only, not blocking Phase 1:** the probe ran `getCheckpointForCommitIds` but I haven't seen its body/verdict in `git_probe_results.json` yet. When you next pull, please read that file and lock the verified `ProvenanceCheckpointDto` field names into §2 so Phase 3's provenance tooltip is built against real shapes (correction A from round 1).
+
+**State of play now:**
+- **Phase 1 is DONE and live-capable.** Once the app is redeployed on sce-coalition with `drift_enabled`, every badge flips from `check-unavailable` to real in-sync/drift. No further code blockers.
+- **Phase 2** (configurable candidate-matching) is unblocked design-wise (11.1 is final/configurable). The one MUST-FIX before building it: `put_assignment_rules` (app.py ~882) drops unknown top-level keys — extend it to read-modify-write so `branch_overrides` + the templates/prefixes config round-trip. You already flagged this in r5; just confirming it's the gating item.
+- **Phase 3** waits on the `getCheckpointForCommitIds` schema from `git_probe_results.json` + the §10b approval-binding answer (already given, will use verbatim).
