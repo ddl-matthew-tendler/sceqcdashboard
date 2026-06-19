@@ -380,7 +380,11 @@ def get_branch_head(project_id, repo_id, branch):
         )
     except HTTPException as e:
         return {"_error": f"git branches read failed ({e.status_code})"}
-    branches = res if isinstance(res, list) else (res or {}).get("branches", [])
+    # Response shape varies: flat list, {branches:[...]}, or paginated {data:{items:[...]}}.
+    branches = (res if isinstance(res, list)
+                else (res or {}).get("branches")
+                     or (res or {}).get("data", {}).get("items")
+                     or [])
     for b in (branches or []):
         name = b.get("name") or b.get("branchName")
         if name == branch:
@@ -401,7 +405,10 @@ def list_commits(project_id, repo_id, branch, count=200):
         )
     except HTTPException:
         return []
-    items = res if isinstance(res, list) else (res or {}).get("commits", [])
+    items = (res if isinstance(res, list)
+             else (res or {}).get("commits")
+                  or (res or {}).get("data", {}).get("items")
+                  or [])
     return items or []
 
 
@@ -410,10 +417,18 @@ def project_default_branch(project_id):
     try:
         ref = v4_get(f"/projects/{project_id}/projectDefaultBranch")
     except HTTPException:
-        return None
+        ref = None
     if isinstance(ref, str):
         return ref
-    return (ref or {}).get("value") or (ref or {}).get("name") or (ref or {}).get("branch")
+    val = (ref or {}).get("value") or (ref or {}).get("name") or (ref or {}).get("branch")
+    if val:
+        return val
+    # Fallback: mainRepository.defaultRef.value (endpoint returns null on some clusters)
+    try:
+        proj = v4_get(f"/projects/{project_id}")
+        return (proj.get("mainRepository") or {}).get("defaultRef", {}).get("value")
+    except HTTPException:
+        return None
 
 
 @_ttl_cache(60)
@@ -457,7 +472,7 @@ def _compute_drift(d):
 
     head = get_branch_head(project_id, repo_id, branch)
     git_error = head.get("_error") if isinstance(head, dict) and head.get("_error") else None
-    found = isinstance(head, dict) and head.get("commitId") is not None
+    found = isinstance(head, dict) and "branchName" in head
     head_commit = head.get("commitId") if found else None
     branch_exists = found
     branch_state = {"branchName": branch, "headCommit": head_commit, "exists": branch_exists,
