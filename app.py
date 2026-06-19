@@ -458,13 +458,29 @@ def project_default_branch(project_id):
 @_ttl_cache(60)
 def get_checkpoint_for_commit(project_id, commit_id):
     """ProvenanceCheckpointDto or None. Companion enrichment only — never gates a
-    badge. Verified path: POST /v4/workspace/project/{projectId}/getCheckpointForCommitIds."""
+    badge, and nothing in the UI calls it today.
+
+    CLOSURE (verified by sce-coalition probe, Jun 2026): this enrichment path is
+    DEAD for git-only projects. getCheckpointForCommitIds strictly requires a real
+    DFS (Domino File System) commit id — no sentinel ("" / "0") is accepted — and
+    git-backed projects have no DFS commit, so the call returns nothing useful for
+    UCB. The companion MLflow path is dead too: attachment identifiers carry only
+    {branch, commit, filename, source}, no executionId. Kept here as a correctly-
+    formed stub for DFS-based projects; harmless (returns None) for git-only ones.
+
+    Verified path + body shape: POST /v4/workspace/project/{projectId}/getCheckpointForCommitIds
+    with BOTH dfsCommitId and gitRepoCommits[] required."""
     if not commit_id:
         return None
+    repos = resolve_repos(project_id)
+    if not repos:
+        return None
+    repo = next((r for r in repos if r.get("isMain")), repos[0])
     try:
         return _v4_post(
             f"/workspace/project/{project_id}/getCheckpointForCommitIds",
-            json_body={"commitIds": [commit_id]},
+            json_body={"dfsCommitId": "",
+                       "gitRepoCommits": [{"repoId": repo["id"], "commitId": commit_id}]},
         )
     except HTTPException:
         return None
@@ -1655,8 +1671,9 @@ def list_project_branches(project_id: str, names: str = ""):
 
 @app.get("/api/projects/{project_id}/provenance")
 def get_project_provenance(project_id: str, commit: str):
-    """Provenance Checkpoint for a commit — enriches the drift tooltip with the
-    execution that produced the evidence. Returns {} if none."""
+    """Provenance Checkpoint for a commit. NOTE: returns {} for git-only projects
+    (the enrichment path is dead there — see get_checkpoint_for_commit closure).
+    Retained for DFS-based projects; not called by the current UI."""
     return get_checkpoint_for_commit(project_id, commit) or {}
 
 
