@@ -54,9 +54,23 @@ Already wired via `gov_get`. No change. Pull `attachment-overviews` (existing ro
 | Path | Use |
 |---|---|
 | `GET /v4/projects/{projectId}` | resolve `mainRepository`, `importedGitRepositories[]`, `projectType` guard |
-| `GET /v4/projects/{projectId}/gitRepositories/{repoId}/git/branches?searchPattern=…&count=…` | branch-existence + HEAD |
-| `GET /v4/projects/{projectId}/gitRepositories/{repoId}/git/commits?branch=…&count=…` | commit history for ancestry/drift |
-| `GET /v4/projects/{projectId}/projectDefaultBranch` | default branch (for "merged ahead" detection) |
+| `GET /v4/projects/{projectId}/gitRepositories/{repoId}/git/branches?searchPattern=…&count=…` | branch-existence only (see shape note below) |
+| `GET /v4/projects/{projectId}/gitRepositories/{repoId}/git/commits?branch=…&count=…` | commit history + HEAD commit (see shape note below) |
+| `GET /v4/projects/{projectId}/projectDefaultBranch` | default branch — **unreliable on sce-coalition, returns null; use `mainRepository.defaultRef.value` instead** |
+
+> **Verified API shapes — sce-coalition probe (round 5, commit `13c6840`). Correct all prior spec text that references the old shapes.**
+>
+> **`git/branches` response** is paginated: `{"data": {"items": [{"name": "<branch>"}, …]}}`.
+> - Top-level key is `data.items`, **not** `branches` or a flat array.
+> - Each item carries only `{name}`. **There is no `commitId` or `sha` per branch item.**
+> - Consequence: branch existence is keyed on `name` presence; the HEAD commit is **not** available from this call.
+>
+> **`git/commits` response** is also paginated: `{"data": {"items": [{id, message, …}, …]}}`.
+> - Top-level key is `data.items`, **not** `commits` or a flat array.
+> - HEAD commit = `items[0]`.
+>
+> **`projectDefaultBranch`** returns HTTP 200 with a `null` body on this cluster. Do not rely on it.
+> Authoritative default branch: `mainRepository.defaultRef.value` from `GET /v4/projects/{projectId}`.
 
 ### v4 — new (this is the missed primitive)
 
@@ -83,6 +97,8 @@ For git-based projects pass `dfsCommitId: ""` (sentinel). If the API rejects emp
 - `gitRepoCommits[]` — each item is a `ProvenanceGitRepoDto`: **`{id, name, commitId, branchName, isMainRepo}`** (note: `id`/`branchName`, not `repositoryId`/`branch` — different shape from the request side).
 - `mainGitBranch`
 - (ignore: `dfsCommit`, `dfsBranch`, `importedProjects[]` for our scope)
+
+> **⚠ UNRESOLVED — Phase 3 gate.** The field names above are derived from the swagger schema (`ProvenanceCheckpointDto`) but have **not yet been verified against a live call** on this cluster. The probe script was run inline and `getCheckpointForCommitIds` output was not captured in `git_probe_results.json`. Do not treat the field names above as authoritative until verified. To unblock Phase 3: run `POST /v4/workspace/project/6a209fea16b2d73bc1502007/getCheckpointForCommitIds` with repo `6a209fed16b2d73bc150200a` and a known commit from `dev/t_14_1_1`, capture the full response body, and update this block.
 
 ### Public API — migrate to these
 | Path | Replaces |
@@ -145,29 +161,58 @@ def resolve_repos(project_id: str) -> list[dict]:
 # --- Branch / commit lookups ---
 
 def get_branch_head(project_id: str, repo_id: str, branch: str) -> dict | None:
-    """Returns {branchName, commitId} or None if branch absent."""
+    """Returns {branchName, commitId} or None if branch absent.
+
+    VERIFIED SHAPE (sce-coalition probe, r5):
+      - branches response is paginated: {data: {items: [{name}]}}
+      - items carry only {name} — no commitId/sha per item
+      - HEAD commitId comes from git/commits[0], NOT from the branches listing
+    """
     try:
-        branches = v4_get(
+        raw = v4_get(
             f"/projects/{project_id}/gitRepositories/{repo_id}/git/branches",
             params={"searchPattern": branch, "count": 50},
         )
     except HTTPException:
         return None
-    for b in (branches or []):
-        if b.get("name") == branch or b.get("branchName") == branch:
-            return {"branchName": branch, "commitId": b.get("commitId") or b.get("sha")}
-    return None
+    # Unwrap pagination; keep flat-list as fallback for older deployments
+    items = (raw or {}).get("data", {}).get("items") if isinstance(raw, dict) else (raw or [])
+    if not any(b.get("name") == branch for b in items):
+        return None
+    # Branch items carry no commitId — fetch HEAD from commits[0]
+    commits = list_commits(project_id, repo_id, branch, count=1)
+    head = commits[0] if commits else {}
+    commit_id = head.get("id") or head.get("sha") or head.get("commitId")
+    return {"branchName": branch, "commitId": commit_id}
 
 def list_commits(project_id: str, repo_id: str, branch: str, count: int = 200) -> list[dict]:
-    return v4_get(
+    """VERIFIED SHAPE (sce-coalition probe, r5):
+      - response is paginated: {data: {items: [{id, message, …}]}}
+      - top-level key is data.items, NOT commits
+    """
+    raw = v4_get(
         f"/projects/{project_id}/gitRepositories/{repo_id}/git/commits",
         params={"branch": branch, "count": count},
-    ) or []
+    ) or {}
+    if isinstance(raw, dict):
+        return raw.get("data", {}).get("items") or raw.get("commits") or []
+    return raw  # fallback if somehow a bare list
 
 def project_default_branch(project_id: str) -> str | None:
+    """VERIFIED (sce-coalition probe, r5): /projectDefaultBranch returns null body (200)
+    on this cluster. Authoritative fallback: mainRepository.defaultRef.value.
+    """
     try:
         ref = v4_get(f"/projects/{project_id}/projectDefaultBranch")
-        return (ref or {}).get("value") or (ref or {}).get("name")
+        val = (ref or {}).get("value") or (ref or {}).get("name")
+        if val:
+            return val
+    except HTTPException:
+        pass
+    # Authoritative fallback
+    try:
+        proj = v4_get(f"/projects/{project_id}")
+        return ((proj.get("mainRepository") or {}).get("defaultRef") or {}).get("value")
     except HTTPException:
         return None
 
@@ -180,6 +225,11 @@ def get_checkpoint_for_commit(project_id: str, repo_id: str, commit_id: str) -> 
     (NOT /v4/projects/{id}/... — different namespace).
     Both dfsCommitId and gitRepoCommits are schema-required; pass "" for the
     DFS side since UCB is git-only.
+
+    ⚠ UNRESOLVED (Phase 3 gate): response field names are from the swagger schema only;
+    not yet verified against a live call on sce-coalition. See §2 unresolved note.
+    Treat ProvenanceCheckpointDto field names as provisional until git_probe_results.json
+    is captured and this block is updated.
     """
     body = {"dfsCommitId": "", "gitRepoCommits": [{"repoId": repo_id, "commitId": commit_id}]}
     try:
@@ -276,7 +326,9 @@ Drift computation per deliverable (sequential within one item, parallel across i
 **Notes / sharp edges:**
 - True merge-base/is-ancestor isn't directly exposed; the "appears in default branch's commit list" approximation is fine for the dashboard but bound the page size and document the limitation in a code comment.
 - If `validatedCommit` is null (no Validated evidence yet), short-circuit to `branch_state` only.
-- `searchPattern` on `/git/branches` is a substring match in some Domino versions and a glob in others — match the result by exact `branchName` server-side rather than trusting the filter.
+- `searchPattern` on `/git/branches` is a substring match in some Domino versions and a glob in others — match the result by exact `name` server-side rather than trusting the filter.
+- **`list_commits` item shape**: each item's commit id is in the `id` field (not `commitId` or `sha`). For drift ancestry (`index_of(validatedCommit, commits)`), compare against `item.get("id") or item.get("sha") or item.get("commitId")` to stay shape-agnostic until verified.
+- **`project_default_branch`** should use the `project_default_branch()` helper (not a direct v4 call) — the helper includes the `mainRepository.defaultRef.value` fallback required on this cluster.
 
 ---
 
@@ -427,19 +479,15 @@ Renders one of the seven states from Section 1 with AntD `Tag` colors:
 - `no-validated-commit` → default
 - `check-unavailable` → dashed warning tag; tooltip surfaces the underlying error (e.g. "Invalid Upstream Credentials" — see §7b). Never silently degrades to green.
 
-### §7b. Git read credentials — known 403 on `git/branches` and `git/commits`
+### §7b. Git read credentials — CLOSED (probe confirmed, round 5)
 
-**Confirmed in round 4** by the implementing agent: with a bare platform API key, `gitRepositories/{repoId}/git/branches` and `git/commits` return **`403 "Invalid Upstream Credentials"`** on this cluster. This contradicts my round-1 brief answer to Q7 ("v4 ref endpoints serve from Domino-cached refs — no provider creds needed for branches/commits"); on UCB's deployment they do reach upstream and require a mapped credential.
+**RESOLVED.** The sidecar identity on sce-coalition **does** carry the upstream git credential. `GET …/git/branches` returned HTTP 200 with real branch data (`dev/t_14_1_1`, `main`) when run from a workspace inside Domino on sce-coalition.
 
-**What this means for Phase 1:**
-- The frontend ships with the `check-unavailable` badge state. Live drift lights up the moment the credential path is sorted; no frontend rework needed.
-- A probe script `git_branches_probe.py` is committed to the repo. Matt should run it inside a Domino workspace (where the sidecar identity carries his GitHub credentials) to confirm whether the same call succeeds. This disambiguates "sidecar identity doesn't inherit git creds outside Domino" vs "this cluster never serves cached refs."
+The 403 `"Invalid Upstream Credentials"` observed in round 4 came from a *different* deployment (local / non-sce-coalition) where the bare platform API key has no upstream git mapping. It is not a blocker for UCB.
 
-**Outcomes and follow-ups (one of):**
-- Probe succeeds inside Domino → sidecar-identity issue. **Action:** document as a deployment prerequisite ("the app must run inside Domino as a user whose project has mapped GitHub credentials"). No tracker code change.
-- Probe still 403s inside Domino → cluster config / per-repo credential mapping is mandatory. **Action:** UCB sets up a service-account credential mapped at the project repository level (`/v4/projects/{projectId}/repository/{repoId}/credentialMapping`). No tracker code change.
+**No deployment prerequisite for sce-coalition.** Once the app is redeployed with `drift_enabled`, every badge flips from `check-unavailable` to real in-sync/drift states with no credential-mapping configuration.
 
-**Do not engineer per-user credential propagation into the tracker.** That's a multi-day rabbit hole and the wrong abstraction for a read-mostly dashboard. Document the requirement, let UCB configure the deployment.
+> **Footnote — future clusters.** If the tracker is ever deployed on a cluster where the sidecar identity does *not* carry upstream git credentials, badges will land on `check-unavailable`. The fix is to map a service-account credential at the project repository level (`/v4/projects/{projectId}/repository/{repoId}/credentialMapping`) — not per-user propagation in the tracker code. The `check-unavailable` badge is the correct GxP-safe failure mode; no code change is needed, only UCB configuration.
 
 Tooltip on hover: "Validated @ `<branch>@<sha[:8]>` · HEAD @ `<sha[:8]>` · `N` commits ahead". If `checkpoint` is present, append "Generated by execution `<executionName>` at `<executionStart>`".
 
