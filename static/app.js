@@ -11495,6 +11495,175 @@ function UtilitiesPage(props) {
   );
 }
 
+// ── Code Sync: Expected-Branch Rules editor ──────────────────────
+// Edits the Phase-2 candidate-matching config persisted under
+// branch_config + branch_overrides in assignment_rules.json. Saves via the
+// merge-safe PUT /api/assignment-rules (won't clobber assignment rules).
+var BRANCH_CFG_DEFAULTS = {
+  enabled: true,
+  templates: ['{name}', '{nameSlug}', '{nameFirstToken}', '{policyKey}'],
+  prefixes: ['', 'dev/', 'feature/'],
+};
+var BRANCH_TOKEN_LEGEND = [
+  ['{name}', 'deliverable name, verbatim'],
+  ['{nameSlug}', 'name lowercased, non-alphanumerics → _'],
+  ['{nameFirstToken}', 'first token of the name'],
+  ['{policyKey}', 'policy name, verbatim'],
+  ['{policyKeySlug}', 'policy name slugified'],
+];
+
+function BranchConfigSection(props) {
+  var bundles = props.bundles || [];
+  var _en = useState(true); var enabled = _en[0]; var setEnabled = _en[1];
+  var _tpl = useState(BRANCH_CFG_DEFAULTS.templates.join('\n')); var tplText = _tpl[0]; var setTplText = _tpl[1];
+  var _bare = useState(true); var includeBare = _bare[0]; var setIncludeBare = _bare[1];
+  var _pre = useState('dev/\nfeature/'); var preText = _pre[0]; var setPreText = _pre[1];
+  var _ov = useState({}); var overrides = _ov[0]; var setOverrides = _ov[1];
+  var _loaded = useState(false); var loaded = _loaded[0]; var setLoaded = _loaded[1];
+  var _saving = useState(false); var saving = _saving[0]; var setSaving = _saving[1];
+  var _nb = useState(null); var newBundle = _nb[0]; var setNewBundle = _nb[1];
+  var _nbr = useState(''); var newBranch = _nbr[0]; var setNewBranch = _nbr[1];
+
+  useEffect(function () {
+    apiGet('api/assignment-rules').then(function (resp) {
+      var bc = (resp && resp.branch_config) || {};
+      setEnabled(bc.enabled !== false);
+      var tpls = (Array.isArray(bc.templates) && bc.templates.length) ? bc.templates : BRANCH_CFG_DEFAULTS.templates;
+      setTplText(tpls.join('\n'));
+      var prefixes = Array.isArray(bc.prefixes) ? bc.prefixes : BRANCH_CFG_DEFAULTS.prefixes;
+      setIncludeBare(prefixes.indexOf('') !== -1);
+      setPreText(prefixes.filter(function (p) { return p !== ''; }).join('\n'));
+      setOverrides((resp && resp.branch_overrides) || {});
+    }).catch(function () { /* keep defaults */ })
+      .then(function () { setLoaded(true); });
+  }, []);
+
+  function bundleName(id) {
+    var b = bundles.find(function (x) { return x.id === id; });
+    return (b && b.name) || id;
+  }
+
+  function buildConfig() {
+    var templates = tplText.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
+    var prefixes = preText.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
+    if (includeBare) prefixes = [''].concat(prefixes);
+    return { enabled: enabled, templates: templates, prefixes: prefixes };
+  }
+
+  function persist(cfg, ov) {
+    setSaving(true);
+    return apiPut('api/assignment-rules', { branch_config: cfg, branch_overrides: ov })
+      .then(function () { antd.message.success('Code sync rules saved'); })
+      .catch(function (e) { antd.message.error('Save failed: ' + ((e && e.message) || e)); })
+      .then(function () { setSaving(false); });
+  }
+
+  function handleSave() { persist(buildConfig(), overrides); }
+
+  function handleReset() {
+    setEnabled(true);
+    setTplText(BRANCH_CFG_DEFAULTS.templates.join('\n'));
+    setIncludeBare(true);
+    setPreText('dev/\nfeature/');
+    antd.message.info('Reset to defaults — click Save to apply');
+  }
+
+  function addOverride() {
+    if (!newBundle || !newBranch.trim()) { antd.message.warning('Pick a deliverable and enter a branch'); return; }
+    var next = Object.assign({}, overrides);
+    next[newBundle] = newBranch.trim();
+    setOverrides(next);
+    setNewBundle(null); setNewBranch('');
+    persist(buildConfig(), next);
+  }
+
+  function removeOverride(id) {
+    var next = Object.assign({}, overrides);
+    delete next[id];
+    setOverrides(next);
+    persist(buildConfig(), next);
+  }
+
+  var overrideIds = Object.keys(overrides);
+  var bundleOpts = bundles.map(function (b) { return { value: b.id, label: (b.name || b.id) }; });
+
+  return h('div', null,
+    h('div', { className: 'metrics-section-header', style: { marginTop: 24 } }, 'Code Sync — Expected Branch Rules'),
+    h('div', { style: { fontSize: 12, color: '#8F8FA3', marginBottom: 12, marginTop: -8 } },
+      'Controls how the Code sync badge infers which Git branch a deliverable should track when it has no validated evidence yet. Candidate names are generated from the templates below and matched against the repository’s actual branches — a rule only takes effect when a real branch matches. A validated evidence branch always wins; a manual override below beats the templates.'),
+
+    h('div', { className: 'panel' },
+      h('div', { className: 'panel-header' },
+        h('span', { className: 'panel-title' }, 'Branch inference'),
+        h('div', { style: { display: 'flex', gap: 8 } },
+          h(Button, { size: 'small', onClick: handleReset, disabled: saving }, 'Reset to Defaults'),
+          h(Button, { size: 'small', type: 'primary', onClick: handleSave, loading: saving }, 'Save rules')
+        )
+      ),
+      h('div', { className: 'panel-body' },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 } },
+          h(Switch, { checked: enabled, onChange: setEnabled, size: 'small' }),
+          h('span', { style: { fontSize: 13 } }, 'Infer branches by candidate-matching'),
+          h('span', { style: { fontSize: 12, color: '#8F8FA3' } }, '(off = rely on evidence + manual overrides only)')
+        ),
+        h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, opacity: enabled ? 1 : 0.5, pointerEvents: enabled ? 'auto' : 'none' } },
+          h('div', null,
+            h('label', { style: { fontWeight: 600, fontSize: 12, color: '#65657B', display: 'block', marginBottom: 6 } }, 'Name templates (one per line)'),
+            h(Input.TextArea, { value: tplText, onChange: function (e) { setTplText(e.target.value); }, rows: 5, style: { fontFamily: 'monospace', fontSize: 12 }, placeholder: '{name}\n{nameSlug}' }),
+            h('div', { style: { fontSize: 11, color: '#8F8FA3', marginTop: 8 } }, 'Available tokens:'),
+            h('div', { style: { marginTop: 4 } },
+              BRANCH_TOKEN_LEGEND.map(function (t) {
+                return h(Tooltip, { key: t[0], title: t[1] },
+                  h(Tag, { style: { fontFamily: 'monospace', fontSize: 11, marginBottom: 4, cursor: 'help' } }, t[0]));
+              })
+            )
+          ),
+          h('div', null,
+            h('label', { style: { fontWeight: 600, fontSize: 12, color: '#65657B', display: 'block', marginBottom: 6 } }, 'Prefixes (one per line)'),
+            h(Input.TextArea, { value: preText, onChange: function (e) { setPreText(e.target.value); }, rows: 5, style: { fontFamily: 'monospace', fontSize: 12 }, placeholder: 'dev/\nfeature/' }),
+            h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 } },
+              h(Checkbox, { checked: includeBare, onChange: function (e) { setIncludeBare(e.target.checked); } },
+                h('span', { style: { fontSize: 12 } }, 'Also match bare branch names (no prefix)'))
+            )
+          )
+        )
+      )
+    ),
+
+    h('div', { className: 'panel', style: { marginTop: 16 } },
+      h('div', { className: 'panel-header' },
+        h('span', { className: 'panel-title' }, 'Manual branch overrides'),
+        h('span', { style: { fontSize: 12, color: '#8F8FA3' } }, overrideIds.length + ' override' + (overrideIds.length === 1 ? '' : 's'))
+      ),
+      h('div', { className: 'panel-body' },
+        h('div', { style: { fontSize: 12, color: '#8F8FA3', marginBottom: 12 } },
+          'Pin a specific deliverable to an exact branch when the templates can’t catch it. Overrides take precedence over inference but never over a validated evidence branch.'),
+        overrideIds.length
+          ? h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 240px 80px', gap: '6px 16px', alignItems: 'center', marginBottom: 16 } },
+              h('span', { style: { fontWeight: 600, fontSize: 12, color: '#65657B' } }, 'Deliverable'),
+              h('span', { style: { fontWeight: 600, fontSize: 12, color: '#65657B' } }, 'Branch'),
+              h('span', null, ''),
+              overrideIds.map(function (id) {
+                return [
+                  h('span', { key: id + '_n', style: { fontSize: 13 } }, bundleName(id)),
+                  h('span', { key: id + '_b', style: { fontFamily: 'monospace', fontSize: 12 } }, overrides[id]),
+                  h(Button, { key: id + '_x', size: 'small', danger: true, onClick: function () { removeOverride(id); }, disabled: saving }, 'Remove')
+                ];
+              })
+            )
+          : null,
+        h('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
+          h(Select, { showSearch: true, value: newBundle, onChange: setNewBundle, placeholder: 'Select deliverable',
+            options: bundleOpts, style: { width: 280 }, size: 'small',
+            filterOption: function (input, opt) { return (opt.label || '').toLowerCase().indexOf(input.toLowerCase()) !== -1; } }),
+          h(Input, { value: newBranch, onChange: function (e) { setNewBranch(e.target.value); }, placeholder: 'branch name, e.g. dev/t_14_1_1', size: 'small', style: { width: 240, fontFamily: 'monospace' } }),
+          h(Button, { size: 'small', type: 'primary', onClick: addOverride, disabled: saving }, 'Add override')
+        )
+      )
+    )
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  PAGE: Configuration
 // ═══════════════════════════════════════════════════════════════
@@ -11715,7 +11884,10 @@ function ConfigurationPage(props) {
       )
     ),
 
-    // ── Section 3: About ──────────────────────────────────────────
+    // ── Section 3: Code Sync — Expected Branch Rules ───────────────
+    h(BranchConfigSection, { bundles: bundles }),
+
+    // ── Section 4: About ──────────────────────────────────────────
     h('div', { className: 'metrics-section-header', style: { marginTop: 24 } }, 'About'),
     h('div', { className: 'panel' },
       h('div', { className: 'panel-body' },

@@ -27,6 +27,34 @@ IMPLEMENTING_AGENT (r5): probe GREEN — 403 question CLOSED, git reads work on 
 NEXT ACTIONS (whoever picks up):
   - DEPLOY: redeploy app on sce-coalition with drift_enabled → badges go live. (Matt)
   - PHASE 2: ✅ CANDIDATE-MATCHING SHIPPED (backend + frontend). Storage gate cleared (read-modify-write store). Resolver in app.py: _branch_settings/_expand_branch_candidates/_match_candidate_branch/_resolve_expected_branch + list_branch_names. Precedence enforced: evidence → override (branch_overrides[bundleId]) → candidate-match (configurable templates × prefixes vs REAL branch list) → none. Defaults: templates {name}/{nameSlug}/{nameFirstToken}/{policyKey}, prefixes ""/"dev/"/"feature/". Config persists under branch_config + branch_overrides in assignment_rules.json (round-trips via /api/assignment-rules). Frontend now sends name+policyKey for ALL bundles (not just evidence-bearing) so no-evidence deliverables resolve. branch_state.branchSource surfaced in tooltip. Unit-verified (candidate gen, match casing, override precedence, disabled-config, git-error graceful). app.js v=57. STILL TODO: a Configuration-page UI to edit templates/prefixes/overrides (currently API-only).
-  - PHASE 3 GATE: getCheckpointForCommitIds schema (probe ran inline, output NOT captured in git_probe_results.json — re-run checkpoint call on sce-coalition to capture) + §10b approval-binding (answered) before drift→Finding creation.
+  - PHASE 2 EDITOR UI: ✅ DONE — Configuration page now has a "Code Sync — Expected Branch Rules" section (BranchConfigSection in app.js, v=58). Edits enabled toggle + name templates + prefixes (with "match bare names" checkbox) + per-deliverable manual overrides. Saves via merge-safe PUT /api/assignment-rules (branch_config + branch_overrides). Verified end-to-end in-browser: save round-trips, rules preserved, success toast. Phase 2 is now feature-complete.
+  - PHASE 3 GATE → WORKSPACE/SPEC AGENT ASK: the ONLY outstanding item. Capture the getCheckpointForCommitIds response body on sce-coalition so we can lock the ProvenanceCheckpointDto field names. Ready-to-run snippet (paste in any AGT-6741_CSR workspace terminal), then commit git_checkpoint_probe.json:
+      python - <<'PY'
+      import os, json, requests
+      HOST=os.environ["DOMINO_API_HOST"].rstrip("/")
+      PID=os.environ["DOMINO_PROJECT_ID"]
+      tok=requests.get("http://localhost:8899/access-token",timeout=10).text.strip()
+      H={"Authorization": tok if tok.startswith("Bearer ") else "Bearer "+tok, "Content-Type":"application/json"}
+      proj=requests.get(f"{HOST}/v4/projects/{PID}",headers=H,timeout=30).json()
+      RID=(proj.get("mainRepository") or {}).get("id")
+      # newest commit on dev/t_14_1_1 (fallback: main)
+      def head(branch):
+          r=requests.get(f"{HOST}/v4/projects/{PID}/gitRepositories/{RID}/git/commits",headers=H,params={"branch":branch,"count":1},timeout=30)
+          items=(r.json() or {}).get("data",{}).get("items") or []
+          return (items[0].get("id") or items[0].get("sha") or items[0].get("commitId")) if items else None
+      COMMIT=head("dev/t_14_1_1") or head("main")
+      out={"projectId":PID,"repoId":RID,"commit":COMMIT,"attempts":[]}
+      for body in ({"dfsCommitId":"","gitRepoCommits":[{"repoId":RID,"commitId":COMMIT}]},
+                   {"dfsCommitId":"0","gitRepoCommits":[{"repoId":RID,"commitId":COMMIT}]},
+                   {"commitIds":[COMMIT]}):
+          r=requests.post(f"{HOST}/v4/workspace/project/{PID}/getCheckpointForCommitIds",headers=H,json=body,timeout=30)
+          try: rb=r.json()
+          except Exception: rb=r.text[:600]
+          out["attempts"].append({"body":body,"status":r.status_code,"resp":rb})
+          if r.status_code==200: break
+      json.dump(out,open("git_checkpoint_probe.json","w"),indent=2)
+      print(json.dumps(out,indent=2))
+      PY
+    Whichever body shape returns 200 is the contract; the resp object's keys are the ProvenanceCheckpointDto fields to lock into spec §2. NOTE app.py get_checkpoint_for_commit currently posts {"commitIds":[id]} — the probe tries that shape last, so it'll tell us if that needs fixing too.
 
-Last update: implementing agent r7 — Phase 2 candidate-matching shipped end-to-end (resolver + frontend wiring + tooltip source note). Configurable templates×prefixes matched against real branch list; precedence evidence→override→candidate→none. Only remaining Phase-2 item is the Configuration-page editor UI (API already supports it). app.js v=57.
+Last update: implementing agent r8 — Phase 2 COMPLETE. Configuration-page editor UI shipped (BranchConfigSection, app.js v=58): toggle + templates + prefixes + bare-name checkbox + manual overrides, all persisting via merge-safe /api/assignment-rules. Verified in-browser (save round-trips, rules preserved). → ONLY remaining work across the whole feature is the Phase 3 getCheckpointForCommitIds capture — ready-to-run snippet left above for the workspace/spec agent. Everything else (Phase 1 live-capable, Phase 2 complete) is done pending Matt's redeploy with drift_enabled.
