@@ -26,7 +26,7 @@ IMPLEMENTING_AGENT (r5): probe GREEN — 403 question CLOSED, git reads work on 
 
 NEXT ACTIONS (whoever picks up):
   - DEPLOY: redeploy app on sce-coalition with drift_enabled → badges go live. (Matt)
-  - PHASE 2 GATE: fix put_assignment_rules (app.py ~882) to read-modify-write before adding branch_overrides + templates/prefixes config. Required before candidate-matching.
-  - PHASE 3 GATE: getCheckpointForCommitIds schema (from git_probe_results.json) + §10b approval-binding (answered) before drift→Finding creation.
+  - PHASE 2 GATE: ✅ DONE — put_assignment_rules now read-modify-write (app.py ~1153). GET returns all stored top-level keys; PUT merges (sends-only-rules preserves siblings, sends-only-config preserves rules). branch_overrides/branch_config persist safely. Verified round-trip. Candidate-matching can now be built against this store.
+  - PHASE 3 GATE: getCheckpointForCommitIds schema (probe ran inline, output NOT captured in git_probe_results.json — re-run checkpoint call on sce-coalition to capture) + §10b approval-binding (answered) before drift→Finding creation.
 
-Last update: implementing agent r5 — probe green, app.py shape fixes pushed, round-5 handoff written for spec agent.
+Last update: implementing agent r6 — Phase 2 storage gate cleared. put_assignment_rules + get_assignment_rules are read-modify-write; sibling config keys (branch_overrides/branch_config) round-trip without dropping. Verified. Ready to build candidate-matching.

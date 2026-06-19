@@ -1134,37 +1134,66 @@ def _assignment_rules_path() -> str:
     return os.path.join(os.path.dirname(__file__), "assignment_rules.json")
 
 
+def _read_assignment_store() -> dict:
+    """Load the full assignment-rules file as a dict. Tolerates a legacy
+    bare-list file (older saves stored just the rules array) and a missing
+    file. Returns {} when there is nothing to read so callers can merge."""
+    path = _assignment_rules_path()
+    if not os.path.exists(path):
+        return {}
+    with open(path, "r") as f:
+        data = json.load(f)
+    if isinstance(data, list):
+        return {"rules": data}
+    return data if isinstance(data, dict) else {}
+
+
 @app.get("/api/assignment-rules")
 def get_assignment_rules():
     path = _assignment_rules_path()
-    if not os.path.exists(path):
-        return {"rules": [], "source": path, "savedAt": None}
     try:
-        with open(path, "r") as f:
-            data = json.load(f)
-        rules = data.get("rules", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
-        saved_at = data.get("savedAt") if isinstance(data, dict) else None
-        return {"rules": rules, "source": path, "savedAt": saved_at}
+        data = _read_assignment_store()
     except (OSError, json.JSONDecodeError) as e:
         logger.warning(f"Failed to read assignment rules from {path}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to read rules: {e}")
+    # Return every stored top-level key (e.g. branch_overrides, branch_config
+    # for Phase 2) so the client sees the whole config, plus source.
+    out = dict(data)
+    out.setdefault("rules", [])
+    out.setdefault("savedAt", None)
+    out["source"] = path
+    return out
 
 
 @app.put("/api/assignment-rules")
 def put_assignment_rules(body: dict):
-    rules = body.get("rules")
-    if not isinstance(rules, list):
-        raise HTTPException(status_code=400, detail="Body must include a 'rules' array")
+    """Read-modify-write: merge the body's top-level keys over whatever is
+    already stored, then re-stamp savedAt/savedBy. A PUT that sends only
+    'rules' preserves any sibling config (branch_overrides, branch_config),
+    and vice-versa — nothing silently drops on the next save."""
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object")
+    if "rules" in body and not isinstance(body["rules"], list):
+        raise HTTPException(status_code=400, detail="'rules' must be an array when present")
     path = _assignment_rules_path()
-    payload = {
-        "rules": rules,
-        "savedAt": datetime.utcnow().isoformat() + "Z",
-        "savedBy": os.environ.get("DOMINO_STARTING_USERNAME") or os.environ.get("USER") or "unknown",
-    }
+    try:
+        payload = _read_assignment_store()
+    except (OSError, json.JSONDecodeError) as e:
+        logger.warning(f"Existing assignment rules unreadable, overwriting fresh: {e}")
+        payload = {}
+    # Merge caller-supplied keys (minus the server-owned stamps) over existing.
+    for k, v in body.items():
+        if k in ("savedAt", "savedBy", "source"):
+            continue
+        payload[k] = v
+    payload.setdefault("rules", [])
+    payload["savedAt"] = datetime.utcnow().isoformat() + "Z"
+    payload["savedBy"] = os.environ.get("DOMINO_STARTING_USERNAME") or os.environ.get("USER") or "unknown"
     try:
         with open(path, "w") as f:
             json.dump(payload, f, indent=2)
-        return {"ok": True, "source": path, "savedAt": payload["savedAt"], "count": len(rules)}
+        return {"ok": True, "source": path, "savedAt": payload["savedAt"],
+                "count": len(payload["rules"])}
     except OSError as e:
         logger.warning(f"Failed to write assignment rules to {path}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to write rules: {e}")
