@@ -91,20 +91,20 @@ Already wired via `gov_get`. No change. Pull `attachment-overviews` (existing ro
 }
 ```
 
-> **⚠ FINDING — `getCheckpointForCommitIds` is inapplicable for git-only UCB projects (probed r7, `git_checkpoint_probe.json`).**
+> **⚠ FINDING — checkpoint enrichment is N/A for UCB (fully closed, r7/r8). Do not implement.**
 >
-> Three body shapes tried; all returned 400:
-> - `{"dfsCommitId": "", "gitRepoCommits": [...]}` → `400 "Invalid id: "` — **empty string is rejected, not a valid sentinel.**
-> - `{"dfsCommitId": "0", "gitRepoCommits": [...]}` → `400 "Invalid id: 0"` — no numeric placeholder works either.
-> - `{"commitIds": ["<sha>"]}` → `400` JSON validation error: both `dfsCommitId` and `gitRepoCommits` are strictly required — **this is the shape `app.py` currently posts; it is wrong and will always 400.**
+> **`getCheckpointForCommitIds` probe (`git_checkpoint_probe.json`):** three body shapes tried, all 400:
+> - `{"dfsCommitId": "", "gitRepoCommits": [...]}` → `400 "Invalid id: "` — empty string is not a valid sentinel.
+> - `{"dfsCommitId": "0", "gitRepoCommits": [...]}` → `400 "Invalid id: 0"`.
+> - `{"commitIds": ["<sha>"]}` → `400` JSON validation — both fields strictly required. **This is the shape `app.py` currently posts; it is wrong.**
 >
-> **Root cause:** `dfsCommitId` must be a real, valid Domino DFS commit ID. UCB's git-only projects have no DFS commits, so there is no valid value to pass. This endpoint is a DFS+Git hybrid facility that does not apply to pure-git projects.
+> **Root cause:** `dfsCommitId` must be a real DFS commit ID. UCB's git-only projects have none. Endpoint is a DFS+Git hybrid; inapplicable for pure-git.
 >
-> **Consequence for Phase 3:** `get_checkpoint_for_commit` will always return `None` for UCB deliverables. Drift computation is unaffected (checkpoint is optional enrichment). The tooltip execution-name/execution-start enrichment needs an alternative path.
+> **MLflow alternative path also closed:** `GET /v4/mlflow/execution/{executionId}/provenanceCheckpoints` requires an `executionId`. Confirmed from source: `attachment.identifier` carries only `{branch, commit, filename, source}` — **no `executionId` field** (`static/app.js:12748-12752`). UCB has not used MLflow. No executionId is available.
 >
-> **Alternative path for tooltip enrichment:** `GET /v4/mlflow/execution/{executionId}/provenanceCheckpoints` — viable only if `executionId` is present in the attachment `identifier`. Check whether `attachment.identifier.executionId` is populated on Report attachments produced by Domino Jobs; if so, use this GET endpoint instead. If not, omit execution enrichment from the tooltip (drift badge still fully functional).
+> **Resolution:** omit execution-name/execution-start from the drift tooltip entirely. Drift badge and all branch-state fields are fully functional without it. See §7 tooltip and §9 out-of-scope.
 >
-> **Fix needed in `app.py`:** `get_checkpoint_for_commit` currently posts `{"commitIds": [id]}` (wrong shape). Update to post the correct `{"dfsCommitId": ..., "gitRepoCommits": [...]}` shape — though for git-only projects it will still return 400 and the helper will correctly return `None`. The fix matters for mixed DFS+Git projects on other clusters.
+> **One cleanup fix still needed in `app.py`:** `get_checkpoint_for_commit` posts `{"commitIds": [id]}` — fix to `{"dfsCommitId": "", "gitRepoCommits": [{repoId, commitId}]}` for API contract correctness on mixed DFS+Git clusters. The function will still return `None` for UCB and the no-op behaviour is correct; this is a body-shape fix only.
 
 `ProvenanceCheckpointDto` (response) fields we consume — **unverified, from swagger schema only; the endpoint does not return 200 for git-only projects:**
 - `id`, `executionId`, `executionName`, `executionStart`, `commitMessage`
@@ -231,24 +231,19 @@ def project_default_branch(project_id: str) -> str | None:
 # --- Provenance Checkpoint (companion anchor) ---
 
 def get_checkpoint_for_commit(project_id: str, repo_id: str, commit_id: str) -> dict | None:
-    """Returns ProvenanceCheckpointDto or None.
+    """Returns ProvenanceCheckpointDto or None. Always returns None for UCB (git-only).
 
-    Path is /v4/workspace/project/{projectId}/getCheckpointForCommitIds
-    (NOT /v4/projects/{id}/... — different namespace).
-    Both dfsCommitId and gitRepoCommits are strictly required by the API.
+    CLOSED (r7/r8): getCheckpointForCommitIds requires a real dfsCommitId; git-only
+    projects have none. MLflow alternative also closed: attachment.identifier has no
+    executionId field. Checkpoint enrichment is omitted from the UCB tooltip.
 
-    ⚠ FINDING (probe r7, git_checkpoint_probe.json): this endpoint is inapplicable
-    for git-only UCB projects. dfsCommitId must be a real DFS commit ID — empty
-    string and "0" are both rejected with 400 "Invalid id". Git-only projects have
-    no DFS commits, so this will always return None for UCB deliverables.
-
-    NOTE: the current app.py body {"commitIds": [id]} is WRONG — the API requires
-    both dfsCommitId and gitRepoCommits. Fix the body even though it still returns
-    None for git-only projects (correctness matters for mixed DFS+Git clusters).
-
-    For tooltip execution enrichment, use GET /v4/mlflow/execution/{executionId}/
-    provenanceCheckpoints if attachment.identifier.executionId is present instead.
+    The correct request body (for API contract correctness on mixed DFS+Git clusters):
+      {"dfsCommitId": "<valid-id>", "gitRepoCommits": [{"repoId": rid, "commitId": sha}]}
+    The current app.py body {"commitIds": [id]} is WRONG — fix it, even though it
+    still returns None for UCB (both fields strictly required, probe confirmed).
     """
+    if not commit_id:
+        return None
     body = {"dfsCommitId": "", "gitRepoCommits": [{"repoId": repo_id, "commitId": commit_id}]}
     try:
         return _v4_post(
@@ -337,7 +332,7 @@ Drift computation per deliverable (sequential within one item, parallel across i
      any commit in commits[0:aheadOfValidated] whose changed-files contains `filename`
      (use git/commits with file-stats if available; if expensive, mark "unknown" and let the badge fall back to "Drift (any files)")
 8. mergedToDefault = validatedCommit appears in list_commits(projectId, repo.id, defaultBranch, count=500)
-9. checkpoint = get_checkpoint_for_commit(projectId, validatedCommit)   # companion enrichment, not gating
+9. # checkpoint enrichment omitted — N/A for git-only UCB projects (see §2 FINDING, §9)
 10. apply Section 1 badge rules.
 ```
 
@@ -507,7 +502,9 @@ The 403 `"Invalid Upstream Credentials"` observed in round 4 came from a *differ
 
 > **Footnote — future clusters.** If the tracker is ever deployed on a cluster where the sidecar identity does *not* carry upstream git credentials, badges will land on `check-unavailable`. The fix is to map a service-account credential at the project repository level (`/v4/projects/{projectId}/repository/{repoId}/credentialMapping`) — not per-user propagation in the tracker code. The `check-unavailable` badge is the correct GxP-safe failure mode; no code change is needed, only UCB configuration.
 
-Tooltip on hover: "Validated @ `<branch>@<sha[:8]>` · HEAD @ `<sha[:8]>` · `N` commits ahead". If `checkpoint` is present, append "Generated by execution `<executionName>` at `<executionStart>`".
+Tooltip on hover: "Validated @ `<branch>@<sha[:8]>` · HEAD @ `<sha[:8]>` · `N` commits ahead". If `branch_state.branchSource` is `override` or `inferred-no-evidence`, append "Branch inferred (no evidence)".
+
+**No execution enrichment.** Checkpoint enrichment (execution name/start) is omitted — `getCheckpointForCommitIds` is inapplicable for git-only UCB projects and `attachment.identifier` carries no `executionId`. See §2 FINDING.
 
 ### Batch the drift fetch
 
@@ -532,7 +529,7 @@ Click `DriftBadge` → open the existing file viewer at the branch HEAD if drift
 - Bump the branch one commit (other files) → `drift-other-files`.
 - Bump the branch with a change to the deliverable's `filename` → `drift-on-this-deliverable`.
 - Merge that branch into default → `merged-ahead-of-validation`.
-- Bundle whose attachment was produced by a known Job → checkpoint enrichment shown in tooltip.
+- ~~Bundle whose attachment was produced by a known Job → checkpoint enrichment shown in tooltip.~~ **REMOVED** — checkpoint enrichment is N/A for git-only UCB projects (see §2 FINDING).
 
 ### Phase 2 — branch existence
 - Project without the expected branch → `not-started`.
@@ -554,7 +551,8 @@ Click `DriftBadge` → open the existing file viewer at the branch HEAD if drift
 - Domino Flows. Stay with Scheduled Jobs. If QC for a deliverable evolves into a true multi-step DAG with heterogeneous environments, revisit; otherwise the Flyte-via-DominoJobTask wrapping is overhead.
 - MCP routing on the request hot path. Keep the v4 + public API proxy as the read path; reserve MCP for operator/setup workflows.
 - DFS code paths. All UCB projects are git-backed. (Don't guard on `projectType == "git_based"` either — see §0 correction; resolve on `mainRepository` presence.)
-- Replacing `attachment.identifier.commit` parsing with provenance-only lookups. The attachment identifier is the canonical, documented anchor. Provenance is a companion enrichment.
+- Replacing `attachment.identifier.commit` parsing with provenance-only lookups. The attachment identifier is the canonical, documented anchor.
+- Provenance checkpoint enrichment (`getCheckpointForCommitIds`, execution name/start in tooltip). Endpoint requires a real DFS commit ID that git-only UCB projects do not have. `attachment.identifier` carries no `executionId`. MLflow path also closed (not used). `get_checkpoint_for_commit` is a no-op for UCB; leave it in place (correct body fix needed — see §3) but do not wire it to the tooltip or the scheduled sweep.
 
 ---
 
